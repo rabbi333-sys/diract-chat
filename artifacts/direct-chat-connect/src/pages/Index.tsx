@@ -13,6 +13,7 @@ import { FailedPanel } from '@/components/FailedPanel';
 import { PlatformSettings } from '@/components/PlatformSettings';
 import { N8nPromptSettings } from '@/components/N8nPromptSettings';
 import OrdersPanel from '@/components/OrdersPanel';
+import OrderAnalytics from '@/components/OrderAnalytics';
 import WebhookSettings from '@/components/WebhookSettings';
 import { useGlobalAiControl } from '@/hooks/useAiControl';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -23,7 +24,7 @@ import {
   BarChart3, MessageSquare, Settings, Menu, X, HandMetal,
   AlertOctagon, ShoppingBag, Bell, BellOff, Volume2, VolumeX,
   Bot, ChevronRight, ArrowLeft, Globe, Webhook, Database, ShieldAlert,
-  Power, Play, Loader2,
+  Power, Play, Loader2, List,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -64,6 +65,7 @@ const Index = () => {
   const [activeNav, setActiveNav] = useState('Messages');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<string | null>(null);
+  const [ordersView, setOrdersView] = useState<'list' | 'analytics'>('list');
   const [aiEdgeFnUrl, setAiEdgeFnUrl] = useState('');
   const { enabled: notifEnabled, soundEnabled, toggleEnabled: toggleNotif, toggleSound, counts, clearCount } = useNotifications();
   const { globalOn, toggle: toggleGlobalAi, isPending: globalAiPending } = useGlobalAiControl();
@@ -394,10 +396,48 @@ const Index = () => {
         {activeNav === 'Orders' && canView('Orders') && (
           <main className="flex-1 flex flex-col overflow-hidden">
             <div className="flex flex-col h-full p-4 md:p-6">
-              <h2 className="text-lg md:text-xl font-bold text-foreground mb-4 flex-shrink-0">{t('ordersTitle')}</h2>
-              <div className="flex-1 overflow-hidden">
-                <OrdersPanel />
+              {/* Header with tab toggle */}
+              <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                <h2 className="text-lg md:text-xl font-bold text-foreground">{t('ordersTitle')}</h2>
+                <div className="flex items-center bg-muted/60 rounded-xl p-1 border border-border/50 gap-0.5">
+                  <button
+                    onClick={() => setOrdersView('list')}
+                    className={cn(
+                      "flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-all",
+                      ordersView === 'list'
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <List size={13} /> Orders
+                  </button>
+                  <button
+                    onClick={() => setOrdersView('analytics')}
+                    className={cn(
+                      "flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-all",
+                      ordersView === 'analytics'
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <BarChart3 size={13} /> Analytics
+                  </button>
+                </div>
               </div>
+
+              {/* List view */}
+              {ordersView === 'list' && (
+                <div className="flex-1 overflow-hidden">
+                  <OrdersPanel />
+                </div>
+              )}
+
+              {/* Analytics view */}
+              {ordersView === 'analytics' && (
+                <div className="flex-1 overflow-auto">
+                  <OrderAnalytics />
+                </div>
+              )}
             </div>
           </main>
         )}
