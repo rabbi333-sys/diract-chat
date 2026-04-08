@@ -803,7 +803,7 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
                         : isMongo
                           ? `db.${ep.table}.insertOne()`
                           : isRedis
-                            ? `SET ${ep.table}:*`
+                            ? `HSET ${ep.table}:*`
                             : ep.table}
                   </code>
                 </button>
