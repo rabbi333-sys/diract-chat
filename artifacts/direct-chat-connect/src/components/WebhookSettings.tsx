@@ -628,8 +628,8 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
           </div>
         )}
 
-        {/* Endpoint Cards — only shown when a DB is connected */}
-        {!noConn && ENDPOINTS.map(ep => {
+        {/* Endpoint Cards — only shown when a valid DB is connected */}
+        {!noConn && !unknownDbType && ENDPOINTS.map(ep => {
           const isOpen = openEp === ep.key;
           const isCreateOpen = openCreate === `${ep.key}-create`;
           const restUrl = isSupabase ? `${supabaseUrl}/rest/v1/${ep.table}` : '';
