@@ -11,10 +11,20 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Reactive hook: re-renders callers whenever active DB connection changes
+// Reactive hook: re-renders callers whenever active DB connection changes.
+// Listens to both the custom meta_db_change event (same-tab) and the
+// browser storage event (cross-tab) to stay in sync.
 function useActiveConnection(): MainDbConnection | null {
   const [conn, setConn] = useState<MainDbConnection | null>(() => getActiveConnection());
-  useEffect(() => onDbChange(() => setConn(getActiveConnection())), []);
+  useEffect(() => {
+    const refresh = () => setConn(getActiveConnection());
+    const unsubscribe = onDbChange(refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
   return conn;
 }
 
