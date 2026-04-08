@@ -302,8 +302,8 @@ const Index = () => {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col pt-14 md:pt-0 overflow-hidden relative">
-        {/* Desktop top-right toolbar: AI toggle + Theme — floats over content, no space taken */}
-        <div className="hidden md:flex items-center gap-2 absolute top-3 right-4 z-10">
+        {/* Desktop top-right toolbar: AI toggle + Theme — hidden on Orders page */}
+        <div className={cn("hidden items-center gap-2 absolute top-3 right-4 z-10", activeNav !== 'Orders' && "md:flex")}>
           <button
             onClick={toggleGlobalAi}
             disabled={globalAiPending}
