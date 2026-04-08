@@ -29,7 +29,7 @@ export function getConnections(): MainDbConnection[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     // Backward compat: old entries without dbType default to 'supabase'
-    return parsed.map((c: MainDbConnection) => ({ dbType: 'supabase', ...c }));
+    return parsed.map((c: MainDbConnection) => ({ ...c, dbType: (c.dbType || 'supabase') as MainDbType }));
   }
   catch { return []; }
 }
