@@ -599,7 +599,15 @@ const SmartWebhookSection = () => {
                   </div>
                   <span className={cn('text-[11px] font-bold flex-shrink-0', ep.colorText)}>{ep.label}</span>
                   <code className="flex-1 text-[10px] font-mono text-muted-foreground truncate min-w-0">
-                    {`→ /rest/v1/${ep.table}`}
+                    {isSupabase
+                      ? `→ /rest/v1/${ep.table}`
+                      : isPostgres || isMysql
+                        ? `INSERT INTO ${ep.table}`
+                        : isMongo
+                          ? `db.${ep.table}.insertOne()`
+                          : isRedis
+                            ? `SET ${ep.table}:*`
+                            : ep.table}
                   </code>
                 </button>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
