@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { getActiveConnection, onDbChange, normalizeDbType, MainDbType, MainDbConnection } from '@/lib/db-config';
+import { getActiveConnection, onDbChange, normalizeDbType, isValidDbType, MainDbType, MainDbConnection } from '@/lib/db-config';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
@@ -512,7 +512,9 @@ const DB_LABELS: Record<MainDbType, { icon: string; label: string; color: string
 };
 
 const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | null }) => {
-  const dbType = normalizeDbType(activeConn?.dbType);
+  const rawDbType = activeConn?.dbType;
+  const unknownDbType = !!activeConn && !isValidDbType(rawDbType);
+  const dbType = normalizeDbType(rawDbType);
   const supabaseUrl = activeConn?.url?.replace(/\/$/, '') || '';
   const anonKey = activeConn?.anonKey || '';
   const dbInfo = DB_LABELS[dbType];
@@ -580,6 +582,16 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
             <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />
             <p className="text-[11px] text-muted-foreground">
               Connect a database first (Settings → Database) to see your webhook endpoints.
+            </p>
+          </div>
+        )}
+
+        {/* Unknown DB type warning */}
+        {unknownDbType && (
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-destructive/8 border border-destructive/25">
+            <AlertTriangle size={13} className="text-destructive flex-shrink-0" />
+            <p className="text-[11px] text-muted-foreground">
+              Unknown database type <code className="font-mono text-foreground">{rawDbType || 'undefined'}</code>. Re-save your connection in Settings → Database to fix this.
             </p>
           </div>
         )}

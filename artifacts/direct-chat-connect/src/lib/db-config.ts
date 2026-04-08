@@ -6,6 +6,10 @@ export function normalizeDbType(raw: string | undefined | null): MainDbType {
   return (raw && VALID_DB_TYPE_SET.has(raw)) ? (raw as MainDbType) : 'supabase';
 }
 
+export function isValidDbType(raw: string | undefined | null): boolean {
+  return !!raw && VALID_DB_TYPE_SET.has(raw);
+}
+
 export interface MainDbConnection {
   id: string;
   name: string;
