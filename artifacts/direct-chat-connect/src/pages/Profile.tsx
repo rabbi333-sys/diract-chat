@@ -221,6 +221,17 @@ const Profile = () => {
   const togglePerm = (key: string) =>
     setInvitePerms((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
 
+  const buildInviteLink = (token: string) => {
+    const base = `${window.location.origin}/invite/${token}`;
+    const conn = getActiveConnection();
+    if (conn?.url && conn?.anonKey) {
+      const u = btoa(conn.url);
+      const k = btoa(conn.anonKey);
+      return `${base}?u=${encodeURIComponent(u)}&k=${encodeURIComponent(k)}`;
+    }
+    return base;
+  };
+
   const handleGenerateInvite = async () => {
     if (!user) return;
     setIsGeneratingInvite(true);
@@ -241,7 +252,7 @@ const Profile = () => {
         }
         return;
       }
-      const link = `${window.location.origin}/invite/${data.token}`;
+      const link = buildInviteLink(data.token);
       setLastInviteLink(link);
       try { await navigator.clipboard.writeText(link); } catch { /* ignore */ }
       toast.success('Invite link generated & copied!');
@@ -268,7 +279,7 @@ const Profile = () => {
   };
 
   const copyLink = async (token: string) => {
-    const link = `${window.location.origin}/invite/${token}`;
+    const link = buildInviteLink(token);
     try { await navigator.clipboard.writeText(link); toast.success('Link copied!'); }
     catch { toast.error('Could not copy'); }
   };

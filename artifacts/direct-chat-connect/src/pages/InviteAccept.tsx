@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { createClient } from '@supabase/supabase-js';
+import { supabase as defaultSupabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { setGuestSession } from '@/lib/guestSession';
+import { getConnections, setActiveConnection } from '@/lib/db-config';
 
 const PERMISSION_LABELS: Record<string, string> = {
   overview: 'Overview',
@@ -27,6 +29,7 @@ type Invite = {
 const InviteAccept = () => {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [stage, setStage] = useState<'loading' | 'granting' | 'done' | 'error'>('loading');
   const [error, setError] = useState('');
@@ -39,7 +42,30 @@ const InviteAccept = () => {
 
   const handleInvite = async (tok: string) => {
     try {
-      const { data, error: rpcErr } = await supabase.rpc('get_invite_by_token', { p_token: tok });
+      // ── Decode Supabase credentials from URL params ────────────────────
+      let supabaseUrl: string | null = null;
+      let supabaseKey: string | null = null;
+
+      const uParam = searchParams.get('u');
+      const kParam = searchParams.get('k');
+
+      if (uParam && kParam) {
+        try {
+          supabaseUrl = atob(decodeURIComponent(uParam));
+          supabaseKey = atob(decodeURIComponent(kParam));
+        } catch {
+          // ignore decode error — will fall back to default client
+        }
+      }
+
+      // Use provided credentials or fall back to the already-configured client
+      const client =
+        supabaseUrl && supabaseKey
+          ? createClient(supabaseUrl, supabaseKey)
+          : defaultSupabase;
+
+      // ── Validate the invite token ───────────────────────────────────────
+      const { data, error: rpcErr } = await client.rpc('get_invite_by_token', { p_token: tok });
 
       if (rpcErr) {
         setError('Could not validate this invite link. Please check the link and try again.');
@@ -63,7 +89,29 @@ const InviteAccept = () => {
       setInvite(row);
       setStage('granting');
 
-      // Store guest session — no login required
+      // ── Store Supabase connection in localStorage so dashboard works ────
+      if (supabaseUrl && supabaseKey) {
+        const existing = getConnections();
+        const alreadyExists = existing.some(c => c.url === supabaseUrl);
+        if (!alreadyExists) {
+          const newConn = {
+            id: `guest-${Date.now()}`,
+            name: 'Invited Access',
+            dbType: 'supabase' as const,
+            url: supabaseUrl,
+            anonKey: supabaseKey,
+            createdAt: new Date().toISOString(),
+          };
+          const updated = [...existing, newConn];
+          localStorage.setItem('meta_db_connections', JSON.stringify(updated));
+          setActiveConnection(newConn.id);
+        } else {
+          const match = existing.find(c => c.url === supabaseUrl)!;
+          setActiveConnection(match.id);
+        }
+      }
+
+      // ── Store guest session ────────────────────────────────────────────
       setGuestSession({
         token: row.token,
         role: row.role,
@@ -71,11 +119,8 @@ const InviteAccept = () => {
         email: row.email,
       });
 
-      // Mark invite as accepted (no user_id since no auth)
-      await supabase
-        .from('team_invites')
-        .update({ status: 'accepted' })
-        .eq('token', tok);
+      // ── Mark invite accepted ───────────────────────────────────────────
+      await client.from('team_invites').update({ status: 'accepted' }).eq('token', tok);
 
       setStage('done');
       setTimeout(() => navigate('/'), 1200);
@@ -85,7 +130,7 @@ const InviteAccept = () => {
     }
   };
 
-  // ── Loading / Validating ───────────────────────────────────────────────────
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (stage === 'loading') {
     return (
       <Screen>
@@ -117,7 +162,7 @@ const InviteAccept = () => {
     );
   }
 
-  // ── Granting / Done ───────────────────────────────────────────────────────
+  // ── Granting / Done ────────────────────────────────────────────────────────
   const visiblePerms = (invite?.permissions ?? []).filter(p => p in PERMISSION_LABELS);
 
   return (
@@ -145,7 +190,6 @@ const InviteAccept = () => {
           )}
         </div>
 
-        {/* Permissions preview */}
         {invite?.role === 'viewer' && visiblePerms.length > 0 && (
           <div className="rounded-xl bg-muted/40 border border-border p-3 text-left space-y-2">
             <p className="text-xs font-semibold text-foreground">Pages you can access</p>
