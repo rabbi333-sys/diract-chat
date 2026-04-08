@@ -7,9 +7,25 @@ import { toast } from 'sonner';
 import {
   Copy, Check, Eye, EyeOff, RefreshCw, Shield, ChevronDown, ChevronRight,
   Terminal, FileJson, AlertOctagon, ShoppingBag, HandMetal, AlertTriangle, Loader2,
-  ClipboardCopy, Database, Webhook, Zap,
+  ClipboardCopy, Database, Webhook, Zap, Globe, Pencil, Save, X,
 } from 'lucide-react';
 import DeployFunctions from '@/components/DeployFunctions';
+
+const PUBLISHED_URL_KEY = 'meta_automation_published_url';
+
+function usePublishedUrl() {
+  const [url, setUrl] = useState<string>(() => {
+    try { return localStorage.getItem(PUBLISHED_URL_KEY) ?? ''; } catch { return ''; }
+  });
+
+  const save = (val: string) => {
+    const trimmed = val.trim().replace(/\/$/, '');
+    try { localStorage.setItem(PUBLISHED_URL_KEY, trimmed); } catch { /* ignore */ }
+    setUrl(trimmed);
+  };
+
+  return { url, save };
+}
 
 const API_KEYS_SQL = `-- Run this ONCE in your Supabase SQL Editor
 CREATE TABLE IF NOT EXISTS public.api_keys (
@@ -165,14 +181,31 @@ const SqlCopyBlock = ({ sql }: { sql: string }) => {
 };
 
 const LocalWebhookSection = () => {
+  const { url: publishedUrl, save: savePublishedUrl } = usePublishedUrl();
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [openCurl, setOpenCurl] = useState<string | null>(null);
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const [editingUrl, setEditingUrl] = useState(!publishedUrl);
+  const [urlDraft, setUrlDraft] = useState(publishedUrl || '');
+
+  const origin = publishedUrl || 'https://your-app.replit.app';
 
   const copy = (text: string, key: string) => {
+    if (!text || text.includes('your-app.replit.app')) {
+      toast.error('Set your Published App URL first');
+      return;
+    }
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const handleSaveUrl = () => {
+    if (!urlDraft.trim()) { toast.error('Please enter your published URL'); return; }
+    let val = urlDraft.trim();
+    if (!val.startsWith('http')) val = 'https://' + val;
+    savePublishedUrl(val);
+    setEditingUrl(false);
+    toast.success('Published URL saved!');
   };
 
   const webhooks = [
@@ -225,6 +258,8 @@ const LocalWebhookSection = () => {
     },
   ];
 
+  const urlIsSet = !!publishedUrl;
+
   return (
     <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 overflow-hidden">
       {/* Header */}
@@ -245,6 +280,70 @@ const LocalWebhookSection = () => {
         </div>
       </div>
 
+      {/* Published URL configurator */}
+      <div className="px-4 pt-4 pb-2">
+        <div className={`rounded-xl border p-3.5 transition-colors ${urlIsSet && !editingUrl ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-amber-400/40 bg-amber-500/5'}`}>
+          <div className="flex items-center gap-2 mb-2">
+            <Globe size={13} className={urlIsSet && !editingUrl ? 'text-emerald-500' : 'text-amber-500'} />
+            <span className="text-[11px] font-bold text-foreground">Your Published App URL</span>
+            {urlIsSet && !editingUrl && (
+              <button
+                onClick={() => { setUrlDraft(publishedUrl); setEditingUrl(true); }}
+                className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Pencil size={10} /> Edit
+              </button>
+            )}
+          </div>
+
+          {editingUrl ? (
+            <div className="space-y-2">
+              <p className="text-[10px] text-muted-foreground leading-relaxed">
+                Enter the URL where this app is <strong>deployed/published</strong>. n8n will POST webhook data to this URL.
+                <br />
+                <span className="text-amber-600 dark:text-amber-400">Example: <code className="bg-muted px-1 rounded">https://myapp.replit.app</code></span>
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={urlDraft}
+                  onChange={e => setUrlDraft(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSaveUrl()}
+                  placeholder="https://your-app.replit.app"
+                  className="flex-1 px-3 py-2 rounded-xl border border-border/60 bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500/40 placeholder:font-sans placeholder:text-muted-foreground/40 transition-all"
+                  autoFocus
+                />
+                <button
+                  onClick={handleSaveUrl}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold transition-colors flex-shrink-0"
+                >
+                  <Save size={12} /> Save
+                </button>
+                {urlIsSet && (
+                  <button
+                    onClick={() => setEditingUrl(false)}
+                    className="flex items-center justify-center w-9 h-9 rounded-xl border border-border/60 hover:bg-muted transition-colors text-muted-foreground flex-shrink-0"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+              <code className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400 flex-1 truncate">{publishedUrl}</code>
+              <Check size={12} className="text-emerald-500 flex-shrink-0" />
+            </div>
+          )}
+
+          {!urlIsSet && !editingUrl && (
+            <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+              ⚠️ Set your published URL above so webhook URLs are correct for your deployment.
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Webhook cards */}
       <div className="p-4 space-y-3">
         {webhooks.map(wh => {
@@ -252,7 +351,7 @@ const LocalWebhookSection = () => {
           const isCurlOpen = openCurl === wh.key;
 
           return (
-            <div key={wh.key} className={`rounded-xl border ${wh.borderColor} bg-background overflow-hidden`}>
+            <div key={wh.key} className={`rounded-xl border ${wh.borderColor} bg-background overflow-hidden ${!urlIsSet ? 'opacity-60' : ''}`}>
               {/* URL row */}
               <div className="flex items-center gap-2.5 px-3.5 py-3">
                 <div className={`h-6 w-6 rounded-lg ${wh.bg} flex items-center justify-center flex-shrink-0`}>
