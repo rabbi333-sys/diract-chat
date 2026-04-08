@@ -65,7 +65,8 @@ DROP POLICY IF EXISTS "Allow all" ON public.handoff_requests;
 CREATE POLICY "Allow all" ON public.handoff_requests FOR ALL USING (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE public.handoff_requests;`,
 
-  postgresql: `CREATE TABLE IF NOT EXISTS handoff_requests (
+  postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
+CREATE TABLE IF NOT EXISTS handoff_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id VARCHAR(255),
   recipient VARCHAR(255),
@@ -77,7 +78,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.handoff_requests;`,
   created_at TIMESTAMP DEFAULT NOW()
 );`,
 
-  mysql: `CREATE TABLE IF NOT EXISTS handoff_requests (
+  mysql: `-- Requires MySQL 8.0.13+ for DEFAULT (UUID()); use app-generated UUIDs on older versions
+CREATE TABLE IF NOT EXISTS handoff_requests (
   id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
   session_id VARCHAR(255),
   recipient VARCHAR(255),
@@ -139,7 +141,8 @@ DROP POLICY IF EXISTS "Allow all" ON public.failed_automations;
 CREATE POLICY "Allow all" ON public.failed_automations FOR ALL USING (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE public.failed_automations;`,
 
-  postgresql: `CREATE TABLE IF NOT EXISTS failed_automations (
+  postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
+CREATE TABLE IF NOT EXISTS failed_automations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workflow_name VARCHAR(255),
   error_message TEXT NOT NULL,
@@ -151,7 +154,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.failed_automations;`,
   created_at TIMESTAMP DEFAULT NOW()
 );`,
 
-  mysql: `CREATE TABLE IF NOT EXISTS failed_automations (
+  mysql: `-- Requires MySQL 8.0.13+ for DEFAULT (UUID()); use app-generated UUIDs on older versions
+CREATE TABLE IF NOT EXISTS failed_automations (
   id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
   workflow_name VARCHAR(255),
   error_message TEXT NOT NULL,
@@ -199,7 +203,8 @@ DROP POLICY IF EXISTS "Allow all" ON public.orders;
 CREATE POLICY "Allow all" ON public.orders FOR ALL USING (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;`,
 
-  postgresql: `CREATE TABLE IF NOT EXISTS orders (
+  postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
+CREATE TABLE IF NOT EXISTS orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   merchant_order_id VARCHAR(255),
   customer_name VARCHAR(255),
@@ -216,7 +221,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;`,
   created_at TIMESTAMP DEFAULT NOW()
 );`,
 
-  mysql: `CREATE TABLE IF NOT EXISTS orders (
+  mysql: `-- Requires MySQL 8.0.13+ for DEFAULT (UUID()); use app-generated UUIDs on older versions
+CREATE TABLE IF NOT EXISTS orders (
   id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
   merchant_order_id VARCHAR(255),
   customer_name VARCHAR(255),
