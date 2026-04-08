@@ -202,14 +202,21 @@ const ORDERS_SQL: Record<MainDbType, string> = {
   session_id text,
   source text DEFAULT 'webhook',
   order_data jsonb DEFAULT '{}',
-  created_at timestamptz DEFAULT now() NOT NULL
+  created_at timestamptz DEFAULT now() NOT NULL,
+  updated_at timestamptz DEFAULT now()
 );
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all" ON public.orders;
 -- Dev policy: allows public insert from n8n/webhooks.
 -- Production: use service_role key in n8n (bypasses RLS) and tighten this policy.
 CREATE POLICY "Allow all" ON public.orders FOR ALL USING (true);
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.orders; EXCEPTION WHEN OTHERS THEN NULL; END $$;`,
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.orders; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+-- ⚠️ If you already have an orders table, run these to add missing columns:
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS sku text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_status text DEFAULT 'unpaid';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS unit_price numeric;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();`,
 
   postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
 CREATE TABLE IF NOT EXISTS orders (
@@ -229,8 +236,15 @@ CREATE TABLE IF NOT EXISTS orders (
   reason_for_cancel TEXT,
   notes TEXT,
   session_id VARCHAR(255),
-  created_at TIMESTAMP DEFAULT NOW()
-);`,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- If you already have an orders table, run these to add missing columns:
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS sku VARCHAR(255);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'unpaid';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS unit_price NUMERIC;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();`,
 
   mysql: `-- Requires MySQL 8.0.13+ for DEFAULT (UUID()); use app-generated UUIDs on older versions
 CREATE TABLE IF NOT EXISTS orders (
@@ -250,8 +264,15 @@ CREATE TABLE IF NOT EXISTS orders (
   reason_for_cancel TEXT,
   notes TEXT,
   session_id VARCHAR(255),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);`,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- If you already have an orders table, run these to add missing columns:
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS sku VARCHAR(255);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'unpaid';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS unit_price DECIMAL(10,2);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;`,
 
   mongodb: `// MongoDB creates collections automatically on first insert.
 db.createCollection("orders");`,
