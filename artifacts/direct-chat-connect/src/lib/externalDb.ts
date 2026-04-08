@@ -277,13 +277,18 @@ export interface AgentMessage {
   recipient?: string;
 }
 
+// Cache which insert format worked per table so we don't retry both every time
+const _insertFormatCache = new Map<string, 'n8n' | 'normalized'>();
+
 /**
  * Silently writes an agent reply to the user's connected external database.
  * Only Supabase is supported via browser-side direct connection.
  *
- * Tries two formats in sequence:
- *  1) n8n native format:   { session_id, message: { type: 'agent', output: text } }
- *  2) Normalized format:   { session_id, sender: 'agent', message_text: text, ... }
+ * Caches the working insert format after first success so subsequent inserts
+ * go directly to the right format without any fallback delay.
+ *
+ * Format 1 (n8n native):  { session_id, message: { type: 'agent', output: text } }
+ * Format 2 (normalized):  { session_id, sender: 'agent', message_text: text, ... }
  *
  * All errors are caught and suppressed — this must never block the send flow.
  */
@@ -298,15 +303,11 @@ export async function insertMessageToExternalDb(
     const tbl = (conn.table_name?.trim()) || 'n8n_chat_histories';
     if (!url || !key) return;
     const client = getExternalClient(url, key);
+    const cacheKey = `${url}::${tbl}`;
+    const knownFormat = _insertFormatCache.get(cacheKey);
 
-    // Try 1: n8n native format — used by n8n_chat_histories (message JSONB column)
-    const { error: e1 } = await client.from(tbl).insert({
-      session_id: message.session_id,
-      message: { type: 'agent', output: message.message_text },
-    });
-
-    if (e1) {
-      // Try 2: Normalized format — for custom tables with sender / message_text columns
+    if (knownFormat === 'normalized') {
+      // Already know normalized works — use it directly, no fallback needed
       await client.from(tbl).insert({
         session_id: message.session_id,
         sender: 'agent',
@@ -314,6 +315,31 @@ export async function insertMessageToExternalDb(
         recipient: message.recipient,
         created_at: message.timestamp,
       });
+      return;
+    }
+
+    // Try n8n format first (default or previously cached)
+    const { error: e1 } = await client.from(tbl).insert({
+      session_id: message.session_id,
+      message: { type: 'agent', output: message.message_text },
+    });
+
+    if (!e1) {
+      _insertFormatCache.set(cacheKey, 'n8n');
+      return;
+    }
+
+    // Fallback: normalized format
+    const { error: e2 } = await client.from(tbl).insert({
+      session_id: message.session_id,
+      sender: 'agent',
+      message_text: message.message_text,
+      recipient: message.recipient,
+      created_at: message.timestamp,
+    });
+
+    if (!e2) {
+      _insertFormatCache.set(cacheKey, 'normalized');
     }
   } catch {
     // Silent — never surface DB write errors to the agent

@@ -183,17 +183,17 @@ const Conversation = () => {
     inputRef.current?.focus();
     // Fire-and-forget API call
     (async () => {
+      // Fire DB write immediately (parallel with Meta API — no await)
+      insertMessageToExternalDb(getStoredConnection(), {
+        session_id: sessionId || '',
+        sender: 'Agent',
+        message_text: text,
+        timestamp: new Date().toISOString(),
+        recipient,
+      });
       try {
         if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
         else if (fbConn) await fbPost(fbConn, recipient, { text });
-        // Persist agent reply to external DB (silent, non-blocking)
-        insertMessageToExternalDb(getStoredConnection(), {
-          session_id: sessionId || '',
-          sender: 'Agent',
-          message_text: text,
-          timestamp: new Date().toISOString(),
-          recipient,
-        });
       } catch (err: unknown) {
         revertOptimistic(id);
         toast.error(err instanceof Error ? err.message : 'Failed to send');
@@ -217,15 +217,7 @@ const Conversation = () => {
     setUploadingId(id);
 
     try {
-      if (waConn) {
-        const mediaId = await waUploadFile(waConn, file, file.name, file.type);
-        const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
-        await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
-      } else if (fbConn) {
-        const attachId = await fbUploadFile(fbConn, file, mediaType);
-        await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
-      }
-      // Persist media send to external DB (silent, non-blocking)
+      // Fire DB write immediately (parallel with upload — no await)
       const mediaLabel = isImage ? '[image]' : isVideo ? '[video]' : '[audio]';
       insertMessageToExternalDb(getStoredConnection(), {
         session_id: sessionId || '',
@@ -234,6 +226,14 @@ const Conversation = () => {
         timestamp: new Date().toISOString(),
         recipient,
       });
+      if (waConn) {
+        const mediaId = await waUploadFile(waConn, file, file.name, file.type);
+        const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
+        await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
+      } else if (fbConn) {
+        const attachId = await fbUploadFile(fbConn, file, mediaType);
+        await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+      }
     } catch (err: unknown) {
       revertOptimistic(id);
       URL.revokeObjectURL(localUrl);
@@ -290,19 +290,19 @@ const Conversation = () => {
 
     (async () => {
       try {
+        // Fire DB write immediately (parallel with upload — no await)
+        insertMessageToExternalDb(getStoredConnection(), {
+          session_id: sessionId || '',
+          sender: 'Agent',
+          message_text: '[voice message]',
+          timestamp: new Date().toISOString(),
+          recipient,
+        });
         if (waConn) {
           const ext = mimeType.includes('ogg') ? 'voice.ogg' : 'voice.webm';
           const uploadMime = mimeType.includes('ogg') ? 'audio/ogg' : 'audio/webm';
           const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
           await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
-          // Persist voice send to external DB (silent, non-blocking)
-          insertMessageToExternalDb(getStoredConnection(), {
-            session_id: sessionId || '',
-            sender: 'Agent',
-            message_text: '[voice message]',
-            timestamp: new Date().toISOString(),
-            recipient,
-          });
         } else if (fbConn) {
           // FB doesn't support direct blob upload easily — inform user
           toast.error('Facebook does not support voice send. Use WhatsApp instead.');
