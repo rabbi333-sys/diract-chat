@@ -616,14 +616,14 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
           </div>
         )}
 
-        {/* Endpoint Cards */}
-        {ENDPOINTS.map(ep => {
+        {/* Endpoint Cards — only shown when a DB is connected */}
+        {!noConn && ENDPOINTS.map(ep => {
           const isOpen = openEp === ep.key;
           const isCreateOpen = openCreate === `${ep.key}-create`;
           const restUrl = isSupabase ? `${supabaseUrl}/rest/v1/${ep.table}` : '';
 
           return (
-            <div key={ep.key} className={cn('rounded-xl border bg-background overflow-hidden', ep.colorBorder, noConn && 'opacity-50 pointer-events-none')}>
+            <div key={ep.key} className={cn('rounded-xl border bg-background overflow-hidden', ep.colorBorder)}>
 
               {/* Card header — split into clickable toggle area + action buttons to avoid nested buttons */}
               <div className="flex items-center gap-2.5 px-3.5 py-3 hover:bg-muted/30 transition-colors">
