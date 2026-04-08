@@ -174,30 +174,27 @@ const OrderDetailSheet = ({ orderId, onClose }: Props) => {
                   <InfoRow icon={User} label="Name" value={order.customer_name} />
                   <InfoRow icon={Phone} label="Phone" value={order.customer_phone} onCopy={copyText} />
                 </div>
-                {order.customer_address && (
-                  <InfoRow icon={MapPin} label="Address" value={order.customer_address} />
-                )}
+                <InfoRow icon={MapPin} label="Address" value={order.customer_address} />
               </Section>
 
               {/* Order Info */}
               <Section icon={Hash} title="Order Info">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {order.merchant_order_id && <InfoRow icon={Hash} label="Merchant Order ID" value={order.merchant_order_id} onCopy={copyText} />}
+                  <InfoRow icon={Hash} label="Merchant Order ID" value={order.merchant_order_id} onCopy={copyText} />
+                  <InfoRow icon={Calendar} label="Date" value={safeDate(order.created_at)} />
+                  <InfoRow icon={Package} label="Product Name" value={order.product_name} />
+                  <InfoRow icon={Tag} label="SKU" value={order.sku} />
                   {order.consignment_id && <InfoRow icon={Tag} label="Consignment ID" value={order.consignment_id} onCopy={copyText} />}
-                  <InfoRow icon={Package} label="Product" value={order.product_name} />
-                  {order.sku && <InfoRow icon={Tag} label="SKU" value={order.sku} />}
-                  {safeDate(order.created_at) && <InfoRow icon={Calendar} label="Date" value={safeDate(order.created_at)!} />}
-                  {safeDate(order.updated_at) && <InfoRow icon={Calendar} label="Updated" value={safeDate(order.updated_at)!} />}
                 </div>
               </Section>
 
-              {/* Price */}
+              {/* Pricing — all 4 fields always visible */}
               <Section icon={CreditCard} title="Pricing">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <PriceBox label="Quantity" value={String(order.quantity || 1)} />
-                  <PriceBox label="Unit Price" value={order.unit_price ? `৳${order.unit_price}` : '—'} />
-                  <PriceBox label="Total" value={order.total_price ? `৳${order.total_price}` : '—'} highlight />
-                  <PriceBox label="To Collect" value={order.amount_to_collect ? `৳${order.amount_to_collect}` : '—'} success />
+                  <PriceBox label="Per Product Price" value={order.unit_price ? `৳${Number(order.unit_price).toLocaleString()}` : '—'} />
+                  <PriceBox label="Total Price" value={order.total_price ? `৳${Number(order.total_price).toLocaleString()}` : '—'} highlight />
+                  <PriceBox label="Amount to Collect" value={order.amount_to_collect ? `৳${Number(order.amount_to_collect).toLocaleString()}` : '—'} success />
                 </div>
               </Section>
 
