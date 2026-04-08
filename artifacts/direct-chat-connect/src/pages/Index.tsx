@@ -397,8 +397,7 @@ const Index = () => {
           <main className="flex-1 flex flex-col overflow-hidden">
             <div className="flex flex-col h-full p-4 md:p-6">
               {/* Header with tab toggle */}
-              <div className="flex items-center justify-between mb-4 flex-shrink-0">
-                <h2 className="text-lg md:text-xl font-bold text-foreground">{t('ordersTitle')}</h2>
+              <div className="flex items-center justify-end mb-2.5 flex-shrink-0">
                 <div className="flex items-center bg-muted/60 rounded-xl p-1 border border-border/50 gap-0.5">
                   <button
                     onClick={() => setOrdersView('list')}

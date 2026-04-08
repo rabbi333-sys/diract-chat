@@ -5,8 +5,8 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
   Package, Clock, CheckCircle, XCircle, Truck, PackageCheck,
-  User, MapPin, Calendar, Loader2, ChevronRight, Download,
-  Webhook, Search, ShoppingBag, TrendingUp, Hash, Tag, Phone,
+  User, MapPin, Calendar, ChevronRight, Download,
+  Webhook, Search, Hash, Tag, Phone,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrderDetailSheet from './OrderDetailSheet';
@@ -21,8 +21,6 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; b
   delivered:  { label: 'Delivered',  bg: 'bg-emerald-50 dark:bg-emerald-950/30',text: 'text-emerald-600 dark:text-emerald-400',border: 'border-emerald-200 dark:border-emerald-800',icon: PackageCheck },
   cancelled:  { label: 'Cancelled',  bg: 'bg-red-50 dark:bg-red-950/30',        text: 'text-red-600 dark:text-red-400',        border: 'border-red-200 dark:border-red-800',       icon: XCircle },
 };
-
-const STATUS_TABS = ['all', 'pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'] as const;
 
 // ─── Order interface ─────────────────────────────────────────────────────────
 
@@ -131,15 +129,6 @@ function exportToCSV(orders: Order[]) {
   toast.success(`${orders.length} orders exported to CSV`);
 }
 
-// ─── Summary stat card ───────────────────────────────────────────────────────
-
-const StatPill = ({ label, value, color }: { label: string; value: string | number; color: string }) => (
-  <div className={cn('flex flex-col items-center justify-center rounded-2xl border px-4 py-3 min-w-0 flex-1', color)}>
-    <span className="text-lg font-extrabold leading-tight">{value}</span>
-    <span className="text-[10px] font-semibold uppercase tracking-wide opacity-70 mt-0.5 text-center">{label}</span>
-  </div>
-);
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const OrdersPanel = () => {
@@ -148,24 +137,10 @@ const OrdersPanel = () => {
   const orders = mergeOrders(localOrders, supabaseOrders);
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
 
-  const stats = useMemo(() => ({
-    total:     orders.length,
-    pending:   orders.filter(o => o.status === 'pending').length,
-    delivered: orders.filter(o => o.status === 'delivered').length,
-    revenue:   orders.reduce((s, o) => s + (Number(o.total_price) || 0), 0),
-  }), [orders]);
-
-  const statusCounts = useMemo(() => {
-    const map: Record<string, number> = {};
-    orders.forEach(o => { map[o.status] = (map[o.status] || 0) + 1; });
-    return map;
-  }, [orders]);
-
   const filtered = useMemo(() => {
-    let list = statusFilter === 'all' ? orders : orders.filter(o => o.status === statusFilter);
+    let list = orders;
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(o =>
@@ -177,24 +152,12 @@ const OrdersPanel = () => {
       );
     }
     return list;
-  }, [orders, statusFilter, search]);
+  }, [orders, search]);
 
   const newLocalCount = localOrders.length;
 
   return (
-    <div className="flex flex-col h-full gap-3">
-
-      {/* Summary stats */}
-      <div className="flex gap-2 flex-shrink-0">
-        <StatPill label="Total Orders" value={stats.total}
-          color="border-border bg-card text-foreground" />
-        <StatPill label="Pending" value={stats.pending}
-          color="border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300" />
-        <StatPill label="Delivered" value={stats.delivered}
-          color="border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300" />
-        <StatPill label="Revenue" value={`৳${stats.revenue.toLocaleString()}`}
-          color="border-primary/20 bg-primary/5 text-primary" />
-      </div>
+    <div className="flex flex-col h-full gap-2.5">
 
       {/* Toolbar: search + CSV */}
       <div className="flex items-center gap-2 flex-shrink-0">
@@ -226,43 +189,6 @@ const OrdersPanel = () => {
         >
           <Download size={13} /> CSV
         </button>
-      </div>
-
-      {/* Status filter tabs */}
-      <div className="flex gap-1 overflow-x-auto pb-0.5 flex-shrink-0 scrollbar-hide">
-        {STATUS_TABS.map(tab => {
-          const count = tab === 'all' ? orders.length : (statusCounts[tab] || 0);
-          const isActive = statusFilter === tab;
-          const cfg = tab !== 'all' ? STATUS_CONFIG[tab] : null;
-          return (
-            <button
-              key={tab}
-              onClick={() => setStatusFilter(tab)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold whitespace-nowrap transition-all border flex-shrink-0",
-                isActive
-                  ? tab === 'all'
-                    ? "bg-foreground text-background border-foreground"
-                    : cn(cfg?.bg, cfg?.text, cfg?.border)
-                  : "border-border text-muted-foreground hover:text-foreground hover:border-border/80 bg-background"
-              )}
-            >
-              {tab === 'all' ? (
-                <><ShoppingBag size={11} /> All</>
-              ) : (
-                <>{cfg && <cfg.icon size={11} />} {STATUS_CONFIG[tab]?.label}</>
-              )}
-              {count > 0 && (
-                <span className={cn(
-                  "text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none",
-                  isActive ? "bg-current/20" : "bg-muted"
-                )}>
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
       </div>
 
       {/* Order list */}
