@@ -392,38 +392,6 @@ const FULL_SETUP_SQL_REDIS = `# ════════════════
 # Set expiry as needed:
 # EXPIRE order:BI-0016 2592000   (30 days)`;
 
-const MIGRATION_SQL: Record<MainDbType, string> = {
-  supabase: `-- ═══════════════════════════════════════════
--- Run if you already have the orders table
--- Adds missing columns (safe to run multiple times)
--- ═══════════════════════════════════════════
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS sku text;
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_status text DEFAULT 'unpaid';
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS unit_price numeric;`,
-
-  postgresql: `-- Run if you already have the orders table
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS sku VARCHAR(255);
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'unpaid';
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS unit_price NUMERIC;`,
-
-  mysql: `-- Run if you already have the orders table
--- MySQL: check column exists manually before running
-ALTER TABLE orders ADD COLUMN sku VARCHAR(255);
-ALTER TABLE orders ADD COLUMN payment_status VARCHAR(50) DEFAULT 'unpaid';
-ALTER TABLE orders ADD COLUMN unit_price DECIMAL(10,2);`,
-
-  mongodb: `// MongoDB: existing documents are not affected.
-// New inserts will include the new fields automatically.
-// To backfill existing docs:
-db.orders.updateMany(
-  { payment_status: { $exists: false } },
-  { $set: { payment_status: "unpaid", sku: "" } }
-);`,
-
-  redis: `# Redis: no schema migration needed.
-# Just include sku and payment_status in new HSET commands.`,
-};
-
 const FULL_SETUP_BY_DB: Record<MainDbType, string> = {
   supabase:   FULL_SETUP_SQL,
   postgresql: FULL_SETUP_SQL_POSTGRESQL,
@@ -863,7 +831,21 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
               {isOpen && (
                 <div className="border-t border-border/40 space-y-4 px-3.5 py-4 animate-in slide-in-from-top-1 duration-150">
 
-                  {/* Supabase: URL + Headers + cURL */}
+                  {/* Connection Method Badge */}
+                  <div className="flex items-center gap-2">
+                    <div className={cn('h-5 w-5 rounded-md flex items-center justify-center flex-shrink-0', ep.colorBg)}>
+                      <Webhook size={10} className={ep.colorText} />
+                    </div>
+                    <span className="text-[10px] font-semibold text-muted-foreground">
+                      {isSupabase  && 'HTTP Request (REST API)'}
+                      {isPostgres  && 'Postgres Node → Execute Query'}
+                      {isMysql     && 'MySQL Node → Execute Query'}
+                      {isMongo     && 'MongoDB Node → Insert Document'}
+                      {isRedis     && 'Redis Node → HSET'}
+                    </span>
+                  </div>
+
+                  {/* Supabase: URL + Headers + Body + cURL */}
                   {isSupabase && (
                     <>
                       {/* URL */}
@@ -930,17 +912,20 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
                     <>
                       <div>
                         <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
-                          n8n {isPostgres ? 'Postgres' : 'MySQL'} Node — Execute Query
+                          Connection Details
                         </p>
                         <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/40 bg-muted/20">
                           {[
                             { label: 'Node Type',  value: isPostgres ? 'Postgres' : 'MySQL' },
                             { label: 'Operation',  value: 'Execute Query' },
-                            { label: 'Connection', value: `${activeConn?.host || 'your-db-host'}:${activeConn?.port || (isPostgres ? '5432' : '3306')}` },
+                            { label: 'Host',       value: `${activeConn?.host || 'your-db-host'}:${activeConn?.port || (isPostgres ? '5432' : '3306')}` },
                           ].map((row, i) => (
                             <div key={i} className="flex items-center gap-3 px-3 py-2.5">
-                              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-24 flex-shrink-0">{row.label}</span>
-                              <code className="text-[10px] font-mono text-foreground">{row.value}</code>
+                              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-20 flex-shrink-0">{row.label}</span>
+                              <code className="text-[10px] font-mono text-foreground flex-1 truncate">{row.value}</code>
+                              <button onClick={() => copy(row.value, `pg-${ep.key}-${i}`)} className="ml-auto text-muted-foreground hover:text-foreground flex-shrink-0">
+                                {copiedKey === `pg-${ep.key}-${i}` ? <Check size={9} className="text-primary" /> : <Copy size={9} />}
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -952,11 +937,21 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
                     </>
                   )}
 
-                  {/* MongoDB: insertOne config */}
+                  {/* MongoDB: no-schema note + document template */}
                   {isMongo && (
                     <>
+                      {/* No schema needed */}
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
+                        <Check size={12} className="text-emerald-600 mt-0.5 flex-shrink-0" />
+                        <p className="text-[11px] text-emerald-700 leading-relaxed">
+                          <span className="font-semibold">No table or schema creation needed.</span>{' '}
+                          MongoDB creates the <code className="bg-emerald-500/10 px-1 rounded font-mono">{ep.table}</code> collection automatically on first insert.
+                        </p>
+                      </div>
+
+                      {/* Node config */}
                       <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">n8n MongoDB Node Config</p>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">n8n Node Config</p>
                         <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/40 bg-muted/20">
                           {[
                             { label: 'Node Type',  value: 'MongoDB' },
@@ -965,22 +960,24 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
                           ].map((row, i) => (
                             <div key={i} className="flex items-center gap-3 px-3 py-2.5">
                               <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-24 flex-shrink-0">{row.label}</span>
-                              <code className="text-[10px] font-mono text-foreground">{row.value}</code>
-                              <button onClick={() => copy(row.value, `mongo-${ep.key}-${i}`)} className="ml-auto text-muted-foreground hover:text-foreground">
+                              <code className="text-[10px] font-mono text-foreground flex-1 truncate">{row.value}</code>
+                              <button onClick={() => copy(row.value, `mongo-${ep.key}-${i}`)} className="ml-auto text-muted-foreground hover:text-foreground flex-shrink-0">
                                 {copiedKey === `mongo-${ep.key}-${i}` ? <Check size={9} className="text-primary" /> : <Copy size={9} />}
                               </button>
                             </div>
                           ))}
                         </div>
                       </div>
+
+                      {/* Document template */}
                       <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Document Template</p>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Document Template (paste into n8n Document field)</p>
                         <CodeBlock code={ep.mongoDoc} />
                       </div>
                     </>
                   )}
 
-                  {/* Redis: SET config */}
+                  {/* Redis: HSET config */}
                   {isRedis && (
                     <>
                       <div>
@@ -988,7 +985,7 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
                         <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/40 bg-muted/20">
                           {[
                             { label: 'Node Type', value: 'Redis' },
-                            { label: 'Operation', value: 'Set' },
+                            { label: 'Operation', value: 'HSET' },
                             { label: 'Key',       value: ep.redisKey },
                             { label: 'Value',     value: ep.redisValue },
                           ].map((row, i) => (
@@ -1005,25 +1002,27 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
                     </>
                   )}
 
-                  {/* Create Table SQL (collapsible) */}
-                  <div className="border-t border-border/30 pt-3">
-                    <button
-                      onClick={() => setOpenCreate(isCreateOpen ? null : `${ep.key}-create`)}
-                      className="flex items-center gap-2 text-[10px] font-semibold text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <Database size={11} />
-                      Create Table / Schema Setup
-                      {isCreateOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                    </button>
-                    {isCreateOpen && (
-                      <div className="mt-2 animate-in slide-in-from-top-1 duration-150">
-                        <p className="text-[10px] text-muted-foreground mb-2">
-                          Run this once in your {dbInfo.label} to create the <code className="bg-muted px-1 py-0.5 rounded">{ep.table}</code> table:
-                        </p>
-                        <CodeBlock code={ep.createSql[dbType]} />
-                      </div>
-                    )}
-                  </div>
+                  {/* Create Table SQL (collapsible) — hidden for MongoDB (no schema needed) */}
+                  {!isMongo && (
+                    <div className="border-t border-border/30 pt-3">
+                      <button
+                        onClick={() => setOpenCreate(isCreateOpen ? null : `${ep.key}-create`)}
+                        className="flex items-center gap-2 text-[10px] font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <Database size={11} />
+                        Create Table / Schema Setup
+                        {isCreateOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                      </button>
+                      {isCreateOpen && (
+                        <div className="mt-2 animate-in slide-in-from-top-1 duration-150">
+                          <p className="text-[10px] text-muted-foreground mb-2">
+                            Run this once in your {dbInfo.label} to create the <code className="bg-muted px-1 py-0.5 rounded">{ep.table}</code> table:
+                          </p>
+                          <CodeBlock code={ep.createSql[dbType]} />
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                 </div>
               )}
@@ -1059,15 +1058,12 @@ const DB_SETUP_META: Record<MainDbType, { title: string; hint: string; lang: str
 const DbSetupSection = ({ activeConn }: { activeConn: MainDbConnection | null }) => {
   const dbType = normalizeDbType(activeConn?.dbType);
   const [open, setOpen] = useState(false);
-  const [openMigration, setOpenMigration] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [copiedMig, setCopiedMig] = useState(false);
 
   if (!activeConn) return null;
 
   const meta = DB_SETUP_META[dbType];
   const setupSql = FULL_SETUP_BY_DB[dbType] ?? FULL_SETUP_SQL;
-  const migSql = MIGRATION_SQL[dbType] ?? MIGRATION_SQL.supabase;
   const dbInfo = DB_LABELS[dbType];
 
   const handleCopy = async () => {
@@ -1075,86 +1071,48 @@ const DbSetupSection = ({ activeConn }: { activeConn: MainDbConnection | null })
     setCopied(true); setTimeout(() => setCopied(false), 2000);
     toast.success('Copied!');
   };
-  const handleCopyMig = async () => {
-    await navigator.clipboard.writeText(migSql);
-    setCopiedMig(true); setTimeout(() => setCopiedMig(false), 2000);
-    toast.success('Migration SQL copied!');
-  };
 
   return (
-    <div className="space-y-2">
-      {/* Main setup */}
-      <div className="rounded-2xl border border-border bg-gradient-to-br from-muted/30 to-muted/10 overflow-hidden">
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="w-full px-5 py-4 flex items-center gap-3 hover:bg-muted/30 transition-colors text-left"
-          data-testid="button-toggle-db-setup"
-        >
-          <div className="h-9 w-9 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
-            <Database size={18} className="text-emerald-500" />
+    <div className="rounded-2xl border border-border bg-gradient-to-br from-muted/30 to-muted/10 overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-5 py-4 flex items-center gap-3 hover:bg-muted/30 transition-colors text-left"
+        data-testid="button-toggle-db-setup"
+      >
+        <div className="h-9 w-9 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+          <Database size={18} className="text-emerald-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-semibold text-foreground">Create Table / Schema Setup</h3>
+          <p className="text-[11px] text-muted-foreground truncate">
+            {meta.hint}
+          </p>
+        </div>
+        <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1 whitespace-nowrap flex items-center gap-1', dbInfo.color, 'bg-muted/50 border border-border/40')}>
+          {dbInfo.icon} {dbInfo.label}
+        </span>
+        {open ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
+      </button>
+      {open && (
+        <div className="px-5 pb-5 space-y-3 border-t border-border/50 pt-4 animate-in slide-in-from-top-2 duration-200">
+          <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
+            <AlertTriangle size={13} className="text-emerald-600 mt-0.5 flex-shrink-0" />
+            <p className="text-[11px] text-muted-foreground leading-relaxed">{meta.hint}</p>
           </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">Create Table / Schema Setup</h3>
-            <p className="text-[11px] text-muted-foreground truncate">
-              {meta.hint}
-            </p>
+          <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
+            <pre className="text-[10px] font-mono text-zinc-400 p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
+              {setupSql}
+            </pre>
+            <button
+              onClick={handleCopy}
+              className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
+              data-testid="button-copy-setup-sql"
+            >
+              {copied ? <><Check size={10} /> Copied!</> : <><ClipboardCopy size={10} /> Copy All</>}
+            </button>
           </div>
-          <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1 whitespace-nowrap flex items-center gap-1', dbInfo.color, 'bg-muted/50 border border-border/40')}>
-            {dbInfo.icon} {dbInfo.label}
-          </span>
-          {open ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
-        </button>
-        {open && (
-          <div className="px-5 pb-5 space-y-3 border-t border-border/50 pt-4 animate-in slide-in-from-top-2 duration-200">
-            <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
-              <AlertTriangle size={13} className="text-emerald-600 mt-0.5 flex-shrink-0" />
-              <p className="text-[11px] text-muted-foreground leading-relaxed">{meta.hint}</p>
-            </div>
-            <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
-              <pre className="text-[10px] font-mono text-zinc-400 p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
-                {setupSql}
-              </pre>
-              <button
-                onClick={handleCopy}
-                className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
-                data-testid="button-copy-setup-sql"
-              >
-                {copied ? <><Check size={10} /> Copied!</> : <><ClipboardCopy size={10} /> Copy All</>}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Migration — add missing columns to existing table */}
-      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
-        <button
-          onClick={() => setOpenMigration(o => !o)}
-          className="w-full px-5 py-3.5 flex items-center gap-3 hover:bg-amber-500/5 transition-colors text-left"
-        >
-          <AlertTriangle size={15} className="text-amber-500 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <h3 className="text-xs font-semibold text-foreground">Already have the orders table?</h3>
-            <p className="text-[10px] text-muted-foreground">Run this to add missing columns (sku, payment_status, unit_price)</p>
-          </div>
-          {openMigration ? <ChevronDown size={13} className="text-muted-foreground" /> : <ChevronRight size={13} className="text-muted-foreground" />}
-        </button>
-        {openMigration && (
-          <div className="px-5 pb-4 border-t border-amber-500/20 pt-3 space-y-2 animate-in slide-in-from-top-2 duration-200">
-            <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
-              <pre className="text-[10px] font-mono text-zinc-400 p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-48">
-                {migSql}
-              </pre>
-              <button
-                onClick={handleCopyMig}
-                className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
-              >
-                {copiedMig ? <><Check size={10} /> Copied!</> : <><ClipboardCopy size={10} /> Copy</>}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };
