@@ -263,9 +263,10 @@ db.createCollection("orders");`,
 # Or JSON: SET order:{id} '{"merchant_order_id":"BI-0016","status":"pending"}' EX 2592000`,
 };
 
-/* ── Full Supabase setup SQL (all tables at once) ───────────────── */
+/* ── Full setup SQL — all 5 database types ──────────────────────── */
+
 const FULL_SETUP_SQL = `-- ═══════════════════════════════════════════════
--- META AUTOMATION — Full Database Setup SQL
+-- META AUTOMATION — Full Database Setup (Supabase)
 -- Run this ONCE in Supabase → SQL Editor
 -- ═══════════════════════════════════════════════
 
@@ -286,7 +287,6 @@ CREATE TABLE IF NOT EXISTS public.ai_control (
 );
 ALTER TABLE public.ai_control ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all for ai_control" ON public.ai_control;
--- Dev policy: allows dashboard access. Tighten in production if needed.
 CREATE POLICY "Allow all for ai_control" ON public.ai_control FOR ALL USING (true);
 
 -- 5. API Keys
@@ -302,6 +302,135 @@ ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users manage own api keys" ON public.api_keys;
 CREATE POLICY "Users manage own api keys" ON public.api_keys
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);`;
+
+const FULL_SETUP_SQL_POSTGRESQL = `-- ═══════════════════════════════════════════════
+-- META AUTOMATION — Full Database Setup (PostgreSQL)
+-- Run this ONCE in your PostgreSQL client
+-- Requires PostgreSQL 13+
+-- ═══════════════════════════════════════════════
+
+-- 1. Human Handoff Requests
+${HANDOFF_SQL.postgresql}
+
+-- 2. Failed Automations
+${FAILURES_SQL.postgresql}
+
+-- 3. Orders
+${ORDERS_SQL.postgresql}
+
+-- 4. AI Control
+CREATE TABLE IF NOT EXISTS ai_control (
+  session_id VARCHAR(255) PRIMARY KEY,
+  ai_enabled BOOLEAN DEFAULT true NOT NULL,
+  updated_at TIMESTAMP DEFAULT NOW()
+);`;
+
+const FULL_SETUP_SQL_MYSQL = `-- ═══════════════════════════════════════════════
+-- META AUTOMATION — Full Database Setup (MySQL)
+-- Run this ONCE in your MySQL client
+-- Requires MySQL 8.0.13+
+-- ═══════════════════════════════════════════════
+
+-- 1. Human Handoff Requests
+${HANDOFF_SQL.mysql}
+
+-- 2. Failed Automations
+${FAILURES_SQL.mysql}
+
+-- 3. Orders
+${ORDERS_SQL.mysql}
+
+-- 4. AI Control
+CREATE TABLE IF NOT EXISTS ai_control (
+  session_id VARCHAR(255) PRIMARY KEY,
+  ai_enabled TINYINT(1) DEFAULT 1 NOT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);`;
+
+const FULL_SETUP_SQL_MONGODB = `// ═══════════════════════════════════════════════
+// META AUTOMATION — Full Database Setup (MongoDB)
+// Run in MongoDB Shell or Compass
+// Collections are created automatically on first insert.
+// Optionally create them explicitly:
+// ═══════════════════════════════════════════════
+
+db.createCollection("handoff_requests");
+db.createCollection("failed_automations");
+db.createCollection("orders");
+db.createCollection("ai_control");
+
+// Recommended indexes for orders:
+db.orders.createIndex({ status: 1 });
+db.orders.createIndex({ created_at: -1 });
+db.orders.createIndex({ merchant_order_id: 1 });
+
+// Recommended indexes for handoff_requests:
+db.handoff_requests.createIndex({ session_id: 1 });
+db.handoff_requests.createIndex({ status: 1 });`;
+
+const FULL_SETUP_SQL_REDIS = `# ═══════════════════════════════════════════════
+# META AUTOMATION — Key Patterns (Redis)
+# Redis requires no schema — just use these key patterns in n8n
+# ═══════════════════════════════════════════════
+
+# Orders  →  order:{merchant_order_id}
+# HSET order:BI-0016 merchant_order_id "BI-0016" customer_name "Zakariea" \\
+#   customer_phone "01758481876" customer_address "Dhaka" \\
+#   product_name "Cotton Saree" sku "CSR-001" quantity "1" \\
+#   unit_price "3491" total_price "3491" amount_to_collect "3491" \\
+#   payment_status "unpaid" status "pending"
+
+# Human Handoff  →  handoff:{session_id}
+# HSET handoff:{session_id} recipient "Name" reason "..." priority "normal"
+
+# Failed Automations  →  failure:{workflow}:{timestamp}
+# HSET failure:BotFlow:1234567890 workflow_name "BotFlow" error_message "..."
+
+# AI Control  →  ai_control:{session_id}
+# SET ai_control:{session_id} "true"
+
+# Set expiry as needed:
+# EXPIRE order:BI-0016 2592000   (30 days)`;
+
+const MIGRATION_SQL: Record<MainDbType, string> = {
+  supabase: `-- ═══════════════════════════════════════════
+-- Run if you already have the orders table
+-- Adds missing columns (safe to run multiple times)
+-- ═══════════════════════════════════════════
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS sku text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_status text DEFAULT 'unpaid';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS unit_price numeric;`,
+
+  postgresql: `-- Run if you already have the orders table
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS sku VARCHAR(255);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'unpaid';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS unit_price NUMERIC;`,
+
+  mysql: `-- Run if you already have the orders table
+-- MySQL: check column exists manually before running
+ALTER TABLE orders ADD COLUMN sku VARCHAR(255);
+ALTER TABLE orders ADD COLUMN payment_status VARCHAR(50) DEFAULT 'unpaid';
+ALTER TABLE orders ADD COLUMN unit_price DECIMAL(10,2);`,
+
+  mongodb: `// MongoDB: existing documents are not affected.
+// New inserts will include the new fields automatically.
+// To backfill existing docs:
+db.orders.updateMany(
+  { payment_status: { $exists: false } },
+  { $set: { payment_status: "unpaid", sku: "" } }
+);`,
+
+  redis: `# Redis: no schema migration needed.
+# Just include sku and payment_status in new HSET commands.`,
+};
+
+const FULL_SETUP_BY_DB: Record<MainDbType, string> = {
+  supabase:   FULL_SETUP_SQL,
+  postgresql: FULL_SETUP_SQL_POSTGRESQL,
+  mysql:      FULL_SETUP_SQL_MYSQL,
+  mongodb:    FULL_SETUP_SQL_MONGODB,
+  redis:      FULL_SETUP_SQL_REDIS,
+};
 
 // Endpoint definitions
 interface EndpointDef {
@@ -918,61 +1047,114 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
   );
 };
 
-// DB setup section — Supabase full SQL at once
+// DB setup section — all 5 database types
+const DB_SETUP_META: Record<MainDbType, { title: string; hint: string; lang: string }> = {
+  supabase:   { title: 'Supabase: Create All Tables at Once',   hint: 'Open Supabase Dashboard → SQL Editor → paste below → click Run.',         lang: 'sql' },
+  postgresql: { title: 'PostgreSQL: Create All Tables at Once', hint: 'Run in your PostgreSQL client (psql, DBeaver, TablePlus, etc.).',           lang: 'sql' },
+  mysql:      { title: 'MySQL: Create All Tables at Once',      hint: 'Run in your MySQL client (MySQL Workbench, DBeaver, TablePlus, etc.).',     lang: 'sql' },
+  mongodb:    { title: 'MongoDB: Create Collections',           hint: 'Run in MongoDB Shell (mongosh) or paste in Compass → Mongosh tab.',        lang: 'js'  },
+  redis:      { title: 'Redis: Key Patterns Reference',         hint: 'No schema needed. Use these key patterns in your n8n Redis node.',         lang: 'bash'},
+};
+
 const DbSetupSection = ({ activeConn }: { activeConn: MainDbConnection | null }) => {
   const dbType = normalizeDbType(activeConn?.dbType);
   const [open, setOpen] = useState(false);
+  const [openMigration, setOpenMigration] = useState(false);
   const [copied, setCopied] = useState(false);
-  if (!activeConn || dbType !== 'supabase') return null;
+  const [copiedMig, setCopiedMig] = useState(false);
+
+  if (!activeConn) return null;
+
+  const meta = DB_SETUP_META[dbType];
+  const setupSql = FULL_SETUP_BY_DB[dbType] ?? FULL_SETUP_SQL;
+  const migSql = MIGRATION_SQL[dbType] ?? MIGRATION_SQL.supabase;
+  const dbInfo = DB_LABELS[dbType];
+
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(FULL_SETUP_SQL);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    await navigator.clipboard.writeText(setupSql);
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+    toast.success('Copied!');
   };
+  const handleCopyMig = async () => {
+    await navigator.clipboard.writeText(migSql);
+    setCopiedMig(true); setTimeout(() => setCopiedMig(false), 2000);
+    toast.success('Migration SQL copied!');
+  };
+
   return (
-    <div className="rounded-2xl border border-border bg-gradient-to-br from-muted/30 to-muted/10 overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full px-5 py-4 border-b border-border/50 flex items-center gap-3 hover:bg-muted/30 transition-colors text-left"
-        data-testid="button-toggle-db-setup"
-      >
-        <div className="h-9 w-9 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
-          <Database size={18} className="text-emerald-500" />
-        </div>
-        <div className="flex-1">
-          <h3 className="text-sm font-semibold text-foreground">Supabase: Create All Tables at Once</h3>
-          <p className="text-[11px] text-muted-foreground">
-            Run this SQL in Supabase SQL Editor — creates all tables + realtime in one click
-          </p>
-        </div>
-        <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full mr-1 whitespace-nowrap">
-          Supabase Only
-        </span>
-        {open ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
-      </button>
-      {open && (
-        <div className="p-5 space-y-3 animate-in slide-in-from-top-2 duration-200">
-          <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
-            <AlertTriangle size={13} className="text-emerald-600 mt-0.5 flex-shrink-0" />
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Open <strong>Supabase Dashboard → SQL Editor</strong> → paste the SQL below → click <strong>Run</strong>.
-              This creates handoff_requests, failed_automations, orders, ai_control, and api_keys tables.
+    <div className="space-y-2">
+      {/* Main setup */}
+      <div className="rounded-2xl border border-border bg-gradient-to-br from-muted/30 to-muted/10 overflow-hidden">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="w-full px-5 py-4 flex items-center gap-3 hover:bg-muted/30 transition-colors text-left"
+          data-testid="button-toggle-db-setup"
+        >
+          <div className="h-9 w-9 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+            <Database size={18} className="text-emerald-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">Create Table / Schema Setup</h3>
+            <p className="text-[11px] text-muted-foreground truncate">
+              {meta.hint}
             </p>
           </div>
-          <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
-            <pre className="text-[10px] font-mono text-zinc-400 p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
-              {FULL_SETUP_SQL}
-            </pre>
-            <button
-              onClick={handleCopy}
-              className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
-              data-testid="button-copy-setup-sql"
-            >
-              {copied ? <><Check size={10} /> Copied!</> : <><ClipboardCopy size={10} /> Copy All</>}
-            </button>
+          <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1 whitespace-nowrap flex items-center gap-1', dbInfo.color, 'bg-muted/50 border border-border/40')}>
+            {dbInfo.icon} {dbInfo.label}
+          </span>
+          {open ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
+        </button>
+        {open && (
+          <div className="px-5 pb-5 space-y-3 border-t border-border/50 pt-4 animate-in slide-in-from-top-2 duration-200">
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
+              <AlertTriangle size={13} className="text-emerald-600 mt-0.5 flex-shrink-0" />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">{meta.hint}</p>
+            </div>
+            <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
+              <pre className="text-[10px] font-mono text-zinc-400 p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
+                {setupSql}
+              </pre>
+              <button
+                onClick={handleCopy}
+                className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
+                data-testid="button-copy-setup-sql"
+              >
+                {copied ? <><Check size={10} /> Copied!</> : <><ClipboardCopy size={10} /> Copy All</>}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* Migration — add missing columns to existing table */}
+      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
+        <button
+          onClick={() => setOpenMigration(o => !o)}
+          className="w-full px-5 py-3.5 flex items-center gap-3 hover:bg-amber-500/5 transition-colors text-left"
+        >
+          <AlertTriangle size={15} className="text-amber-500 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <h3 className="text-xs font-semibold text-foreground">Already have the orders table?</h3>
+            <p className="text-[10px] text-muted-foreground">Run this to add missing columns (sku, payment_status, unit_price)</p>
+          </div>
+          {openMigration ? <ChevronDown size={13} className="text-muted-foreground" /> : <ChevronRight size={13} className="text-muted-foreground" />}
+        </button>
+        {openMigration && (
+          <div className="px-5 pb-4 border-t border-amber-500/20 pt-3 space-y-2 animate-in slide-in-from-top-2 duration-200">
+            <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
+              <pre className="text-[10px] font-mono text-zinc-400 p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-48">
+                {migSql}
+              </pre>
+              <button
+                onClick={handleCopyMig}
+                className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
+              >
+                {copiedMig ? <><Check size={10} /> Copied!</> : <><ClipboardCopy size={10} /> Copy</>}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
