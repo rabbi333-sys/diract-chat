@@ -1046,6 +1046,8 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
 };
 
 // DB setup section — all 5 database types
+const DB_TYPES: MainDbType[] = ['supabase', 'postgresql', 'mysql', 'mongodb', 'redis'];
+
 const DB_SETUP_META: Record<MainDbType, { title: string; hint: string; lang: string }> = {
   supabase:   { title: 'Supabase: Create All Tables at Once',   hint: 'Open Supabase Dashboard → SQL Editor → paste below → click Run.',         lang: 'sql' },
   postgresql: { title: 'PostgreSQL: Create All Tables at Once', hint: 'Run in your PostgreSQL client (psql, DBeaver, TablePlus, etc.).',           lang: 'sql' },
@@ -1055,15 +1057,15 @@ const DB_SETUP_META: Record<MainDbType, { title: string; hint: string; lang: str
 };
 
 const DbSetupSection = ({ activeConn }: { activeConn: MainDbConnection | null }) => {
-  const dbType = normalizeDbType(activeConn?.dbType);
+  const activeDbType = normalizeDbType(activeConn?.dbType);
   const [open, setOpen] = useState(false);
+  const [selectedDb, setSelectedDb] = useState<MainDbType>(activeDbType);
   const [copied, setCopied] = useState(false);
 
   if (!activeConn) return null;
 
-  const meta = DB_SETUP_META[dbType];
-  const setupSql = FULL_SETUP_BY_DB[dbType] ?? FULL_SETUP_SQL;
-  const dbInfo = DB_LABELS[dbType];
+  const meta = DB_SETUP_META[selectedDb];
+  const setupSql = FULL_SETUP_BY_DB[selectedDb] ?? FULL_SETUP_SQL;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(setupSql);
@@ -1083,32 +1085,67 @@ const DbSetupSection = ({ activeConn }: { activeConn: MainDbConnection | null })
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-semibold text-foreground">Create Table / Schema Setup</h3>
-          <p className="text-[11px] text-muted-foreground truncate">
-            {meta.hint}
-          </p>
+          <p className="text-[11px] text-muted-foreground">SQL & commands for all 5 supported databases</p>
         </div>
-        <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1 whitespace-nowrap flex items-center gap-1', dbInfo.color, 'bg-muted/50 border border-border/40')}>
-          {dbInfo.icon} {dbInfo.label}
-        </span>
-        {open ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
+        <div className="flex items-center gap-0.5 mr-1 flex-shrink-0">
+          {DB_TYPES.map(t => (
+            <span key={t} className="text-base leading-none" title={DB_LABELS[t].label}>{DB_LABELS[t].icon}</span>
+          ))}
+        </div>
+        {open ? <ChevronDown size={15} className="text-muted-foreground flex-shrink-0" /> : <ChevronRight size={15} className="text-muted-foreground flex-shrink-0" />}
       </button>
+
       {open && (
-        <div className="px-5 pb-5 space-y-3 border-t border-border/50 pt-4 animate-in slide-in-from-top-2 duration-200">
-          <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
-            <AlertTriangle size={13} className="text-emerald-600 mt-0.5 flex-shrink-0" />
-            <p className="text-[11px] text-muted-foreground leading-relaxed">{meta.hint}</p>
+        <div className="border-t border-border/50 animate-in slide-in-from-top-2 duration-200">
+          {/* Database tab pills */}
+          <div className="flex items-center gap-1.5 px-5 pt-4 pb-3 flex-wrap">
+            {DB_TYPES.map(t => {
+              const info = DB_LABELS[t];
+              const isSelected = selectedDb === t;
+              const isConnected = activeDbType === t;
+              return (
+                <button
+                  key={t}
+                  onClick={() => { setSelectedDb(t); setCopied(false); }}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors border',
+                    isSelected
+                      ? 'bg-primary/10 border-primary/30 text-primary'
+                      : 'bg-muted/40 border-border/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground'
+                  )}
+                >
+                  <span>{info.icon}</span>
+                  <span>{info.label}</span>
+                  {isConnected && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" title="Currently connected" />
+                  )}
+                </button>
+              );
+            })}
           </div>
-          <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
-            <pre className="text-[10px] font-mono text-zinc-400 p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
-              {setupSql}
-            </pre>
-            <button
-              onClick={handleCopy}
-              className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
-              data-testid="button-copy-setup-sql"
-            >
-              {copied ? <><Check size={10} /> Copied!</> : <><ClipboardCopy size={10} /> Copy All</>}
-            </button>
+
+          {/* Hint bar */}
+          <div className="px-5 pb-3">
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
+              <AlertTriangle size={13} className="text-emerald-600 mt-0.5 flex-shrink-0" />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">{meta.hint}</p>
+            </div>
+          </div>
+
+          {/* SQL / commands block */}
+          <div className="px-5 pb-5">
+            <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
+              <pre className="text-[10px] font-mono text-zinc-400 p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
+                {setupSql}
+              </pre>
+              <button
+                onClick={handleCopy}
+                className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
+                data-testid="button-copy-setup-sql"
+              >
+                {copied ? <><Check size={10} /> Copied!</> : <><ClipboardCopy size={10} /> Copy All</>}
+              </button>
+            </div>
           </div>
         </div>
       )}
