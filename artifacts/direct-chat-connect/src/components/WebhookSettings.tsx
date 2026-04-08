@@ -812,8 +812,11 @@ const SmartWebhookSection = () => {
 
 // DB setup section — Supabase full SQL at once
 const DbSetupSection = () => {
+  const activeConn = getActiveConnection();
+  const dbType: MainDbType = (activeConn?.dbType as MainDbType) || 'supabase';
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  if (dbType !== 'supabase') return null;
   const handleCopy = async () => {
     await navigator.clipboard.writeText(FULL_SETUP_SQL);
     setCopied(true);
