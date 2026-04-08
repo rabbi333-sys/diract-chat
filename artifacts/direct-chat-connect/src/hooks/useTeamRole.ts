@@ -111,7 +111,15 @@ export function useTeamRole(): TeamRole {
         setPermissions([]);
         setNotAuthorized(false);
       } catch {
-        // ignore auth errors
+        // supabase.auth failed (e.g. placeholder URL on first load) — still check guest session
+        const guest = getGuestSession();
+        if (guest) {
+          setUser(null);
+          setIsGuest(true);
+          setIsAdmin(guest.role === 'admin');
+          setPermissions(guest.permissions ?? []);
+          setNotAuthorized(false);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }

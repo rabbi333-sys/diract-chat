@@ -123,7 +123,8 @@ const InviteAccept = () => {
       await client.from('team_invites').update({ status: 'accepted' }).eq('token', tok);
 
       setStage('done');
-      setTimeout(() => navigate('/'), 1200);
+      // Full page reload so the Supabase client re-initialises with the new credentials
+      setTimeout(() => { window.location.href = '/'; }, 1200);
     } catch {
       setError('Something went wrong. Please try again.');
       setStage('error');
