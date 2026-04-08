@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
@@ -179,8 +178,7 @@ export const HandoffPanel = () => {
       </div>
 
       {/* List */}
-      <ScrollArea className="max-h-[55vh]">
-        <div className="space-y-3">
+      <div className="overflow-y-auto max-h-[55vh] pr-1 space-y-3">
           {filtered.length === 0 && (
             <div className="text-center py-16 text-muted-foreground">
               <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-4">
@@ -306,8 +304,7 @@ export const HandoffPanel = () => {
               </button>
             );
           })}
-        </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 };
