@@ -770,7 +770,7 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
               {isPostgres && <>In n8n, add a <strong>Postgres</strong> node with "Execute Query". Use the INSERT query below. Connect it using your PostgreSQL host/port/credentials.</>}
               {isMysql   && <>In n8n, add a <strong>MySQL</strong> node with "Execute Query". Use the INSERT query below. Connect it using your MySQL host/port/credentials.</>}
               {isMongo   && <>In n8n, add a <strong>MongoDB</strong> node. Use "Insert Document" operation with the document template below.</>}
-              {isRedis   && <>In n8n, add a <strong>Redis</strong> node. Use "Set" operation with the key and value patterns below.</>}
+              {isRedis   && <>In n8n, add a <strong>Redis</strong> node. Use "HSET" operation with the key pattern and field values below.</>}
             </p>
           </div>
         )}
@@ -977,27 +977,26 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
                     </>
                   )}
 
-                  {/* Redis: HSET config */}
+                  {/* Redis: key pattern + HSET code block */}
                   {isRedis && (
                     <>
                       <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">n8n Redis Node Config</p>
-                        <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/40 bg-muted/20">
-                          {[
-                            { label: 'Node Type', value: 'Redis' },
-                            { label: 'Operation', value: 'HSET' },
-                            { label: 'Key',       value: ep.redisKey },
-                            { label: 'Value',     value: ep.redisValue },
-                          ].map((row, i) => (
-                            <div key={i} className="flex items-center gap-3 px-3 py-2.5">
-                              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-20 flex-shrink-0">{row.label}</span>
-                              <code className="text-[10px] font-mono text-foreground flex-1 truncate">{row.value}</code>
-                              <button onClick={() => copy(row.value, `redis-${ep.key}-${i}`)} className="ml-auto text-muted-foreground hover:text-foreground flex-shrink-0">
-                                {copiedKey === `redis-${ep.key}-${i}` ? <Check size={9} className="text-primary" /> : <Copy size={9} />}
-                              </button>
-                            </div>
-                          ))}
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Key Pattern</p>
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 text-[10px] bg-muted/60 rounded-lg px-3 py-2 font-mono text-primary truncate">
+                            {ep.redisKey}
+                          </code>
+                          <button onClick={() => copy(ep.redisKey, `redis-key-${ep.key}`)} className="text-[10px] px-2 py-1.5 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground flex items-center gap-1 flex-shrink-0">
+                            {copiedKey === `redis-key-${ep.key}` ? <Check size={10} className="text-primary" /> : <Copy size={10} />}
+                          </button>
                         </div>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">HSET Command (n8n Redis Node → HSET operation)</p>
+                        <CodeBlock code={[
+                          `HSET ${ep.redisKey}`,
+                          ...ep.fields.map(f => `  ${f.name.padEnd(20)} "{{ $json.${f.name} }}"`)
+                        ].join(' \\\n')} />
                       </div>
                     </>
                   )}
