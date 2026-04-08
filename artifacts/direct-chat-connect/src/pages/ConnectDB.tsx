@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS orders (
   unit_price          NUMERIC,
   total_price         NUMERIC,
   amount_to_collect   NUMERIC,
+  payment_status      TEXT                 DEFAULT 'unpaid',
   status              TEXT        NOT NULL DEFAULT 'pending',
   source              TEXT,
   merchant_order_id   TEXT,

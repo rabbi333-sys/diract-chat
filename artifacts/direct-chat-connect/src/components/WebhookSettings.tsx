@@ -190,10 +190,12 @@ const ORDERS_SQL: Record<MainDbType, string> = {
   customer_phone text,
   customer_address text,
   product_name text DEFAULT 'Unknown Product',
+  sku text,
   quantity integer DEFAULT 1,
   unit_price numeric,
   total_price numeric,
   amount_to_collect numeric,
+  payment_status text DEFAULT 'unpaid',
   status text DEFAULT 'pending',
   reason_for_cancel text,
   notes text,
@@ -217,9 +219,12 @@ CREATE TABLE IF NOT EXISTS orders (
   customer_phone VARCHAR(50),
   customer_address TEXT,
   product_name VARCHAR(255) DEFAULT 'Unknown Product',
+  sku VARCHAR(255),
   quantity INTEGER DEFAULT 1,
+  unit_price NUMERIC,
   total_price NUMERIC,
   amount_to_collect NUMERIC,
+  payment_status VARCHAR(50) DEFAULT 'unpaid',
   status VARCHAR(50) DEFAULT 'pending',
   reason_for_cancel TEXT,
   notes TEXT,
@@ -235,9 +240,12 @@ CREATE TABLE IF NOT EXISTS orders (
   customer_phone VARCHAR(50),
   customer_address TEXT,
   product_name VARCHAR(255) DEFAULT 'Unknown Product',
+  sku VARCHAR(255),
   quantity INT DEFAULT 1,
+  unit_price DECIMAL(10,2),
   total_price DECIMAL(10,2),
   amount_to_collect DECIMAL(10,2),
+  payment_status VARCHAR(50) DEFAULT 'unpaid',
   status VARCHAR(50) DEFAULT 'pending',
   reason_for_cancel TEXT,
   notes TEXT,
@@ -251,8 +259,8 @@ db.createCollection("orders");`,
   redis: `# Redis key pattern for orders:
 #   order:{merchant_order_id}
 #
-# HSET order:1234 customer_name "Name" product_name "Product" total_price "3491" status "pending"
-# Or JSON: SET order:{id} '{"customer_name":"...","status":"pending"}' EX 2592000`,
+# HSET order:BI-0016 merchant_order_id "BI-0016" customer_name "Zakariea" customer_phone "01758481876" customer_address "Dhaka" product_name "Cotton Saree" sku "CSR-001" quantity "1" unit_price "3491" total_price "3491" amount_to_collect "3491" payment_status "unpaid" status "pending"
+# Or JSON: SET order:{id} '{"merchant_order_id":"BI-0016","status":"pending"}' EX 2592000`,
 };
 
 /* ── Full Supabase setup SQL (all tables at once) ───────────────── */
@@ -409,45 +417,87 @@ VALUES (
     colorBg: 'bg-amber-500/10',
     colorBorder: 'border-amber-500/25',
     fields: [
-      { name: 'customer_name',  example: 'Zakariea' },
-      { name: 'customer_phone', example: '01758481876' },
-      { name: 'product_name',   example: 'Cotton Saree' },
-      { name: 'quantity',       example: '1' },
-      { name: 'total_price',    example: '3491' },
-      { name: 'status',         example: 'pending' },
+      { name: 'merchant_order_id', example: 'BI-0016' },
+      { name: 'customer_name',     example: 'Zakariea' },
+      { name: 'customer_phone',    example: '01758481876' },
+      { name: 'customer_address',  example: 'Dhaka, Bangladesh' },
+      { name: 'product_name',      example: 'Cotton Saree' },
+      { name: 'sku',               example: 'CSR-001' },
+      { name: 'quantity',          example: '1' },
+      { name: 'unit_price',        example: '3491' },
+      { name: 'total_price',       example: '3491' },
+      { name: 'amount_to_collect', example: '3491' },
+      { name: 'payment_status',    example: 'unpaid' },
+      { name: 'status',            example: 'pending' },
     ],
-    bodyJson: { customer_name: 'Zakariea', customer_phone: '01758481876', product_name: 'Cotton Saree', quantity: 1, total_price: 3491, status: 'pending' },
+    bodyJson: {
+      merchant_order_id: 'BI-0016',
+      customer_name:     'Zakariea',
+      customer_phone:    '01758481876',
+      customer_address:  'Dhaka, Bangladesh',
+      product_name:      'Cotton Saree',
+      sku:               'CSR-001',
+      quantity:          1,
+      unit_price:        3491,
+      total_price:       3491,
+      amount_to_collect: 3491,
+      payment_status:    'unpaid',
+      status:            'pending',
+    },
     createSql: ORDERS_SQL,
     n8nInsertQuery: {
-      pg: `INSERT INTO orders (customer_name, customer_phone, product_name, quantity, total_price, status, merchant_order_id)
+      pg: `INSERT INTO orders (
+  merchant_order_id, customer_name, customer_phone, customer_address,
+  product_name, sku, quantity, unit_price, total_price, amount_to_collect,
+  payment_status, status
+)
 VALUES (
+  '{{ $json.merchant_order_id }}',
   '{{ $json.customer_name }}',
   '{{ $json.customer_phone }}',
+  '{{ $json.customer_address }}',
   '{{ $json.product_name }}',
+  '{{ $json.sku }}',
   {{ $json.quantity }},
+  {{ $json.unit_price }},
   {{ $json.total_price }},
-  '{{ $json.status }}',
-  '{{ $json.merchant_order_id }}'
+  {{ $json.amount_to_collect }},
+  '{{ $json.payment_status }}',
+  '{{ $json.status }}'
 );`,
-      mysql: `INSERT INTO orders (customer_name, customer_phone, product_name, quantity, total_price, status, merchant_order_id)
+      mysql: `INSERT INTO orders (
+  merchant_order_id, customer_name, customer_phone, customer_address,
+  product_name, sku, quantity, unit_price, total_price, amount_to_collect,
+  payment_status, status
+)
 VALUES (
+  '{{ $json.merchant_order_id }}',
   '{{ $json.customer_name }}',
   '{{ $json.customer_phone }}',
+  '{{ $json.customer_address }}',
   '{{ $json.product_name }}',
+  '{{ $json.sku }}',
   {{ $json.quantity }},
+  {{ $json.unit_price }},
   {{ $json.total_price }},
-  '{{ $json.status }}',
-  '{{ $json.merchant_order_id }}'
+  {{ $json.amount_to_collect }},
+  '{{ $json.payment_status }}',
+  '{{ $json.status }}'
 );`,
     },
     mongoDoc: `{
+  "merchant_order_id": "{{ $json.merchant_order_id }}",
   "customer_name":     "{{ $json.customer_name }}",
   "customer_phone":    "{{ $json.customer_phone }}",
+  "customer_address":  "{{ $json.customer_address }}",
   "product_name":      "{{ $json.product_name }}",
+  "sku":               "{{ $json.sku }}",
   "quantity":          {{ $json.quantity }},
+  "unit_price":        {{ $json.unit_price }},
   "total_price":       {{ $json.total_price }},
-  "status":            "{{ $json.status }}",
-  "merchant_order_id": "{{ $json.merchant_order_id }}"
+  "amount_to_collect": {{ $json.amount_to_collect }},
+  "payment_status":    "{{ $json.payment_status }}",
+  "status":            "{{ $json.status }}"
 }`,
     redisKey: 'order:{{ $json.merchant_order_id }}',
     redisValue: '{{ JSON.stringify($json) }}',
