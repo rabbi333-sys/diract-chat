@@ -281,8 +281,10 @@ export const useRecipientNames = () => {
   });
 };
 
-// Module-level set to avoid re-attempting IDs we've already tried this session
-const _autoResolveAttempted = new Set<string>();
+// TTL-based cache: maps recipient ID → timestamp of last attempt
+// IDs that failed will be retried after RETRY_TTL_MS (default: 1 hour)
+const _autoResolveAttemptedAt = new Map<string, number>();
+const RETRY_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 interface PlatformConnLike {
   platform: string;
@@ -294,6 +296,7 @@ interface PlatformConnLike {
  * Silently fetches real names from Meta Graph API for any recipients
  * whose IDs appear numeric (from Facebook/Instagram) and aren't already in `knownNames`.
  * On success, upserts to `recipient_names` in the local Supabase project.
+ * Failed IDs are retried after RETRY_TTL_MS so stale/expired tokens can be recovered.
  */
 export const useAutoResolveNames = (
   recipients: string[],
@@ -313,11 +316,18 @@ export const useAutoResolveNames = (
     const tokens = tokensKey.split(',').filter(Boolean);
     if (tokens.length === 0) return;
 
+    const now = Date.now();
     const known = knownNames ?? {};
-    const unresolved = recipients.filter(r => r && /^\d+$/.test(r) && !known[r] && !_autoResolveAttempted.has(r));
+    const unresolved = recipients.filter(r => {
+      if (!r || !/^\d+$/.test(r)) return false;
+      if (known[r]) return false;
+      const lastAttempt = _autoResolveAttemptedAt.get(r);
+      return lastAttempt === undefined || now - lastAttempt > RETRY_TTL_MS;
+    });
     if (unresolved.length === 0) return;
 
-    unresolved.forEach(r => _autoResolveAttempted.add(r));
+    // Stamp all as attempted immediately so concurrent renders don't duplicate
+    unresolved.forEach(r => _autoResolveAttemptedAt.set(r, now));
 
     Promise.all(
       unresolved.map(async (recipientId): Promise<boolean> => {
