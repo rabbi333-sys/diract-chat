@@ -500,8 +500,7 @@ const DB_LABELS: Record<MainDbType, { icon: string; label: string; color: string
   redis:      { icon: '🔴', label: 'Redis',      color: 'text-red-500' },
 };
 
-const SmartWebhookSection = () => {
-  const activeConn = useActiveConnection();
+const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | null }) => {
   const dbType = normalizeDbType(activeConn?.dbType);
   const supabaseUrl = activeConn?.url?.replace(/\/$/, '') || '';
   const anonKey = activeConn?.anonKey || '';
@@ -847,8 +846,7 @@ const SmartWebhookSection = () => {
 };
 
 // DB setup section — Supabase full SQL at once
-const DbSetupSection = () => {
-  const activeConn = useActiveConnection();
+const DbSetupSection = ({ activeConn }: { activeConn: MainDbConnection | null }) => {
   const dbType = normalizeDbType(activeConn?.dbType);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1199,10 +1197,10 @@ const WebhookSettings = () => {
     <div className="space-y-4">
 
       {/* ① Primary: DB-aware endpoints — no domain needed */}
-      <SmartWebhookSection />
+      <SmartWebhookSection activeConn={activeConn} />
 
       {/* ② DB Tables setup (Supabase: all-in-one SQL) */}
-      <DbSetupSection />
+      <DbSetupSection activeConn={activeConn} />
 
       {/* ③ API Key (Supabase only) */}
       {hasDb && (
