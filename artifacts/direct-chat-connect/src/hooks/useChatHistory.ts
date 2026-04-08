@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { format, subDays, subMonths, startOfWeek, endOfWeek } from 'date-fns';
 import {
@@ -278,6 +279,76 @@ export const useRecipientNames = () => {
       return map;
     },
   });
+};
+
+// Module-level set to avoid re-attempting IDs we've already tried this session
+const _autoResolveAttempted = new Set<string>();
+
+interface PlatformConnLike {
+  platform: string;
+  is_active: boolean;
+  access_token: string;
+}
+
+/**
+ * Silently fetches real names from Meta Graph API for any recipients
+ * whose IDs appear numeric (from Facebook/Instagram) and aren't already in `knownNames`.
+ * On success, upserts to `recipient_names` in the local Supabase project.
+ */
+export const useAutoResolveNames = (
+  recipients: string[],
+  knownNames: Record<string, string> | undefined,
+  platformConns: PlatformConnLike[]
+) => {
+  const queryClient = useQueryClient();
+
+  const recipientsKey = recipients.join(',');
+  const namesKey = Object.keys(knownNames ?? {}).join(',');
+  const tokensKey = platformConns
+    .filter(c => c.is_active && (c.platform === 'facebook' || c.platform === 'instagram') && c.access_token)
+    .map(c => c.access_token)
+    .join(',');
+
+  useEffect(() => {
+    const tokens = tokensKey.split(',').filter(Boolean);
+    if (tokens.length === 0) return;
+
+    const known = knownNames ?? {};
+    const unresolved = recipients.filter(r => r && /^\d+$/.test(r) && !known[r] && !_autoResolveAttempted.has(r));
+    if (unresolved.length === 0) return;
+
+    unresolved.forEach(r => _autoResolveAttempted.add(r));
+
+    Promise.all(
+      unresolved.map(async (recipientId): Promise<boolean> => {
+        for (const token of tokens) {
+          try {
+            const res = await fetch(
+              `https://graph.facebook.com/v19.0/${recipientId}?fields=name&access_token=${token}`
+            );
+            const data = await res.json();
+            if (data.name && !data.error) {
+              await supabase
+                .from('recipient_names')
+                .upsert(
+                  { recipient_id: recipientId, name: data.name, updated_at: new Date().toISOString() },
+                  { onConflict: 'recipient_id' }
+                );
+              return true;
+            }
+          } catch {
+            // try next token
+          }
+        }
+        return false;
+      })
+    ).then(results => {
+      if (results.some(Boolean)) {
+        queryClient.invalidateQueries({ queryKey: ['recipient-names'] });
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipientsKey, namesKey, tokensKey]);
 };
 
 // ─── useUpdateRecipientName ───────────────────────────────────────────────────

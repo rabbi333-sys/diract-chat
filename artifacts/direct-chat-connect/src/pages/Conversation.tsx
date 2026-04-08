@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useChatHistory, useRecipientNames, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
+import { useChatHistory, useRecipientNames, useAutoResolveNames, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
+import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage } from '@/components/ChatMessage';
 import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot } from 'lucide-react';
 import { useAiControl } from '@/hooks/useAiControl';
@@ -132,6 +133,12 @@ const Conversation = () => {
 
   const { aiEnabled, toggle: toggleAi, isPending: aiTogglePending } = useAiControl(sessionId);
 
+  useAutoResolveNames(
+    recipient ? [recipient] : [],
+    recipientNames,
+    platformConns
+  );
+
   const allMessages = [...(messages || []), ...localMessages];
 
   useEffect(() => {
@@ -179,6 +186,14 @@ const Conversation = () => {
       try {
         if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
         else if (fbConn) await fbPost(fbConn, recipient, { text });
+        // Persist agent reply to external DB (silent, non-blocking)
+        insertMessageToExternalDb(getStoredConnection(), {
+          session_id: sessionId || '',
+          sender: 'Agent',
+          message_text: text,
+          timestamp: new Date().toISOString(),
+          recipient,
+        });
       } catch (err: unknown) {
         revertOptimistic(id);
         toast.error(err instanceof Error ? err.message : 'Failed to send');
@@ -210,6 +225,15 @@ const Conversation = () => {
         const attachId = await fbUploadFile(fbConn, file, mediaType);
         await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
       }
+      // Persist media send to external DB (silent, non-blocking)
+      const mediaLabel = isImage ? '[image]' : isVideo ? '[video]' : '[audio]';
+      insertMessageToExternalDb(getStoredConnection(), {
+        session_id: sessionId || '',
+        sender: 'Agent',
+        message_text: mediaLabel,
+        timestamp: new Date().toISOString(),
+        recipient,
+      });
     } catch (err: unknown) {
       revertOptimistic(id);
       URL.revokeObjectURL(localUrl);
@@ -217,7 +241,7 @@ const Conversation = () => {
     } finally {
       setUploadingId(null);
     }
-  }, [activeConn, waConn, fbConn, recipient, replyingTo]);
+  }, [activeConn, waConn, fbConn, recipient, replyingTo, sessionId]);
 
   // ── Voice recording ─────────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
@@ -271,6 +295,14 @@ const Conversation = () => {
           const uploadMime = mimeType.includes('ogg') ? 'audio/ogg' : 'audio/webm';
           const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
           await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
+          // Persist voice send to external DB (silent, non-blocking)
+          insertMessageToExternalDb(getStoredConnection(), {
+            session_id: sessionId || '',
+            sender: 'Agent',
+            message_text: '[voice message]',
+            timestamp: new Date().toISOString(),
+            recipient,
+          });
         } else if (fbConn) {
           // FB doesn't support direct blob upload easily — inform user
           toast.error('Facebook does not support voice send. Use WhatsApp instead.');
@@ -285,7 +317,7 @@ const Conversation = () => {
         setUploadingId(null);
       }
     })();
-  }, [recording, activeConn, waConn, fbConn, recipient, replyingTo]);
+  }, [recording, activeConn, waConn, fbConn, recipient, replyingTo, sessionId]);
 
   const cancelRecording = useCallback(() => {
     if (!mediaRecorderRef.current) return;

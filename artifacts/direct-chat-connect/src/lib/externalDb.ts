@@ -29,7 +29,7 @@ export interface StoredConnection {
 export interface NormalizedMessage {
   id: string | number;
   session_id: string;
-  sender: 'User' | 'AI';
+  sender: 'User' | 'AI' | 'Agent';
   message_text: string;
   timestamp: string;
   recipient?: string;
@@ -88,9 +88,10 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
   if (raw.sender !== undefined && raw.message_text !== undefined) {
     const s = String(raw.sender).toLowerCase();
     const isHuman = ['user', 'human', 'customer'].includes(s);
+    const isAgent = ['agent', 'human_agent', 'operator'].includes(s);
     const text = String(raw.message_text ?? '');
     if (!text.trim()) return null;
-    return { id, session_id, sender: isHuman ? 'User' : 'AI', message_text: text, timestamp, recipient };
+    return { id, session_id, sender: isHuman ? 'User' : isAgent ? 'Agent' : 'AI', message_text: text, timestamp, recipient };
   }
 
   // Role-based: { role, content }
@@ -205,6 +206,38 @@ export async function queryExternalSupabase(
   return ((data ?? []) as Record<string, unknown>[])
     .map(normalizeRow)
     .filter(Boolean) as NormalizedMessage[];
+}
+
+// ─── Insert agent reply into external DB ─────────────────────────────────────
+
+export interface AgentMessage {
+  session_id: string;
+  sender: 'Agent';
+  message_text: string;
+  timestamp: string;
+  recipient?: string;
+}
+
+/**
+ * Silently writes an agent reply to the user's connected external database.
+ * Only Supabase is supported via browser-side direct connection.
+ * All errors are caught and suppressed — this must never block the send flow.
+ */
+export async function insertMessageToExternalDb(
+  conn: StoredConnection | null,
+  message: AgentMessage
+): Promise<void> {
+  if (!conn || conn.db_type !== 'supabase') return;
+  try {
+    const url = conn.supabase_url?.trim();
+    const key = conn.service_role_key?.trim();
+    const tbl = (conn.table_name?.trim()) || 'n8n_chat_histories';
+    if (!url || !key) return;
+    const client = getExternalClient(url, key);
+    await client.from(tbl).insert({ ...message });
+  } catch {
+    // Silent — never surface DB write errors to the agent
+  }
 }
 
 // ─── Validate connection (for Settings page) ─────────────────────────────────

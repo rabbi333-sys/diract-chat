@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useSessions, useRecipientNames, useUpdateRecipientName, fetchMessages, SessionInfo } from '@/hooks/useChatHistory';
+import { useSessions, useRecipientNames, useUpdateRecipientName, useAutoResolveNames, fetchMessages, SessionInfo } from '@/hooks/useChatHistory';
+import { usePlatformConnections } from '@/hooks/usePlatformConnections';
 import { Search, RefreshCw, Pencil, Check, X, MessageCircle, MessagesSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -33,8 +34,15 @@ export const SessionList = () => {
   const queryClient = useQueryClient();
   const { data: sessions, isLoading, refetch, isFetching } = useSessions();
   const { data: recipientNames } = useRecipientNames();
+  const { data: platformConns = [] } = usePlatformConnections();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'active'>('all');
+
+  useAutoResolveNames(
+    sessions?.map(s => s.recipient) ?? [],
+    recipientNames,
+    platformConns
+  );
 
   const prefetchSession = useCallback((sessionId: string) => {
     queryClient.prefetchQuery({
