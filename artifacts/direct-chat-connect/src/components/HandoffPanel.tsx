@@ -143,7 +143,7 @@ export const HandoffPanel = () => {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Local webhook badge */}
       {localCount > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/8 border border-primary/20">
@@ -178,7 +178,7 @@ export const HandoffPanel = () => {
       </div>
 
       {/* List */}
-      <div className="overflow-y-auto max-h-[55vh] pr-1 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
           {filtered.length === 0 && (
             <div className="text-center py-16 text-muted-foreground">
               <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-4">

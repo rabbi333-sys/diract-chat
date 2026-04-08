@@ -372,9 +372,9 @@ const Index = () => {
 
         {/* Handoff Page */}
         {activeNav === 'Handoff' && canView('Handoff') && (
-          <main className="flex-1 overflow-auto">
-            <div className="p-4 md:p-6 max-w-3xl">
-              <h2 className="text-lg md:text-xl font-bold text-foreground mb-4">{t('handoffTitle')}</h2>
+          <main className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex flex-col flex-1 min-h-0 p-4 md:p-6 max-w-3xl w-full">
+              <h2 className="text-lg md:text-xl font-bold text-foreground mb-4 flex-shrink-0">{t('handoffTitle')}</h2>
               <HandoffPanel />
             </div>
           </main>
@@ -382,9 +382,9 @@ const Index = () => {
 
         {/* Failed Automations Page */}
         {activeNav === 'Failed' && canView('Failed') && (
-          <main className="flex-1 overflow-auto">
-            <div className="p-4 md:p-6 max-w-3xl">
-              <h2 className="text-lg md:text-xl font-bold text-foreground mb-4">{t('failedTitle')}</h2>
+          <main className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex flex-col flex-1 min-h-0 p-4 md:p-6 max-w-3xl w-full">
+              <h2 className="text-lg md:text-xl font-bold text-foreground mb-4 flex-shrink-0">{t('failedTitle')}</h2>
               <FailedPanel />
             </div>
           </main>
