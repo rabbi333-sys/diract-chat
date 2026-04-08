@@ -143,7 +143,7 @@ export const HandoffPanel = () => {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-4">
       {/* Local webhook badge */}
       {localCount > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/8 border border-primary/20">

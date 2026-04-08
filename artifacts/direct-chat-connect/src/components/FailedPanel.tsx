@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { AlertOctagon, CheckCircle, Clock, XCircle, AlertTriangle, RotateCcw, Webhook } from 'lucide-react';
@@ -128,7 +127,7 @@ export const FailedPanel = () => {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-4">
       {localActiveCount > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-destructive/8 border border-destructive/20">
           <Webhook size={13} className="text-destructive flex-shrink-0" />
@@ -162,8 +161,7 @@ export const FailedPanel = () => {
       </div>
 
       {/* List */}
-      <ScrollArea className="max-h-[55vh]">
-        <div className="space-y-3">
+      <div className="overflow-y-auto max-h-[55vh] pr-1 space-y-3">
           {filtered.length === 0 && (
             <div className="text-center py-16 text-muted-foreground">
               <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-4">
@@ -278,8 +276,7 @@ export const FailedPanel = () => {
               </button>
             );
           })}
-        </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 };
