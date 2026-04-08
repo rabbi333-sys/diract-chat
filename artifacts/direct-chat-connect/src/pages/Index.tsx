@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { AiControlGuide } from '@/components/AiControlGuide';
 import { getActiveConnection } from '@/lib/db-config';
+import { clearGuestSession } from '@/lib/guestSession';
 import { toast } from 'sonner';
 import { SessionList } from '@/components/SessionList';
 import { AnalyticsCard } from '@/components/AnalyticsCard';
@@ -176,7 +177,7 @@ const Index = () => {
             </p>
           </div>
           <button
-            onClick={() => { supabase.auth.signOut(); navigate('/'); }}
+            onClick={() => { clearGuestSession(); supabase.auth.signOut(); navigate('/'); }}
             className="text-sm text-primary hover:underline"
           >
             {t('signOut')}

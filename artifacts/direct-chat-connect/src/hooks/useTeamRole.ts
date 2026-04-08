@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
+import { getGuestSession } from '@/lib/guestSession';
 
 export interface TeamRole {
   user: User | null;
@@ -10,6 +11,7 @@ export interface TeamRole {
   displayName: string;
   initials: string;
   loading: boolean;
+  isGuest: boolean;
 }
 
 function getInitials(name: string): string {
@@ -34,6 +36,7 @@ export function useTeamRole(): TeamRole {
   const [permissions, setPermissions] = useState<string[]>([]);
   const [notAuthorized, setNotAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,60 +46,70 @@ export function useTeamRole(): TeamRole {
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (cancelled) return;
 
-        if (!authUser) {
-          setUser(null);
-          setLoading(false);
-          return;
-        }
+        // ── Supabase authenticated user ──────────────────────────────────
+        if (authUser) {
+          setUser(authUser);
+          setIsGuest(false);
 
-        setUser(authUser);
+          try {
+            const { data: ownerRow, error: ownerError } = await supabase
+              .from('app_owner')
+              .select('user_id')
+              .eq('user_id', authUser.id)
+              .maybeSingle();
 
-        try {
-          // Step 1: Read-only check — is this user the pre-configured dashboard owner?
-          // Ownership is set externally (Supabase SQL editor or admin script), never claimed
-          // automatically by the client at runtime.
-          const { data: ownerRow, error: ownerError } = await supabase
-            .from('app_owner')
-            .select('user_id')
-            .eq('user_id', authUser.id)
-            .maybeSingle();
+            if (cancelled) return;
 
-          if (cancelled) return;
+            if (!ownerError && ownerRow) {
+              setIsAdmin(true);
+              setPermissions([]);
+              setNotAuthorized(false);
+              return;
+            }
 
-          if (!ownerError && ownerRow) {
-            setIsAdmin(true);
-            setPermissions([]);
-            setNotAuthorized(false);
-            return;
-          }
+            const { data: invite, error: inviteError } = await supabase
+              .from('team_invites')
+              .select('role, permissions')
+              .eq('accepted_user_id', authUser.id)
+              .eq('status', 'accepted')
+              .maybeSingle();
 
-          // Step 2: Not the owner — look for an accepted invite
-          const { data: invite, error: inviteError } = await supabase
-            .from('team_invites')
-            .select('role, permissions')
-            .eq('accepted_user_id', authUser.id)
-            .eq('status', 'accepted')
-            .maybeSingle();
+            if (cancelled) return;
 
-          if (cancelled) return;
-
-          if (!inviteError && invite) {
-            setIsAdmin(invite.role === 'admin');
-            setPermissions(invite.permissions ?? []);
-            setNotAuthorized(false);
-          } else {
-            // No owner record AND no accepted invite → not authorized
+            if (!inviteError && invite) {
+              setIsAdmin(invite.role === 'admin');
+              setPermissions(invite.permissions ?? []);
+              setNotAuthorized(false);
+            } else {
+              setIsAdmin(false);
+              setPermissions([]);
+              setNotAuthorized(true);
+            }
+          } catch {
             setIsAdmin(false);
             setPermissions([]);
             setNotAuthorized(true);
           }
-        } catch {
-          // Any unexpected error (network, missing table, etc.) → deny access.
-          // Never grant admin on an exception — always fail closed.
-          setIsAdmin(false);
-          setPermissions([]);
-          setNotAuthorized(true);
+          return;
         }
+
+        // ── No Supabase session — check for guest invite session ─────────
+        const guest = getGuestSession();
+        if (guest) {
+          setUser(null);
+          setIsGuest(true);
+          setIsAdmin(guest.role === 'admin');
+          setPermissions(guest.permissions ?? []);
+          setNotAuthorized(false);
+          return;
+        }
+
+        // No auth and no guest session
+        setUser(null);
+        setIsGuest(false);
+        setIsAdmin(false);
+        setPermissions([]);
+        setNotAuthorized(false);
       } catch {
         // ignore auth errors
       } finally {
@@ -116,8 +129,11 @@ export function useTeamRole(): TeamRole {
     };
   }, []);
 
-  const displayName = user ? getDisplayName(user) : 'User';
+  // Guest display name from email
+  const guest = getGuestSession();
+  const guestDisplayName = guest?.email?.split('@')[0] ?? 'Guest';
+  const displayName = isGuest ? guestDisplayName : (user ? getDisplayName(user) : 'User');
   const initials = getInitials(displayName);
 
-  return { user, isAdmin, permissions, notAuthorized, displayName, initials, loading };
+  return { user, isAdmin, permissions, notAuthorized, displayName, initials, loading, isGuest };
 }

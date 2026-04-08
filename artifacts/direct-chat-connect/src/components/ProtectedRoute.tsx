@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { Navigate } from "react-router-dom";
 import { hasActiveConnection } from "@/lib/db-config";
+import { isGuestSessionActive } from "@/lib/guestSession";
 import Login from "@/pages/Login";
 
 interface ProtectedRouteProps {
@@ -51,6 +52,11 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
         </div>
       </div>
     );
+  }
+
+  // Allow guest invite sessions — no Supabase account required
+  if (!user && isGuestSessionActive()) {
+    return <>{children}</>;
   }
 
   if (!user) {

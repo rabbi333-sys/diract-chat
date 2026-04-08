@@ -15,6 +15,7 @@ import {
   deleteConnection, MAX_CONNECTIONS, MainDbConnection,
   DB_TYPES, getConnectionDisplayUrl,
 } from '@/lib/db-config';
+import { clearGuestSession } from '@/lib/guestSession';
 
 type Invite = {
   id: string;
@@ -211,7 +212,11 @@ const Profile = () => {
     } finally { setIsSavingName(false); }
   };
 
-  const handleSignOut = async () => { await supabase.auth.signOut(); navigate('/'); };
+  const handleSignOut = async () => {
+    clearGuestSession();
+    await supabase.auth.signOut();
+    navigate('/');
+  };
 
   const togglePerm = (key: string) =>
     setInvitePerms((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
