@@ -1,5 +1,11 @@
 export type MainDbType = 'supabase' | 'postgresql' | 'mysql' | 'mongodb' | 'redis';
 
+const VALID_DB_TYPE_SET = new Set<string>(['supabase', 'postgresql', 'mysql', 'mongodb', 'redis']);
+
+export function normalizeDbType(raw: string | undefined | null): MainDbType {
+  return (raw && VALID_DB_TYPE_SET.has(raw)) ? (raw as MainDbType) : 'supabase';
+}
+
 export interface MainDbConnection {
   id: string;
   name: string;
@@ -28,8 +34,8 @@ export function getConnections(): MainDbConnection[] {
     const raw = localStorage.getItem(CONNECTIONS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    // Backward compat: old entries without dbType default to 'supabase'
-    return parsed.map((c: MainDbConnection) => ({ ...c, dbType: (c.dbType || 'supabase') as MainDbType }));
+    // Normalize and back-fill dbType at the read boundary
+    return parsed.map((c: MainDbConnection) => ({ ...c, dbType: normalizeDbType(c.dbType) }));
   }
   catch { return []; }
 }
@@ -110,12 +116,6 @@ export const DB_TYPES: { value: MainDbType; icon: string; label: string; default
   { value: 'mongodb',     icon: '🍃', label: 'MongoDB',    defaultPort: '27017' },
   { value: 'redis',       icon: '🔴', label: 'Redis',      defaultPort: '6379' },
 ];
-
-const VALID_DB_TYPES = new Set<MainDbType>(['supabase', 'postgresql', 'mysql', 'mongodb', 'redis']);
-
-export function normalizeDbType(raw: string | undefined | null): MainDbType {
-  return (raw && VALID_DB_TYPES.has(raw as MainDbType)) ? (raw as MainDbType) : 'supabase';
-}
 
 export function getDbTypeInfo(dbType?: MainDbType) {
   return DB_TYPES.find(t => t.value === (dbType || 'supabase')) ?? DB_TYPES[0];
