@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { getActiveConnection, MainDbType } from '@/lib/db-config';
+import { getActiveConnection, onDbChange, MainDbType, MainDbConnection } from '@/lib/db-config';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
@@ -10,6 +10,13 @@ import {
   ClipboardCopy, Database, Webhook, Zap, Globe, Pencil, Save, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// Reactive hook: re-renders callers whenever active DB connection changes
+function useActiveConnection(): MainDbConnection | null {
+  const [conn, setConn] = useState<MainDbConnection | null>(() => getActiveConnection());
+  useEffect(() => onDbChange(() => setConn(getActiveConnection())), []);
+  return conn;
+}
 
 /* ── Published URL (localStorage) ─────────────────────────────────── */
 const PUBLISHED_URL_KEY = 'meta_automation_published_url';
@@ -44,6 +51,7 @@ const HANDOFF_SQL: Record<MainDbType, string> = {
   created_at timestamptz DEFAULT now() NOT NULL
 );
 ALTER TABLE public.handoff_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all" ON public.handoff_requests;
 CREATE POLICY "Allow all" ON public.handoff_requests FOR ALL USING (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE public.handoff_requests;`,
 
@@ -117,6 +125,7 @@ const FAILURES_SQL: Record<MainDbType, string> = {
   created_at timestamptz DEFAULT now() NOT NULL
 );
 ALTER TABLE public.failed_automations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all" ON public.failed_automations;
 CREATE POLICY "Allow all" ON public.failed_automations FOR ALL USING (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE public.failed_automations;`,
 
@@ -176,6 +185,7 @@ const ORDERS_SQL: Record<MainDbType, string> = {
   created_at timestamptz DEFAULT now() NOT NULL
 );
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all" ON public.orders;
 CREATE POLICY "Allow all" ON public.orders FOR ALL USING (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;`,
 
@@ -245,6 +255,7 @@ CREATE TABLE IF NOT EXISTS public.ai_control (
   updated_at timestamptz DEFAULT now()
 );
 ALTER TABLE public.ai_control ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for ai_control" ON public.ai_control;
 CREATE POLICY "Allow all for ai_control" ON public.ai_control FOR ALL USING (true);
 
 -- 5. API Keys
@@ -257,6 +268,7 @@ CREATE TABLE IF NOT EXISTS public.api_keys (
   updated_at timestamptz DEFAULT now() NOT NULL
 );
 ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users manage own api keys" ON public.api_keys;
 CREATE POLICY "Users manage own api keys" ON public.api_keys
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);`;
 
@@ -473,7 +485,7 @@ const DB_LABELS: Record<MainDbType, { icon: string; label: string; color: string
 };
 
 const SmartWebhookSection = () => {
-  const activeConn = getActiveConnection();
+  const activeConn = useActiveConnection();
   const dbType: MainDbType = (activeConn?.dbType as MainDbType) || 'supabase';
   const supabaseUrl = activeConn?.url?.replace(/\/$/, '') || '';
   const anonKey = activeConn?.anonKey || '';
@@ -820,7 +832,7 @@ const SmartWebhookSection = () => {
 
 // DB setup section — Supabase full SQL at once
 const DbSetupSection = () => {
-  const activeConn = getActiveConnection();
+  const activeConn = useActiveConnection();
   const dbType: MainDbType = (activeConn?.dbType as MainDbType) || 'supabase';
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1058,6 +1070,7 @@ const API_KEYS_SQL = `CREATE TABLE IF NOT EXISTS public.api_keys (
   updated_at timestamptz DEFAULT now() NOT NULL
 );
 ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users manage own api keys" ON public.api_keys;
 CREATE POLICY "Users manage own api keys" ON public.api_keys
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);`;
 

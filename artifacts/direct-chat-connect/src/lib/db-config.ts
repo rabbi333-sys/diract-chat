@@ -40,6 +40,17 @@ export function getActiveConnection(): MainDbConnection | null {
   return connections.find(c => c.id === activeId) || connections[0] || null;
 }
 
+const DB_CHANGE_EVENT = 'meta_db_change';
+
+function notifyChange() {
+  window.dispatchEvent(new CustomEvent(DB_CHANGE_EVENT));
+}
+
+export function onDbChange(handler: () => void): () => void {
+  window.addEventListener(DB_CHANGE_EVENT, handler);
+  return () => window.removeEventListener(DB_CHANGE_EVENT, handler);
+}
+
 export function saveConnection(conn: Omit<MainDbConnection, 'id' | 'createdAt'> & { id?: string }): MainDbConnection {
   const connections = getConnections();
   const existingIdx = conn.id ? connections.findIndex(c => c.id === conn.id) : -1;
@@ -48,6 +59,7 @@ export function saveConnection(conn: Omit<MainDbConnection, 'id' | 'createdAt'> 
     const updated = { ...connections[existingIdx], ...conn, id: connections[existingIdx].id };
     connections[existingIdx] = updated;
     localStorage.setItem(CONNECTIONS_KEY, JSON.stringify(connections));
+    notifyChange();
     return updated;
   }
 
@@ -62,11 +74,13 @@ export function saveConnection(conn: Omit<MainDbConnection, 'id' | 'createdAt'> 
   };
   connections.push(newConn);
   localStorage.setItem(CONNECTIONS_KEY, JSON.stringify(connections));
+  notifyChange();
   return newConn;
 }
 
 export function setActiveConnection(id: string): void {
   localStorage.setItem(ACTIVE_ID_KEY, id);
+  notifyChange();
 }
 
 export function deleteConnection(id: string): void {
@@ -78,6 +92,7 @@ export function deleteConnection(id: string): void {
     if (next) localStorage.setItem(ACTIVE_ID_KEY, next.id);
     else localStorage.removeItem(ACTIVE_ID_KEY);
   }
+  notifyChange();
 }
 
 export function hasActiveConnection(): boolean {
