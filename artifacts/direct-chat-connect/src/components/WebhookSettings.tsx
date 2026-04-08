@@ -25,11 +25,9 @@ function usePublishedUrl() {
   return { url, save };
 }
 
-/* ══════════════════════════════════════════════════════════════
-   TABLE CREATION SQL — per DB type, per table
-══════════════════════════════════════════════════════════════ */
+// Table creation SQL — per DB type, per table
 
-/* handoff_requests */
+// handoff_requests
 const HANDOFF_SQL: Record<MainDbType, string> = {
   supabase: `CREATE TABLE IF NOT EXISTS public.handoff_requests (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -262,9 +260,7 @@ ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users manage own api keys" ON public.api_keys
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);`;
 
-/* ══════════════════════════════════════════════════════════════
-   ENDPOINT DEFINITIONS
-══════════════════════════════════════════════════════════════ */
+// Endpoint definitions
 interface EndpointDef {
   key: string;
   label: string;
@@ -423,9 +419,7 @@ VALUES (
   },
 ];
 
-/* ══════════════════════════════════════════════════════════════
-   HELPER COMPONENTS
-══════════════════════════════════════════════════════════════ */
+// Helper components
 const CodeBlock = ({ code, maxH = 'max-h-52' }: { code: string; maxH?: string }) => {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -468,9 +462,7 @@ const FieldsGrid = ({ fields, copiedKey, onCopy }: {
   </div>
 );
 
-/* ══════════════════════════════════════════════════════════════
-   SMART WEBHOOK SECTION (Primary — DB-aware, no domain needed)
-══════════════════════════════════════════════════════════════ */
+// Primary section: DB-aware, no domain needed
 
 const DB_LABELS: Record<MainDbType, { icon: string; label: string; color: string }> = {
   supabase:   { icon: '⚡', label: 'Supabase',   color: 'text-emerald-600' },
@@ -595,31 +587,40 @@ const SmartWebhookSection = () => {
           return (
             <div key={ep.key} className={cn('rounded-xl border bg-background overflow-hidden', ep.colorBorder, noConn && 'opacity-50 pointer-events-none')}>
 
-              {/* Card header */}
-              <button
-                onClick={() => setOpenEp(isOpen ? null : ep.key)}
-                className="w-full flex items-center gap-2.5 px-3.5 py-3 hover:bg-muted/30 transition-colors text-left"
-              >
-                <div className={cn('h-6 w-6 rounded-lg flex items-center justify-center flex-shrink-0', ep.colorBg)}>
-                  <Webhook size={12} className={ep.colorText} />
-                </div>
-                <span className={cn('text-[11px] font-bold flex-shrink-0', ep.colorText)}>{ep.label}</span>
-                <code className="flex-1 text-[10px] font-mono text-muted-foreground truncate min-w-0">
-                  {isSupabase
-                    ? (supabaseUrl ? `→ /rest/v1/${ep.table}` : `→ /rest/v1/${ep.table}`)
-                    : `→ ${ep.table}`}
-                </code>
-                {isSupabase && supabaseUrl && (
+              {/* Card header — split into clickable toggle area + action buttons to avoid nested buttons */}
+              <div className="flex items-center gap-2.5 px-3.5 py-3 hover:bg-muted/30 transition-colors">
+                <button
+                  onClick={() => setOpenEp(isOpen ? null : ep.key)}
+                  className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
+                  aria-expanded={isOpen}
+                >
+                  <div className={cn('h-6 w-6 rounded-lg flex items-center justify-center flex-shrink-0', ep.colorBg)}>
+                    <Webhook size={12} className={ep.colorText} />
+                  </div>
+                  <span className={cn('text-[11px] font-bold flex-shrink-0', ep.colorText)}>{ep.label}</span>
+                  <code className="flex-1 text-[10px] font-mono text-muted-foreground truncate min-w-0">
+                    {`→ /rest/v1/${ep.table}`}
+                  </code>
+                </button>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {isSupabase && supabaseUrl && (
+                    <button
+                      onClick={() => copy(restUrl, `${ep.key}-url`)}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground text-[10px] font-semibold transition-colors"
+                    >
+                      {copiedKey === `${ep.key}-url` ? <Check size={10} className="text-primary" /> : <Copy size={10} />}
+                      URL
+                    </button>
+                  )}
                   <button
-                    onClick={e => { e.stopPropagation(); copy(restUrl, `${ep.key}-url`); }}
-                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground text-[10px] font-semibold flex-shrink-0 transition-colors"
+                    onClick={() => setOpenEp(isOpen ? null : ep.key)}
+                    className="flex items-center justify-center w-5 h-5"
+                    aria-label={isOpen ? 'Collapse' : 'Expand'}
                   >
-                    {copiedKey === `${ep.key}-url` ? <Check size={10} className="text-primary" /> : <Copy size={10} />}
-                    URL
+                    {isOpen ? <ChevronDown size={13} className="text-muted-foreground" /> : <ChevronRight size={13} className="text-muted-foreground" />}
                   </button>
-                )}
-                {isOpen ? <ChevronDown size={13} className="text-muted-foreground flex-shrink-0" /> : <ChevronRight size={13} className="text-muted-foreground flex-shrink-0" />}
-              </button>
+                </div>
+              </div>
 
               {/* Expanded content */}
               {isOpen && (
@@ -809,9 +810,7 @@ const SmartWebhookSection = () => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════
-   DB SETUP SECTION (collapsed, full SQL at once for Supabase)
-══════════════════════════════════════════════════════════════ */
+// DB setup section — Supabase full SQL at once
 const DbSetupSection = () => {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -868,9 +867,7 @@ const DbSetupSection = () => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════
-   ADVANCED: HTTP Webhooks (collapsed, requires published URL)
-══════════════════════════════════════════════════════════════ */
+// Advanced section: traditional HTTP webhooks (requires deployed URL)
 const AdvancedHttpSection = () => {
   const [open, setOpen] = useState(false);
   const { url: publishedUrl, save: savePublishedUrl } = usePublishedUrl();
@@ -1040,9 +1037,7 @@ const AdvancedHttpSection = () => {
   );
 };
 
-/* ══════════════════════════════════════════════════════════════
-   API KEY SECTION
-══════════════════════════════════════════════════════════════ */
+// API key section
 const API_KEYS_SQL = `CREATE TABLE IF NOT EXISTS public.api_keys (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
@@ -1061,9 +1056,7 @@ function genApiKey(): string {
     .join('');
 }
 
-/* ══════════════════════════════════════════════════════════════
-   MAIN EXPORT
-══════════════════════════════════════════════════════════════ */
+// Main export
 const WebhookSettings = () => {
   const queryClient = useQueryClient();
   const [showKey, setShowKey] = useState(false);
