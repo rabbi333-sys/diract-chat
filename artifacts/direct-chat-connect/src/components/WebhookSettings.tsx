@@ -65,7 +65,7 @@ DROP POLICY IF EXISTS "Allow all" ON public.handoff_requests;
 -- Dev policy: allows public insert from n8n/webhooks.
 -- Production: use service_role key in n8n (bypasses RLS) and tighten this policy.
 CREATE POLICY "Allow all" ON public.handoff_requests FOR ALL USING (true);
-ALTER PUBLICATION supabase_realtime ADD TABLE public.handoff_requests;`,
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.handoff_requests; EXCEPTION WHEN OTHERS THEN NULL; END $$;`,
 
   postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
 CREATE TABLE IF NOT EXISTS handoff_requests (
@@ -143,7 +143,7 @@ DROP POLICY IF EXISTS "Allow all" ON public.failed_automations;
 -- Dev policy: allows public insert from n8n/webhooks.
 -- Production: use service_role key in n8n (bypasses RLS) and tighten this policy.
 CREATE POLICY "Allow all" ON public.failed_automations FOR ALL USING (true);
-ALTER PUBLICATION supabase_realtime ADD TABLE public.failed_automations;`,
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.failed_automations; EXCEPTION WHEN OTHERS THEN NULL; END $$;`,
 
   postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
 CREATE TABLE IF NOT EXISTS failed_automations (
@@ -207,7 +207,7 @@ DROP POLICY IF EXISTS "Allow all" ON public.orders;
 -- Dev policy: allows public insert from n8n/webhooks.
 -- Production: use service_role key in n8n (bypasses RLS) and tighten this policy.
 CREATE POLICY "Allow all" ON public.orders FOR ALL USING (true);
-ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;`,
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.orders; EXCEPTION WHEN OTHERS THEN NULL; END $$;`,
 
   postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
 CREATE TABLE IF NOT EXISTS orders (
