@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSessions, useRecipientNames, useUpdateRecipientName, useAutoResolveNames, fetchMessages, SessionInfo } from '@/hooks/useChatHistory';
@@ -43,6 +43,20 @@ export const SessionList = () => {
     recipientNames,
     platformConns
   );
+
+  // After sessions data loads, give the background name-extraction 3 seconds to settle,
+  // then invalidate the recipient-names cache so newly extracted names appear in the UI.
+  const sessionsKeyRef = useRef('');
+  useEffect(() => {
+    if (!sessions) return;
+    const key = sessions.map(s => s.recipient).join(',');
+    if (key === sessionsKeyRef.current) return;
+    sessionsKeyRef.current = key;
+    const timer = setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ['recipient-names'] });
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [sessions, queryClient]);
 
   const prefetchSession = useCallback((sessionId: string) => {
     queryClient.prefetchQuery({

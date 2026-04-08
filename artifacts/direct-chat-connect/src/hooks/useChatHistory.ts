@@ -267,7 +267,7 @@ export const useSessions = (filterDate?: Date | null) => {
 export const useRecipientNames = () => {
   return useQuery({
     queryKey: ['recipient-names'],
-    staleTime: 5 * 60_000,   // 5 min — names rarely change
+    staleTime: 30_000,       // 30s — pick up newly extracted names quickly
     gcTime: 30 * 60_000,
     queryFn: async () => {
       const { data, error } = await supabase

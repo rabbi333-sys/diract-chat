@@ -77,11 +77,12 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     const msg = raw.message as Record<string, unknown>;
     const type = String(msg.type ?? '').toLowerCase();
     const isHuman = type === 'human' || type === 'user';
+    const isAgent = type === 'agent' || type === 'human_agent';
     const text = isHuman
       ? String(msg.content ?? msg.text ?? msg.body ?? '')
       : String(msg.output ?? msg.content ?? msg.text ?? msg.body ?? '');
     if (!text.trim()) return null;
-    return { id, session_id, sender: isHuman ? 'User' : 'AI', message_text: text, timestamp, recipient };
+    return { id, session_id, sender: isHuman ? 'User' : isAgent ? 'Agent' : 'AI', message_text: text, timestamp, recipient };
   }
 
   // Normalized: { sender, message_text }
@@ -166,6 +167,58 @@ function getExternalClient(url: string, key: string) {
   return client;
 }
 
+// ─── Auto-extract contact names from raw DB rows ─────────────────────────────
+
+const _NAME_FIELDS = ['name', 'sender_name', 'contact_name', 'profile_name', 'from_name', 'display_name', 'customer_name'] as const;
+
+/**
+ * Scans raw database rows for any contact name fields and upserts them
+ * into the local Supabase `recipient_names` table.
+ * Runs as a silent background side-effect — all errors are swallowed.
+ */
+async function autoExtractAndSaveNames(rows: Record<string, unknown>[]): Promise<void> {
+  const toSave: { recipient_id: string; name: string; updated_at: string }[] = [];
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    const sessionId = String(row.session_id ?? '').trim();
+    if (!sessionId || seen.has(sessionId)) continue;
+    if (!/^\d+$/.test(sessionId)) continue; // only pure-numeric IDs (phone numbers / PSIDs)
+
+    let name = '';
+
+    // 1. Check top-level name fields
+    for (const field of _NAME_FIELDS) {
+      const val = row[field];
+      if (typeof val === 'string' && val.trim() && val.trim() !== sessionId) {
+        name = val.trim();
+        break;
+      }
+    }
+
+    // 2. Check inside message JSONB (n8n format)
+    if (!name && row.message && typeof row.message === 'object') {
+      const msg = row.message as Record<string, unknown>;
+      const addl = msg.additional_kwargs;
+      const addlName = typeof addl === 'object' && addl ? (addl as Record<string, unknown>).name : undefined;
+      for (const c of [msg.name, msg.from_name, msg.sender_name, addlName]) {
+        if (typeof c === 'string' && c.trim() && c.trim() !== sessionId) {
+          name = c.trim();
+          break;
+        }
+      }
+    }
+
+    if (name) {
+      seen.add(sessionId);
+      toSave.push({ recipient_id: sessionId, name, updated_at: new Date().toISOString() });
+    }
+  }
+
+  if (toSave.length === 0) return;
+  await localSupabase.from('recipient_names').upsert(toSave, { onConflict: 'recipient_id' });
+}
+
 // ─── Direct Supabase query (browser-safe, no edge function) ──────────────────
 
 export async function queryExternalSupabase(
@@ -203,9 +256,15 @@ export async function queryExternalSupabase(
     throw new Error(msg || 'Unknown Supabase error');
   }
 
-  return ((data ?? []) as Record<string, unknown>[])
-    .map(normalizeRow)
-    .filter(Boolean) as NormalizedMessage[];
+  const rows = (data ?? []) as Record<string, unknown>[];
+
+  // Side effect: extract contact names from raw data and save to local recipient_names table.
+  // Only runs for full session fetches (not filtered single-session message fetches).
+  if (!sessionId && rows.length > 0) {
+    autoExtractAndSaveNames(rows).catch(() => {});
+  }
+
+  return rows.map(normalizeRow).filter(Boolean) as NormalizedMessage[];
 }
 
 // ─── Insert agent reply into external DB ─────────────────────────────────────
@@ -221,6 +280,11 @@ export interface AgentMessage {
 /**
  * Silently writes an agent reply to the user's connected external database.
  * Only Supabase is supported via browser-side direct connection.
+ *
+ * Tries two formats in sequence:
+ *  1) n8n native format:   { session_id, message: { type: 'agent', output: text } }
+ *  2) Normalized format:   { session_id, sender: 'agent', message_text: text, ... }
+ *
  * All errors are caught and suppressed — this must never block the send flow.
  */
 export async function insertMessageToExternalDb(
@@ -234,7 +298,23 @@ export async function insertMessageToExternalDb(
     const tbl = (conn.table_name?.trim()) || 'n8n_chat_histories';
     if (!url || !key) return;
     const client = getExternalClient(url, key);
-    await client.from(tbl).insert({ ...message });
+
+    // Try 1: n8n native format — used by n8n_chat_histories (message JSONB column)
+    const { error: e1 } = await client.from(tbl).insert({
+      session_id: message.session_id,
+      message: { type: 'agent', output: message.message_text },
+    });
+
+    if (e1) {
+      // Try 2: Normalized format — for custom tables with sender / message_text columns
+      await client.from(tbl).insert({
+        session_id: message.session_id,
+        sender: 'agent',
+        message_text: message.message_text,
+        recipient: message.recipient,
+        created_at: message.timestamp,
+      });
+    }
   } catch {
     // Silent — never surface DB write errors to the agent
   }
