@@ -72,17 +72,27 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     raw.created_at ?? raw.timestamp ?? raw.createdAt ?? new Date().toISOString()
   );
 
-  // n8n native: { message: { type, content|output } }
+  // n8n / LangChain native: { message: { type, data: { content } } }
+  // Also handles older formats: { message: { type, content|output } }
   if (raw.message && typeof raw.message === 'object') {
-    const msg = raw.message as Record<string, unknown>;
+    const msg = raw.message as Record<string, any>;
     const type = String(msg.type ?? '').toLowerCase();
     const isHuman = type === 'human' || type === 'user';
+    const isAi = type === 'ai' || type === 'assistant';
     const isAgent = type === 'agent' || type === 'human_agent';
-    const text = isHuman
-      ? String(msg.content ?? msg.text ?? msg.body ?? '')
-      : String(msg.output ?? msg.content ?? msg.text ?? msg.body ?? '');
+    // LangChain stores text inside data.content; fallback to top-level fields
+    const data = msg.data as Record<string, unknown> | undefined;
+    const text = String(
+      data?.content ??
+      msg.content ??
+      msg.output ??
+      msg.text ??
+      msg.body ??
+      ''
+    );
     if (!text.trim()) return null;
-    return { id, session_id, sender: isHuman ? 'User' : isAgent ? 'Agent' : 'AI', message_text: text, timestamp, recipient };
+    const sender = isHuman ? 'User' : isAi ? 'AI' : isAgent ? 'Agent' : 'AI';
+    return { id, session_id, sender, message_text: text, timestamp, recipient };
   }
 
   // Normalized: { sender, message_text }
@@ -319,9 +329,13 @@ export async function insertMessageToExternalDb(
     }
 
     // Try n8n format first (default or previously cached)
+    // n8n Postgres Chat Memory expects LangChain message format
     const { error: e1 } = await client.from(tbl).insert({
       session_id: message.session_id,
-      message: { type: 'agent', output: message.message_text },
+      message: {
+        type: 'ai',
+        data: { content: message.message_text, additional_kwargs: {} },
+      },
     });
 
     if (!e1) {
