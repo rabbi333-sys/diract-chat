@@ -111,6 +111,12 @@ export const DB_TYPES: { value: MainDbType; icon: string; label: string; default
   { value: 'redis',       icon: '🔴', label: 'Redis',      defaultPort: '6379' },
 ];
 
+const VALID_DB_TYPES = new Set<MainDbType>(['supabase', 'postgresql', 'mysql', 'mongodb', 'redis']);
+
+export function normalizeDbType(raw: string | undefined | null): MainDbType {
+  return (raw && VALID_DB_TYPES.has(raw as MainDbType)) ? (raw as MainDbType) : 'supabase';
+}
+
 export function getDbTypeInfo(dbType?: MainDbType) {
   return DB_TYPES.find(t => t.value === (dbType || 'supabase')) ?? DB_TYPES[0];
 }

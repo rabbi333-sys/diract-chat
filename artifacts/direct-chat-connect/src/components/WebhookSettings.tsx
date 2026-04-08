@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { getActiveConnection, onDbChange, MainDbType, MainDbConnection } from '@/lib/db-config';
+import { getActiveConnection, onDbChange, normalizeDbType, MainDbType, MainDbConnection } from '@/lib/db-config';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
@@ -496,7 +496,7 @@ const DB_LABELS: Record<MainDbType, { icon: string; label: string; color: string
 
 const SmartWebhookSection = () => {
   const activeConn = useActiveConnection();
-  const dbType: MainDbType = (activeConn?.dbType as MainDbType) || 'supabase';
+  const dbType = normalizeDbType(activeConn?.dbType);
   const supabaseUrl = activeConn?.url?.replace(/\/$/, '') || '';
   const anonKey = activeConn?.anonKey || '';
   const dbInfo = DB_LABELS[dbType];
@@ -843,7 +843,7 @@ const SmartWebhookSection = () => {
 // DB setup section — Supabase full SQL at once
 const DbSetupSection = () => {
   const activeConn = useActiveConnection();
-  const dbType: MainDbType = (activeConn?.dbType as MainDbType) || 'supabase';
+  const dbType = normalizeDbType(activeConn?.dbType);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   if (!activeConn || dbType !== 'supabase') return null;
