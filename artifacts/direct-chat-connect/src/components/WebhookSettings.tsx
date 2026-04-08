@@ -62,6 +62,8 @@ const HANDOFF_SQL: Record<MainDbType, string> = {
 );
 ALTER TABLE public.handoff_requests ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all" ON public.handoff_requests;
+-- Dev policy: allows public insert from n8n/webhooks.
+-- Production: use service_role key in n8n (bypasses RLS) and tighten this policy.
 CREATE POLICY "Allow all" ON public.handoff_requests FOR ALL USING (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE public.handoff_requests;`,
 
@@ -138,6 +140,8 @@ const FAILURES_SQL: Record<MainDbType, string> = {
 );
 ALTER TABLE public.failed_automations ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all" ON public.failed_automations;
+-- Dev policy: allows public insert from n8n/webhooks.
+-- Production: use service_role key in n8n (bypasses RLS) and tighten this policy.
 CREATE POLICY "Allow all" ON public.failed_automations FOR ALL USING (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE public.failed_automations;`,
 
@@ -200,6 +204,8 @@ const ORDERS_SQL: Record<MainDbType, string> = {
 );
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all" ON public.orders;
+-- Dev policy: allows public insert from n8n/webhooks.
+-- Production: use service_role key in n8n (bypasses RLS) and tighten this policy.
 CREATE POLICY "Allow all" ON public.orders FOR ALL USING (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;`,
 
@@ -272,6 +278,7 @@ CREATE TABLE IF NOT EXISTS public.ai_control (
 );
 ALTER TABLE public.ai_control ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all for ai_control" ON public.ai_control;
+-- Dev policy: allows dashboard access. Tighten in production if needed.
 CREATE POLICY "Allow all for ai_control" ON public.ai_control FOR ALL USING (true);
 
 -- 5. API Keys
