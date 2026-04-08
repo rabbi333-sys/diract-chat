@@ -1089,7 +1089,7 @@ const WebhookSettings = () => {
   const [tableMissing, setTableMissing] = useState(false);
   const hasAttemptedCreate = useRef(false);
 
-  const activeConn = getActiveConnection();
+  const activeConn = useActiveConnection();
   const baseUrl = activeConn?.url?.replace(/\/$/, '') ?? '';
   const hasDb = !!baseUrl && (!activeConn?.dbType || activeConn.dbType === 'supabase');
 
