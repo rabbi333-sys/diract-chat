@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Rocket, Eye, EyeOff, CheckCircle2, XCircle, Loader2, ChevronDown, ChevronRight, ExternalLink, Key } from 'lucide-react';
+import { getActiveConnection } from '@/lib/db-config';
+import { toast } from 'sonner';
 
 import checkAiStatusCode from '../../supabase/functions/check-ai-status/index.ts?raw';
 import createConfirmedUserCode from '../../supabase/functions/create-confirmed-user/index.ts?raw';
@@ -14,7 +16,16 @@ import receiveOrderCode from '../../supabase/functions/receive-order/index.ts?ra
 import sendInviteEmailCode from '../../supabase/functions/send-invite-email/index.ts?raw';
 import sendReplyCode from '../../supabase/functions/send-reply/index.ts?raw';
 
-const PROJECT_REF = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? '';
+function getProjectRef(): string {
+  const conn = getActiveConnection();
+  if (!conn?.url) return '';
+  try {
+    const hostname = new URL(conn.url.trim()).hostname;
+    return hostname.split('.')[0] ?? '';
+  } catch {
+    return '';
+  }
+}
 const MGMT_BASE = '/api/supabase-mgmt/v1';
 
 const FUNCTIONS = [
@@ -55,7 +66,11 @@ export default function DeployFunctions() {
   };
 
   const deployAll = async () => {
-    if (!token.trim() || !PROJECT_REF) return;
+    const projectRef = getProjectRef();
+    if (!token.trim() || !projectRef) {
+      if (!projectRef) toast.error('Connect your Supabase database first — project ref is needed.');
+      return;
+    }
     setDeploying(true);
     setDone(false);
     const next: Record<string, FnStatus> = {};
@@ -64,7 +79,7 @@ export default function DeployFunctions() {
 
     for (const fn of FUNCTIONS) {
       try {
-        const base = `${MGMT_BASE}/projects/${PROJECT_REF}/functions`;
+        const base = `${MGMT_BASE}/projects/${projectRef}/functions`;
         const headers = {
           'Authorization': `Bearer ${token.trim()}`,
           'Content-Type': 'application/json',
@@ -173,11 +188,26 @@ export default function DeployFunctions() {
             </p>
           </div>
 
+          {/* Project ref indicator */}
+          {(() => {
+            const ref = getProjectRef();
+            return ref ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/8 border border-emerald-500/20">
+                <span className="text-[10px] text-muted-foreground">Target project:</span>
+                <code className="text-[10px] font-mono text-emerald-600 font-semibold">{ref}.supabase.co</code>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/8 border border-amber-500/20">
+                <span className="text-[10px] text-amber-600">⚠ No Supabase database connected. Connect one first in the DB settings.</span>
+              </div>
+            );
+          })()}
+
           {/* Deploy button */}
           <Button
             className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold text-sm h-10 gap-2"
             onClick={deployAll}
-            disabled={!token.trim() || deploying}
+            disabled={!token.trim() || deploying || !getProjectRef()}
             data-testid="button-deploy-all-functions"
           >
             {deploying ? (

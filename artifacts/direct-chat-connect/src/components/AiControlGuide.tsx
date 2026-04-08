@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ClipboardCopy, ChevronDown, Terminal } from 'lucide-react';
+import { ClipboardCopy, ChevronDown, Terminal, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { MainDbType, DB_TYPES } from '@/lib/db-config';
@@ -90,51 +90,53 @@ const getCurl = (dbType: MainDbType, url: string): string => {
 };
 
 /* ── n8n node instructions ─────────────────────────────────────── */
-const N8N_NODES: Record<MainDbType, { node: string; fields: { label: string; value: string }[]; ifPath: string }> = {
-  supabase: {
-    node: 'HTTP Request',
-    fields: [
-      { label: 'Method', value: 'POST' },
-      { label: 'URL', value: '(Edge Function URL above)' },
-      { label: 'Body', value: '{ "session_id": "{{ $json.session_id }}" }' },
-      { label: 'Returns', value: '{ "ai_enabled": true | false }' },
-    ],
-    ifPath: '{{ $json.ai_enabled }}',
-  },
-  postgresql: {
-    node: 'Postgres',
-    fields: [
-      { label: 'Operation', value: 'Execute Query' },
-      { label: 'Query', value: "SELECT ai_enabled FROM ai_control WHERE session_id = '{{ $json.session_id }}' LIMIT 1;" },
-    ],
-    ifPath: '{{ $json[0].ai_enabled }}',
-  },
-  mysql: {
-    node: 'MySQL',
-    fields: [
-      { label: 'Operation', value: 'Execute Query' },
-      { label: 'Query', value: "SELECT ai_enabled FROM ai_control WHERE session_id = '{{ $json.session_id }}' LIMIT 1;" },
-    ],
-    ifPath: '{{ $json[0].ai_enabled }}',
-  },
-  mongodb: {
-    node: 'MongoDB',
-    fields: [
-      { label: 'Collection', value: 'ai_control' },
-      { label: 'Operation', value: 'Find One' },
-      { label: 'Filter', value: '{ "session_id": "{{ $json.session_id }}" }' },
-    ],
-    ifPath: '{{ $json.ai_enabled }}',
-  },
-  redis: {
-    node: 'Redis',
-    fields: [
-      { label: 'Operation', value: 'Get' },
-      { label: 'Key', value: 'ai_control:{{ $json.session_id }}' },
-    ],
-    ifPath: '{{ $json.value }}',
-  },
-};
+function getN8nNodes(edgeFnUrl: string): Record<MainDbType, { node: string; fields: { label: string; value: string; isUrl?: boolean }[]; ifPath: string }> {
+  return {
+    supabase: {
+      node: 'HTTP Request',
+      fields: [
+        { label: 'Method', value: 'POST' },
+        { label: 'URL', value: edgeFnUrl || 'https://<your-project>.supabase.co/functions/v1/check-ai-status', isUrl: true },
+        { label: 'Body', value: '{ "session_id": "{{ $json.session_id }}" }' },
+        { label: 'Returns', value: '{ "ai_enabled": true | false }' },
+      ],
+      ifPath: '{{ $json.ai_enabled }}',
+    },
+    postgresql: {
+      node: 'Postgres',
+      fields: [
+        { label: 'Operation', value: 'Execute Query' },
+        { label: 'Query', value: "SELECT ai_enabled FROM ai_control WHERE session_id = '{{ $json.session_id }}' LIMIT 1;" },
+      ],
+      ifPath: '{{ $json[0].ai_enabled }}',
+    },
+    mysql: {
+      node: 'MySQL',
+      fields: [
+        { label: 'Operation', value: 'Execute Query' },
+        { label: 'Query', value: "SELECT ai_enabled FROM ai_control WHERE session_id = '{{ $json.session_id }}' LIMIT 1;" },
+      ],
+      ifPath: '{{ $json[0].ai_enabled }}',
+    },
+    mongodb: {
+      node: 'MongoDB',
+      fields: [
+        { label: 'Collection', value: 'ai_control' },
+        { label: 'Operation', value: 'Find One' },
+        { label: 'Filter', value: '{ "session_id": "{{ $json.session_id }}" }' },
+      ],
+      ifPath: '{{ $json.ai_enabled }}',
+    },
+    redis: {
+      node: 'Redis',
+      fields: [
+        { label: 'Operation', value: 'Get' },
+        { label: 'Key', value: 'ai_control:{{ $json.session_id }}' },
+      ],
+      ifPath: '{{ $json.value }}',
+    },
+  };
+}
 
 /* ── Props ─────────────────────────────────────────────────────── */
 interface AiControlGuideProps {
@@ -150,8 +152,21 @@ export function AiControlGuide({ defaultDbType = 'supabase', edgeFnUrl = '', acc
   const [activeDb, setActiveDb] = useState<MainDbType>(defaultDbType);
   const [showSetupSql, setShowSetupSql] = useState(false);
   const [showCurl, setShowCurl] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  const n8n = N8N_NODES[activeDb];
+  const copyField = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(key);
+    toast.success('Copied!');
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const urlDisplay = activeDb === 'supabase'
+    ? (edgeFnUrl || 'https://<your-project>.supabase.co/functions/v1/check-ai-status')
+    : '';
+
+  const n8nNodes = getN8nNodes(urlDisplay);
+  const n8n = n8nNodes[activeDb];
 
   const getSetupCode = (): { code: string; lang: string } => {
     switch (activeDb) {
@@ -176,10 +191,6 @@ export function AiControlGuide({ defaultDbType = 'supabase', edgeFnUrl = '', acc
   const stepBall = (n: number) => (
     <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0">{n}</span>
   );
-
-  const urlDisplay = activeDb === 'supabase'
-    ? (edgeFnUrl || 'https://<project-ref>.supabase.co/functions/v1/check-ai-status')
-    : '';
 
   return (
     <div className="space-y-5">
@@ -265,7 +276,20 @@ export function AiControlGuide({ defaultDbType = 'supabase', edgeFnUrl = '', acc
           {n8n.fields.map(f => (
             <div key={f.label} className="px-3.5 py-2.5 flex items-start gap-3">
               <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-24 flex-shrink-0 mt-0.5">{f.label}</span>
-              <code className="text-[10px] font-mono text-foreground break-all">{f.value}</code>
+              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                <code className={cn('text-[10px] font-mono break-all flex-1', f.isUrl ? 'text-primary' : 'text-foreground')}>{f.value}</code>
+                {f.isUrl && (
+                  <button
+                    onClick={() => copyField(f.value, `n8n-${f.label}`)}
+                    className="flex-shrink-0 p-1 rounded-md hover:bg-muted transition-colors"
+                    title="Copy URL"
+                  >
+                    {copiedField === `n8n-${f.label}`
+                      ? <CheckCircle2 size={11} className="text-emerald-500" />
+                      : <ClipboardCopy size={11} className="text-muted-foreground" />}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
