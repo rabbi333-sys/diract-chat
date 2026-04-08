@@ -14,7 +14,6 @@ import {
 } from "@/lib/db-config";
 import { toast } from "sonner";
 import {
-  Database,
   Key,
   CheckCircle2,
   Plus,
@@ -28,23 +27,21 @@ import {
   Eye,
   EyeOff,
   Server,
+  Wifi,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const emptyForm = {
   name: "",
   dbType: "supabase" as MainDbType,
-  // Supabase
   url: "",
   anonKey: "",
   serviceRoleKey: "",
-  // PostgreSQL / MySQL
   host: "",
   port: "",
   dbUsername: "",
   dbPassword: "",
   dbName: "",
-  // MongoDB / Redis
   connectionString: "",
 };
 
@@ -91,10 +88,7 @@ const ConnectDB = () => {
   };
 
   const testConnection = async () => {
-    if (!canTest()) {
-      toast.error("Please fill in the required fields");
-      return;
-    }
+    if (!canTest()) { toast.error("Please fill in the required fields"); return; }
     setTesting(true);
     setTestOk(null);
     try {
@@ -103,16 +97,12 @@ const ConnectDB = () => {
           auth: { persistSession: false, autoRefreshToken: false },
         });
         const { error } = await client.auth.getSession();
-        if (error && !error.message.toLowerCase().includes("refresh token")) {
-          throw error;
-        }
+        if (error && !error.message.toLowerCase().includes("refresh token")) throw error;
         setTestOk(true);
-        toast.success("Supabase connection successful!");
+        toast.success("Connection successful!");
       } else {
-        // For non-Supabase types, we just validate the form without a live test
-        // (browser can't connect directly — edge function handles it)
         setTestOk(true);
-        toast.success("Settings valid! Will connect via edge function.");
+        toast.success("Settings valid!");
       }
     } catch (e) {
       setTestOk(false);
@@ -124,54 +114,32 @@ const ConnectDB = () => {
   };
 
   const handleSave = async () => {
-    if (!form.name.trim()) { toast.error("Please enter a name for this connection"); return; }
+    if (!form.name.trim()) { toast.error("Please enter a connection name"); return; }
     if (!canTest()) { toast.error("Please fill in the required fields"); return; }
     setSaving(true);
     try {
-      const base = {
-        name: form.name.trim(),
-        dbType: form.dbType,
-        // Provide defaults for all Supabase fields so the type is satisfied
-        url: '',
-        anonKey: '',
-      };
+      const base = { name: form.name.trim(), dbType: form.dbType, url: '', anonKey: '' };
       let conn: Omit<MainDbConnection, 'id' | 'createdAt'>;
       if (form.dbType === 'supabase') {
-        conn = {
-          ...base,
-          url: form.url.trim(),
-          anonKey: form.anonKey.trim(),
-          serviceRoleKey: form.serviceRoleKey.trim() || undefined,
-        };
+        conn = { ...base, url: form.url.trim(), anonKey: form.anonKey.trim(), serviceRoleKey: form.serviceRoleKey.trim() || undefined };
       } else if (form.dbType === 'postgresql' || form.dbType === 'mysql') {
-        conn = {
-          ...base,
-          host: form.host.trim(),
-          port: form.port.trim() || currentType.defaultPort,
-          dbUsername: form.dbUsername.trim(),
-          dbPassword: form.dbPassword,
-          dbName: form.dbName.trim(),
-        };
+        conn = { ...base, host: form.host.trim(), port: form.port.trim() || currentType.defaultPort, dbUsername: form.dbUsername.trim(), dbPassword: form.dbPassword, dbName: form.dbName.trim() };
       } else {
-        conn = {
-          ...base,
-          connectionString: form.connectionString.trim(),
-        };
+        conn = { ...base, connectionString: form.connectionString.trim() };
       }
       const saved = saveConnection(conn);
       setActiveConnection(saved.id);
-      toast.success("Saved! Loading dashboard...");
+      toast.success("Connected! Loading dashboard...");
       setTimeout(() => { window.location.href = "/"; }, 700);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(msg);
+      toast.error(e instanceof Error ? e.message : String(e));
       setSaving(false);
     }
   };
 
   const handleActivate = (id: string) => {
     setActiveConnection(id);
-    toast.success("Switching...");
+    toast.success("Switching connection...");
     setTimeout(() => { window.location.href = "/"; }, 700);
   };
 
@@ -184,97 +152,108 @@ const ConnectDB = () => {
     setTestOk(null);
   };
 
+  const inputCls = "w-full px-3.5 py-3 rounded-xl border border-border/60 bg-background/80 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-all placeholder:text-muted-foreground/40";
+  const labelCls = "block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide";
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/60 dark:from-zinc-950 dark:via-zinc-900 dark:to-blue-950/20 flex items-center justify-center p-4">
 
-      {/* Branding */}
-      <div className="mb-8 text-center select-none">
-        <div className="inline-flex items-center gap-3 mb-2">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-lg shadow-primary/20">
-            <Zap size={20} className="text-primary-foreground" />
+      {/* Decorative blobs */}
+      <div className="fixed top-0 left-1/4 w-96 h-96 bg-blue-400/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="fixed bottom-0 right-1/4 w-80 h-80 bg-indigo-400/10 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="relative w-full max-w-[440px]">
+
+        {/* Logo header */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-500/30 mb-4">
+            <Zap size={22} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Meta <span className="text-primary">Automation</span>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            Meta <span className="text-blue-500">Automation</span>
           </h1>
+          <p className="text-sm text-muted-foreground mt-1">Connect your database to get started</p>
         </div>
-        <p className="text-muted-foreground text-sm">
-          Connect your database
-        </p>
-      </div>
 
-      {/* Saved connections */}
-      {connections.length > 0 && (
-        <div className="w-full max-w-md mb-4">
-          <div className="backdrop-blur-xl bg-card/80 border border-border/50 rounded-2xl p-5 shadow-xl">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Saved Connections ({connections.length}/{MAX_CONNECTIONS})
-              </span>
+        {/* Saved connections */}
+        {connections.length > 0 && (
+          <div className="mb-4 rounded-2xl border border-border/50 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl shadow-xl shadow-black/5 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/40">
+              <div className="flex items-center gap-2">
+                <Wifi size={13} className="text-muted-foreground" />
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Connections ({connections.length}/{MAX_CONNECTIONS})
+                </span>
+              </div>
               {connections.length < MAX_CONNECTIONS && (
                 <button
                   onClick={() => { setShowForm(v => !v); setForm(emptyForm); setTestOk(null); }}
-                  className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 font-medium transition-colors"
+                  className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 font-semibold transition-colors"
                   data-testid="button-toggle-form"
                 >
-                  <Plus size={11} /> Add New
+                  <Plus size={12} /> Add New
                 </button>
               )}
             </div>
-            <div className="space-y-2">
+            <div className="p-3 space-y-2">
               {connections.map(conn => {
                 const typeInfo = DB_TYPES.find(t => t.value === (conn.dbType || 'supabase'))!;
                 const displayUrl = getConnectionDisplayUrl(conn);
+                const isActive = conn.id === activeId;
                 return (
                   <div
                     key={conn.id}
                     className={cn(
-                      'flex items-center gap-3 p-3 rounded-xl border transition-all',
-                      conn.id === activeId
-                        ? "bg-primary/8 border-primary/25"
-                        : "bg-muted/20 border-border/20 hover:bg-muted/40"
+                      'group flex items-center gap-3 p-3.5 rounded-xl border transition-all cursor-default',
+                      isActive
+                        ? "bg-blue-50/80 dark:bg-blue-950/30 border-blue-200/60 dark:border-blue-800/40"
+                        : "bg-muted/20 border-border/30 hover:bg-muted/40 hover:border-border/50"
                     )}
                     data-testid={`card-connection-${conn.id}`}
                   >
-                    <div className={cn('w-2 h-2 rounded-full flex-shrink-0', conn.id === activeId ? 'bg-green-500' : 'bg-muted-foreground/25')} />
+                    <div className={cn(
+                      'w-2 h-2 rounded-full flex-shrink-0 transition-colors',
+                      isActive ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-muted-foreground/25'
+                    )} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm leading-none">{typeInfo.icon}</span>
-                        <p className="text-sm font-medium truncate">{conn.name}</p>
+                        <span className="text-sm">{typeInfo.icon}</span>
+                        <p className="text-sm font-semibold truncate text-foreground">{conn.name}</p>
                       </div>
                       {displayUrl && (
-                        <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5">{displayUrl}</p>
+                        <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 opacity-70">{displayUrl}</p>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      {conn.id === activeId ? (
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-green-500/15 text-green-600 dark:text-green-400">
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {isActive ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">
                           Active
                         </span>
                       ) : (
                         <button
                           onClick={() => handleActivate(conn.id)}
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                          className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-blue-500 text-white hover:bg-blue-600 transition-colors shadow-sm"
                           data-testid={`button-activate-${conn.id}`}
                         >
                           Use
                         </button>
                       )}
                       {deleteConfirmId === conn.id ? (
-                        <div className="flex items-center gap-1 ml-0.5">
+                        <div className="flex items-center gap-1">
                           <button
                             onClick={() => handleDelete(conn.id)}
-                            className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+                            className="px-2 py-1 rounded-lg text-[10px] font-bold bg-red-500 text-white hover:bg-red-600 transition-colors"
                             data-testid={`button-delete-confirm-${conn.id}`}
                           >Delete</button>
                           <button
                             onClick={() => setDeleteConfirmId(null)}
-                            className="px-2 py-1 rounded-lg text-[10px] font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                            className="px-2 py-1 rounded-lg text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors"
                           >Cancel</button>
                         </div>
                       ) : (
                         <button
                           onClick={() => setDeleteConfirmId(conn.id)}
-                          className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors ml-0.5"
+                          className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-50 dark:hover:bg-red-950/40 text-muted-foreground hover:text-red-500 transition-all"
                           title="Delete"
                           data-testid={`button-delete-connection-${conn.id}`}
                         >
@@ -287,300 +266,279 @@ const ConnectDB = () => {
               })}
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Add form */}
-      {showForm && (
-        <div className="w-full max-w-md backdrop-blur-xl bg-card/80 border border-border/50 rounded-2xl p-6 shadow-xl space-y-5">
-          <h2 className="font-semibold flex items-center gap-2 text-sm">
-            <Database size={15} className="text-primary" />
-            New Database Connection
-          </h2>
+        {/* Add form — modal card */}
+        {showForm && (
+          <div className="rounded-2xl border border-border/50 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-xl shadow-2xl shadow-black/10 overflow-hidden">
 
-          {/* DB Type Selector */}
-          <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-              Database Type
-            </p>
-            <div className="grid grid-cols-5 gap-1.5">
-              {DB_TYPES.map(t => (
-                <button
-                  key={t.value}
-                  onClick={() => { setField('dbType', t.value); setTestOk(null); }}
-                  data-testid={`dbtype-${t.value}`}
-                  className={cn(
-                    "flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl border text-center transition-all",
-                    form.dbType === t.value
-                      ? "border-primary bg-primary/10 shadow-sm"
-                      : "border-border hover:border-primary/30 hover:bg-muted/40"
-                  )}
-                >
-                  <span className="text-lg leading-none">{t.icon}</span>
-                  <span className={cn("text-[10px] font-semibold leading-none",
-                    form.dbType === t.value ? "text-primary" : "text-muted-foreground"
-                  )}>{t.label}</span>
-                </button>
-              ))}
+            {/* Card header */}
+            <div className="px-6 py-5 border-b border-border/40 bg-gradient-to-r from-blue-50/60 to-indigo-50/40 dark:from-blue-950/20 dark:to-indigo-950/10">
+              <h2 className="text-base font-bold text-foreground">New Database Connection</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Choose your database type and enter credentials</p>
             </div>
-          </div>
 
-          {/* Connection Name */}
-          <div>
-            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Connection Name <span className="text-destructive">*</span>
-            </label>
-            <input
-              value={form.name}
-              onChange={e => setField("name", e.target.value)}
-              placeholder="My Store / Client A"
-              className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all placeholder:text-muted-foreground/50"
-              data-testid="input-connection-name"
-            />
-          </div>
-
-          {/* ── Supabase fields ── */}
-          {form.dbType === 'supabase' && (
-            <div className="space-y-4 bg-muted/30 rounded-xl p-4 border border-border/40">
+            <div className="p-6 space-y-5">
+              {/* DB Type pills */}
               <div>
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Supabase Project URL <span className="text-destructive">*</span>
-                </label>
-                <div className="relative mt-1.5">
-                  <Link2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
-                  <input
-                    value={form.url}
-                    onChange={e => setField("url", e.target.value)}
-                    placeholder="https://xxxxxxxxxxxx.supabase.co"
-                    className="w-full pl-8 pr-3 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all font-mono placeholder:font-sans placeholder:text-muted-foreground/50"
-                    data-testid="input-supabase-url"
-                  />
+                <label className={labelCls}>Database Type</label>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {DB_TYPES.map(t => (
+                    <button
+                      key={t.value}
+                      onClick={() => { setField('dbType', t.value); setTestOk(null); }}
+                      data-testid={`dbtype-${t.value}`}
+                      className={cn(
+                        "flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl border-2 text-center transition-all select-none",
+                        form.dbType === t.value
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 shadow-sm shadow-blue-500/10"
+                          : "border-transparent bg-muted/30 hover:bg-muted/60 hover:border-border/60"
+                      )}
+                    >
+                      <span className="text-xl leading-none">{t.icon}</span>
+                      <span className={cn(
+                        "text-[10px] font-bold leading-none",
+                        form.dbType === t.value ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground"
+                      )}>{t.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
+
+              {/* Connection Name */}
               <div>
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Anon / Public Key <span className="text-destructive">*</span>
+                <label className={labelCls}>
+                  Connection Name <span className="text-red-400">*</span>
                 </label>
                 <input
-                  value={form.anonKey}
-                  onChange={e => setField("anonKey", e.target.value)}
-                  placeholder="eyJhbGciOiJIUzI1NiIs..."
-                  type="password"
-                  className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all font-mono placeholder:font-sans placeholder:text-muted-foreground/50"
-                  data-testid="input-anon-key"
+                  value={form.name}
+                  onChange={e => setField("name", e.target.value)}
+                  placeholder="My Store / Client A"
+                  className={inputCls}
+                  data-testid="input-connection-name"
                 />
               </div>
-              <div>
-                <button
-                  onClick={() => setShowServiceKey(v => !v)}
-                  className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                  data-testid="button-toggle-service-key"
-                >
-                  <Key size={11} />
-                  Service Role Key (optional — for webhooks)
-                  {showServiceKey ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                </button>
-                {showServiceKey && (
-                  <input
-                    value={form.serviceRoleKey}
-                    onChange={e => setField("serviceRoleKey", e.target.value)}
-                    placeholder="eyJhbGciOiJIUzI1NiIs..."
-                    type="password"
-                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all font-mono placeholder:font-sans placeholder:text-muted-foreground/50"
-                    data-testid="input-service-role-key"
-                  />
-                )}
-              </div>
-            </div>
-          )}
 
-          {/* ── PostgreSQL / MySQL fields ── */}
-          {(form.dbType === 'postgresql' || form.dbType === 'mysql') && (
-            <div className="space-y-3 bg-muted/30 rounded-xl p-4 border border-border/40">
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-2">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    Host <span className="text-destructive">*</span>
-                  </label>
-                  <input
-                    value={form.host}
-                    onChange={e => setField("host", e.target.value)}
-                    placeholder={form.dbType === 'postgresql' ? 'db.example.com' : 'mysql.example.com'}
-                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all placeholder:text-muted-foreground/50"
-                    data-testid="input-host"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Port</label>
-                  <input
-                    value={form.port}
-                    onChange={e => setField("port", e.target.value)}
-                    placeholder={currentType.defaultPort}
-                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all placeholder:text-muted-foreground/50"
-                    data-testid="input-port"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    Username <span className="text-destructive">*</span>
-                  </label>
-                  <input
-                    value={form.dbUsername}
-                    onChange={e => setField("dbUsername", e.target.value)}
-                    placeholder={form.dbType === 'postgresql' ? 'postgres' : 'root'}
-                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all placeholder:text-muted-foreground/50"
-                    data-testid="input-username"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Password</label>
-                  <div className="relative mt-1.5">
+              {/* ── Supabase fields ── */}
+              {form.dbType === 'supabase' && (
+                <div className="space-y-4 rounded-xl border border-border/50 bg-muted/20 p-4">
+                  <div>
+                    <label className={labelCls}>
+                      Project URL <span className="text-red-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <Link2 size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
+                      <input
+                        value={form.url}
+                        onChange={e => setField("url", e.target.value)}
+                        placeholder="https://xxxxxxxxxxxx.supabase.co"
+                        className={cn(inputCls, "pl-9 font-mono placeholder:font-sans")}
+                        data-testid="input-supabase-url"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>
+                      Anon / Public Key <span className="text-red-400">*</span>
+                    </label>
                     <input
-                      value={form.dbPassword}
-                      onChange={e => setField("dbPassword", e.target.value)}
-                      placeholder="••••••••"
+                      value={form.anonKey}
+                      onChange={e => setField("anonKey", e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIs..."
+                      type="password"
+                      className={cn(inputCls, "font-mono placeholder:font-sans")}
+                      data-testid="input-anon-key"
+                    />
+                  </div>
+                  <div>
+                    <button
+                      onClick={() => setShowServiceKey(v => !v)}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      data-testid="button-toggle-service-key"
+                    >
+                      <Key size={11} />
+                      <span>Service Role Key</span>
+                      <span className="text-muted-foreground/50">(optional — for webhooks)</span>
+                      {showServiceKey ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                    </button>
+                    {showServiceKey && (
+                      <input
+                        value={form.serviceRoleKey}
+                        onChange={e => setField("serviceRoleKey", e.target.value)}
+                        placeholder="eyJhbGciOiJIUzI1NiIs..."
+                        type="password"
+                        className={cn(inputCls, "mt-2 font-mono placeholder:font-sans")}
+                        data-testid="input-service-role-key"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── PostgreSQL / MySQL ── */}
+              {(form.dbType === 'postgresql' || form.dbType === 'mysql') && (
+                <div className="space-y-3 rounded-xl border border-border/50 bg-muted/20 p-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-2">
+                      <label className={labelCls}>Host <span className="text-red-400">*</span></label>
+                      <input
+                        value={form.host}
+                        onChange={e => setField("host", e.target.value)}
+                        placeholder={form.dbType === 'postgresql' ? 'db.example.com' : 'mysql.example.com'}
+                        className={inputCls}
+                        data-testid="input-host"
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Port</label>
+                      <input
+                        value={form.port}
+                        onChange={e => setField("port", e.target.value)}
+                        placeholder={currentType.defaultPort}
+                        className={inputCls}
+                        data-testid="input-port"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className={labelCls}>Username <span className="text-red-400">*</span></label>
+                      <input
+                        value={form.dbUsername}
+                        onChange={e => setField("dbUsername", e.target.value)}
+                        placeholder={form.dbType === 'postgresql' ? 'postgres' : 'root'}
+                        className={inputCls}
+                        data-testid="input-username"
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Password</label>
+                      <div className="relative">
+                        <input
+                          value={form.dbPassword}
+                          onChange={e => setField("dbPassword", e.target.value)}
+                          placeholder="••••••••"
+                          type={showPassword ? 'text' : 'password'}
+                          className={cn(inputCls, "pr-10")}
+                          data-testid="input-password"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(v => !v)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Database Name</label>
+                    <input
+                      value={form.dbName}
+                      onChange={e => setField("dbName", e.target.value)}
+                      placeholder="mydb"
+                      className={inputCls}
+                      data-testid="input-dbname"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ── MongoDB ── */}
+              {form.dbType === 'mongodb' && (
+                <div className="rounded-xl border border-border/50 bg-muted/20 p-4">
+                  <label className={labelCls}>MongoDB URI <span className="text-red-400">*</span></label>
+                  <div className="relative">
+                    <input
+                      value={form.connectionString}
+                      onChange={e => setField("connectionString", e.target.value)}
+                      placeholder="mongodb+srv://user:pass@cluster.mongodb.net/db"
                       type={showPassword ? 'text' : 'password'}
-                      className="w-full px-3 pr-9 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all"
-                      data-testid="input-password"
+                      className={cn(inputCls, "pr-10 font-mono placeholder:font-sans")}
+                      data-testid="input-mongo-uri"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(v => !v)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
+                      {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
                   </div>
                 </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Database Name</label>
-                <input
-                  value={form.dbName}
-                  onChange={e => setField("dbName", e.target.value)}
-                  placeholder="mydb"
-                  className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all placeholder:text-muted-foreground/50"
-                  data-testid="input-dbname"
-                />
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                {form.dbType === 'postgresql' ? 'Neon, Supabase, Railway, Render, etc.' : 'PlanetScale, Railway, DigitalOcean, etc.'}
-              </p>
-            </div>
-          )}
-
-          {/* ── MongoDB ── */}
-          {form.dbType === 'mongodb' && (
-            <div className="space-y-3 bg-muted/30 rounded-xl p-4 border border-border/40">
-              <div>
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  MongoDB URI <span className="text-destructive">*</span>
-                </label>
-                <div className="relative mt-1.5">
-                  <input
-                    value={form.connectionString}
-                    onChange={e => setField("connectionString", e.target.value)}
-                    placeholder="mongodb+srv://user:pass@cluster.mongodb.net/db"
-                    type={showPassword ? 'text' : 'password'}
-                    className="w-full px-3 pr-9 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all font-mono placeholder:font-sans placeholder:text-muted-foreground/50"
-                    data-testid="input-mongo-uri"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(v => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
-                  </button>
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-1">MongoDB Atlas or local MongoDB URI</p>
-              </div>
-            </div>
-          )}
-
-          {/* ── Redis ── */}
-          {form.dbType === 'redis' && (
-            <div className="space-y-3 bg-muted/30 rounded-xl p-4 border border-border/40">
-              <div>
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Redis Connection String <span className="text-destructive">*</span>
-                </label>
-                <div className="relative mt-1.5">
-                  <input
-                    value={form.connectionString}
-                    onChange={e => setField("connectionString", e.target.value)}
-                    placeholder="redis://:password@host:6379"
-                    type={showPassword ? 'text' : 'password'}
-                    className="w-full px-3 pr-9 py-2.5 rounded-xl border border-border/50 bg-background/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-all font-mono placeholder:font-sans placeholder:text-muted-foreground/50"
-                    data-testid="input-redis-uri"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(v => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
-                  </button>
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-1">Upstash, Redis Cloud, etc.</p>
-              </div>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex gap-2 pt-1">
-            <button
-              onClick={testConnection}
-              disabled={testing || saving || !canTest()}
-              className={cn(
-                "flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border text-sm font-medium transition-all disabled:opacity-50",
-                testOk === true
-                  ? "border-green-500/40 text-green-600 bg-green-500/10"
-                  : testOk === false
-                    ? "border-destructive/40 text-destructive bg-destructive/10"
-                    : "border-border/50 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
               )}
-              data-testid="button-test-connection"
-            >
-              {testing
-                ? <Loader2 size={13} className="animate-spin" />
-                : testOk === true
-                  ? <CheckCircle2 size={13} />
-                  : <Server size={13} />
-              }
-              {testing ? "Testing..." : "Test"}
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={testing || saving || !canSave()}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-50 shadow-md shadow-primary/20"
-              data-testid="button-save-connection"
-            >
-              {saving ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} />}
-              {saving ? "Saving..." : "Save & Connect"}
-            </button>
-          </div>
 
-          {/* Supported DBs note */}
-          <div className="rounded-xl border border-border/40 bg-muted/20 p-3 text-[10px] text-muted-foreground space-y-0.5">
-            <p className="font-semibold text-[11px] text-foreground/70 mb-1.5 flex items-center gap-1"><Server size={10} /> Supported Databases</p>
-            <p>⚡ <strong>Supabase</strong> — URL + Anon Key</p>
-            <p>🐘 <strong>PostgreSQL</strong> — Host / Port / User / Password</p>
-            <p>🐬 <strong>MySQL</strong> — Host / Port / User / Password</p>
-            <p>🍃 <strong>MongoDB</strong> — mongodb+srv:// URI</p>
-            <p>🔴 <strong>Redis</strong> — redis:// URI</p>
-          </div>
-        </div>
-      )}
+              {/* ── Redis ── */}
+              {form.dbType === 'redis' && (
+                <div className="rounded-xl border border-border/50 bg-muted/20 p-4">
+                  <label className={labelCls}>Redis Connection String <span className="text-red-400">*</span></label>
+                  <div className="relative">
+                    <input
+                      value={form.connectionString}
+                      onChange={e => setField("connectionString", e.target.value)}
+                      placeholder="redis://default:password@host:6379"
+                      type={showPassword ? 'text' : 'password'}
+                      className={cn(inputCls, "pr-10 font-mono placeholder:font-sans")}
+                      data-testid="input-redis-uri"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+              )}
 
-      {/* Help */}
-      {form.dbType === 'supabase' && (
-        <p className="mt-6 text-[11px] text-muted-foreground/60 text-center max-w-xs leading-relaxed">
-          Supabase Dashboard → Project Settings → API → Project URL & anon key
-        </p>
-      )}
+              {/* Action buttons */}
+              <div className="flex gap-2.5 pt-1">
+                <button
+                  onClick={testConnection}
+                  disabled={testing || saving || !canTest()}
+                  className={cn(
+                    "flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed",
+                    testOk === true
+                      ? "border-emerald-400/50 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30"
+                      : testOk === false
+                        ? "border-red-400/50 text-red-500 bg-red-50 dark:bg-red-950/30"
+                        : "border-border/60 text-muted-foreground bg-muted/30 hover:bg-muted/60 hover:text-foreground"
+                  )}
+                  data-testid="button-test-connection"
+                >
+                  {testing
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : testOk === true
+                      ? <CheckCircle2 size={14} />
+                      : <Server size={14} />
+                  }
+                  {testing ? "Testing..." : testOk === true ? "Verified" : "Test"}
+                </button>
+
+                <button
+                  onClick={handleSave}
+                  disabled={testing || saving || !canSave()}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-blue-500/25"
+                  data-testid="button-save-connection"
+                >
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
+                  {saving ? "Connecting..." : "Save & Connect"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Help hint for Supabase */}
+        {form.dbType === 'supabase' && showForm && (
+          <p className="mt-4 text-center text-[11px] text-muted-foreground/60 leading-relaxed">
+            Find your credentials in{" "}
+            <span className="font-medium text-muted-foreground">Supabase Dashboard → Project Settings → API</span>
+          </p>
+        )}
+      </div>
     </div>
   );
 };
