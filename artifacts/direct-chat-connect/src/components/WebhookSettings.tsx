@@ -476,24 +476,28 @@ const CodeBlock = ({ code, maxH = 'max-h-52' }: { code: string; maxH?: string })
   );
 };
 
-const FieldsGrid = ({ fields, copiedKey, onCopy }: {
+const FieldsGrid = ({ fields, epKey, copiedKey, onCopy }: {
   fields: { name: string; example: string }[];
+  epKey: string;
   copiedKey: string | null;
   onCopy: (text: string, key: string) => void;
 }) => (
   <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-    {fields.map((f, i) => (
-      <div key={i} className="flex items-center gap-1.5 min-w-0">
-        <button
-          onClick={() => onCopy(f.name, `field-${i}`)}
-          className="text-[10px] font-mono font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-1 group flex-shrink-0"
-        >
-          {f.name}
-          {copiedKey === `field-${i}` ? <Check size={8} className="text-primary" /> : <Copy size={8} className="opacity-0 group-hover:opacity-60" />}
-        </button>
-        <span className="text-[10px] text-muted-foreground/60 truncate">{f.example}</span>
-      </div>
-    ))}
+    {fields.map((f, i) => {
+      const ck = `${epKey}-field-${i}`;
+      return (
+        <div key={i} className="flex items-center gap-1.5 min-w-0">
+          <button
+            onClick={() => onCopy(f.name, ck)}
+            className="text-[10px] font-mono font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-1 group flex-shrink-0"
+          >
+            {f.name}
+            {copiedKey === ck ? <Check size={8} className="text-primary" /> : <Copy size={8} className="opacity-0 group-hover:opacity-60" />}
+          </button>
+          <span className="text-[10px] text-muted-foreground/60 truncate">{f.example}</span>
+        </div>
+      );
+    })}
   </div>
 );
 
@@ -719,7 +723,7 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
                       {/* Body fields */}
                       <div>
                         <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Body Fields (n8n → Body → Using Fields Below)</p>
-                        <FieldsGrid fields={ep.fields} copiedKey={copiedKey} onCopy={copy} />
+                        <FieldsGrid fields={ep.fields} epKey={ep.key} copiedKey={copiedKey} onCopy={copy} />
                       </div>
 
                       {/* cURL */}
