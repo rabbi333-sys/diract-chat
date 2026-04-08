@@ -1107,7 +1107,7 @@ const WebhookSettings = () => {
 
   const activeConn = useActiveConnection();
   const baseUrl = activeConn?.url?.replace(/\/$/, '') ?? '';
-  const hasDb = !!baseUrl && (!activeConn?.dbType || activeConn.dbType === 'supabase');
+  const hasDb = !!baseUrl && normalizeDbType(activeConn?.dbType) === 'supabase';
 
   const { data: apiKeyData, refetch: refetchApiKey, isLoading: isLoadingKey } = useQuery({
     queryKey: ['api-key'],
