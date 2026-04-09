@@ -542,6 +542,18 @@ const Profile = () => {
                     {pendingCount} pending
                   </span>
                 )}
+                <button
+                  onClick={() => setShowInviteSql(v => !v)}
+                  className={cn(
+                    'flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors',
+                    showInviteSql
+                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/25'
+                      : 'bg-muted text-muted-foreground border-border hover:text-foreground'
+                  )}
+                  title="Toggle DB setup SQL"
+                >
+                  <Database size={9} /> DB Setup
+                </button>
               </div>
             </div>
 
@@ -672,12 +684,15 @@ const Profile = () => {
                 <div className="flex items-start gap-2">
                   <AlertTriangle size={13} className="text-amber-600 mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">Database needs a one-time update</p>
-                    <p className="text-xs text-amber-600/80 mt-0.5">Go to <strong>Supabase → SQL Editor</strong> and run:</p>
+                    <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">One-time database setup required</p>
+                    <p className="text-xs text-amber-600/80 mt-0.5">
+                      Copy this SQL and run it in your <strong>Supabase → SQL Editor</strong>.
+                      This sets up team invite columns and the login/submission functions members need.
+                    </p>
                   </div>
                 </div>
                 <SqlCopyBlock sql={INVITE_FIX_SQL} />
-                <p className="text-[11px] text-amber-600/70">After running, refresh the page and try again.</p>
+                <p className="text-[11px] text-amber-600/70">Run once, then refresh. Members can then submit invite requests and sign in.</p>
                 <button onClick={() => setShowInviteSql(false)} className="text-[11px] text-muted-foreground hover:text-foreground underline">Dismiss</button>
               </div>
             )}
