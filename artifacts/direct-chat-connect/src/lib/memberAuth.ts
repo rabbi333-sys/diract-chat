@@ -10,6 +10,7 @@ export type MemberSession = {
   displayName: string;
   inviteId: string;
   isSelfDb?: boolean;
+  selfDbCreds?: Record<string, string> | null;
 };
 
 // ── Password hashing (Web Crypto SHA-256, browser-native) ───────────────────

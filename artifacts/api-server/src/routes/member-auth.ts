@@ -35,6 +35,7 @@ type InviteRecord = {
   submitted_password_hash?: string | null;
   submitted_at: string | null;
   last_login_at?: string | null;
+  subadmin_db_creds?: string | null;
   created_at: string;
 };
 
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS team_invites (
   submitted_password_hash TEXT,
   submitted_at            TIMESTAMPTZ,
   last_login_at           TIMESTAMPTZ,
+  subadmin_db_creds       TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 `;
@@ -86,6 +88,10 @@ CREATE TABLE IF NOT EXISTS team_invites (
 const PG_MIGRATE_SQL = `
 DO $$ BEGIN
   ALTER TABLE team_invites ADD COLUMN last_login_at TIMESTAMPTZ;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE team_invites ADD COLUMN subadmin_db_creds TEXT;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
 `;
@@ -133,11 +139,15 @@ CREATE TABLE IF NOT EXISTS team_invites (
   submitted_password_hash TEXT,
   submitted_at            DATETIME(6),
   last_login_at           DATETIME(6),
+  subadmin_db_creds       TEXT,
   created_at              DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
 );
 `;
 
-const MYSQL_MIGRATE_SQL = `ALTER TABLE team_invites ADD COLUMN IF NOT EXISTS last_login_at DATETIME(6)`;
+const MYSQL_MIGRATE_SQLS = [
+  `ALTER TABLE team_invites ADD COLUMN IF NOT EXISTS last_login_at DATETIME(6)`,
+  `ALTER TABLE team_invites ADD COLUMN IF NOT EXISTS subadmin_db_creds TEXT`,
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MongoDB helpers
@@ -241,7 +251,7 @@ router.post("/member-auth/init", async (req: Request, res: Response) => {
       await pgQuery(creds, PG_MIGRATE_SQL);
     } else if (creds.dbType === "mysql") {
       await mysqlQuery(creds, MYSQL_INIT_SQL);
-      try { await mysqlQuery(creds, MYSQL_MIGRATE_SQL); } catch { /* column may already exist */ }
+      for (const sql of MYSQL_MIGRATE_SQLS) { try { await mysqlQuery(creds, sql); } catch { /* column may already exist */ } }
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => { await col.countDocuments({}); });
     } else if (creds.dbType === "redis") {
@@ -336,7 +346,7 @@ router.post("/member-auth/invites/create", async (req: Request, res: Response) =
       record = rows[0] ? normRow(rows[0]) : null;
     } else if (creds.dbType === "mysql") {
       await mysqlQuery(creds, MYSQL_INIT_SQL);
-      try { await mysqlQuery(creds, MYSQL_MIGRATE_SQL); } catch { /* column may already exist */ }
+      for (const sql of MYSQL_MIGRATE_SQLS) { try { await mysqlQuery(creds, sql); } catch { /* column may already exist */ } }
       await mysqlQuery(
         creds,
         "INSERT INTO team_invites (id,email,role,permissions,token,status,created_by,created_at) VALUES (?,?,?,?,?,'pending',?,NOW(6))",

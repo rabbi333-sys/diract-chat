@@ -55,7 +55,7 @@ export function useTeamRole(): TeamRole {
             const name = (meta.display_name as string) || memberUser.email?.split('@')[0] || 'Member';
             setUser(null);
             setIsGuest(true); // treats member like a restricted guest (respects permissions)
-            setIsAdmin(role === 'admin');
+            setIsAdmin(role === 'admin' || role === 'sub-admin');
             setPermissions(perms);
             setNotAuthorized(false);
             setDisplayName(name);
