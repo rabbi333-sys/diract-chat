@@ -90,14 +90,14 @@ const getCurl = (dbType: MainDbType, url: string): string => {
 };
 
 /* ── n8n node instructions ─────────────────────────────────────── */
-function getN8nNodes(edgeFnUrl: string): Record<MainDbType, { node: string; fields: { label: string; value: string; isUrl?: boolean }[]; ifPath: string }> {
+function getN8nNodes(apiUrl: string): Record<MainDbType, { node: string; fields: { label: string; value: string; isUrl?: boolean }[]; ifPath: string }> {
   return {
     supabase: {
       node: 'HTTP Request',
       fields: [
         { label: 'Method', value: 'POST' },
-        { label: 'URL', value: edgeFnUrl || 'https://<your-project>.supabase.co/functions/v1/check-ai-status', isUrl: true },
-        { label: 'Body', value: '{ "session_id": "{{ $json.session_id }}" }' },
+        { label: 'URL', value: apiUrl || '<your-app-url>/api/ai-status', isUrl: true },
+        { label: 'Body', value: '{\n  "session_id": "{{ $json.session_id }}",\n  "supabase_url": "https://YOUR-PROJECT.supabase.co",\n  "anon_key": "YOUR-ANON-KEY"\n}' },
         { label: 'Returns', value: '{ "ai_enabled": true | false }' },
       ],
       ifPath: '{{ $json.ai_enabled }}',
@@ -161,11 +161,7 @@ export function AiControlGuide({ defaultDbType = 'supabase', edgeFnUrl = '', acc
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const urlDisplay = activeDb === 'supabase'
-    ? (edgeFnUrl || 'https://<your-project>.supabase.co/functions/v1/check-ai-status')
-    : '';
-
-  const n8nNodes = getN8nNodes(urlDisplay);
+  const n8nNodes = getN8nNodes(edgeFnUrl || '<your-app-url>/api/ai-status');
   const n8n = n8nNodes[activeDb];
 
   const getSetupCode = (): { code: string; lang: string } => {
@@ -237,21 +233,22 @@ export function AiControlGuide({ defaultDbType = 'supabase', edgeFnUrl = '', acc
         </div>
       </div>
 
-      {/* ── Step 2: (Supabase only) Deploy edge function ── */}
+      {/* ── Step 2: (Supabase only) API Endpoint — no Edge Function needed ── */}
       {activeDb === 'supabase' && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             {stepBall(2)}
-            <p className="text-xs font-semibold text-foreground">Deploy Edge Function</p>
+            <p className="text-xs font-semibold text-foreground">Use the built-in AI Status endpoint</p>
           </div>
           <div className="ml-7 space-y-2">
-            <p className="text-[11px] text-muted-foreground">Run this command using Supabase CLI:</p>
-            <CopyBlock code="supabase functions deploy check-ai-status" lang="bash" />
-            {urlDisplay && (
-              <div className="flex items-center gap-2 mt-2 p-2.5 rounded-xl bg-muted/40 border border-border/40">
-                <code className="flex-1 text-[10px] font-mono text-primary break-all" data-testid="text-ai-edge-fn-url">{urlDisplay}</code>
+            <p className="text-[11px] text-muted-foreground">
+              No Supabase CLI or Edge Function needed. Use the endpoint below — it's built into this app and always available.
+            </p>
+            {edgeFnUrl && (
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/40">
+                <code className="flex-1 text-[10px] font-mono text-emerald-700 dark:text-emerald-400 break-all" data-testid="text-ai-edge-fn-url">{edgeFnUrl}</code>
                 <button
-                  onClick={() => { navigator.clipboard.writeText(urlDisplay); toast.success('URL copied!'); }}
+                  onClick={() => { navigator.clipboard.writeText(edgeFnUrl); toast.success('URL copied!'); }}
                   className="flex-shrink-0 p-1.5 rounded-md hover:bg-muted transition-colors"
                   title="Copy URL"
                   data-testid="button-copy-edge-fn-url"

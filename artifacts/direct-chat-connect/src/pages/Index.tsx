@@ -77,12 +77,8 @@ const Index = () => {
 
   useEffect(() => {
     if (settingsSection !== 'ai-control') return;
-    const active = getActiveConnection();
-    if (active?.url && (!active.dbType || active.dbType === 'supabase')) {
-      setAiEdgeFnUrl(`${active.url.replace(/\/$/, '')}/functions/v1/check-ai-status`);
-    } else {
-      setAiEdgeFnUrl('https://<project-ref>.supabase.co/functions/v1/check-ai-status');
-    }
+    // Use our built-in API server endpoint — no Edge Function deployment needed
+    setAiEdgeFnUrl(`${window.location.origin}/api/ai-status`);
   }, [settingsSection]);
 
   const navItems = roleLoading

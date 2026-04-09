@@ -22,7 +22,8 @@
     "mysql2": "^3.20.0",
     "pg": "^8.20.0",
     "pino": "^9",
-    "pino-http": "^10"
+    "pino-http": "^10",
+    "redis": "^5.11.0"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",
