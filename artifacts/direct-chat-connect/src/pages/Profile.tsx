@@ -196,6 +196,7 @@ const Profile = () => {
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showInviteSql, setShowInviteSql] = useState(false);
+  const [dbSetupNeeded, setDbSetupNeeded] = useState(false);
 
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -217,6 +218,24 @@ const Profile = () => {
   useEffect(() => {
     if (!pageLoading && isAdmin && user) loadInvites(user.id);
   }, [pageLoading, isAdmin, user?.id]);
+
+  // Auto-detect if the new auth RPCs are missing and show the SQL panel
+  useEffect(() => {
+    if (!isAdmin || pageLoading) return;
+    const check = async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (supabase as any).rpc('member_login_by_credentials', {
+          p_email: '__probe__', p_password_hash: '__probe__',
+        });
+        if (error?.message?.includes('function') || error?.message?.includes('does not exist')) {
+          setDbSetupNeeded(true);
+          setShowInviteSql(true);
+        }
+      } catch { /* ignore */ }
+    };
+    check();
+  }, [isAdmin, pageLoading]);
 
   useEffect(() => {
     if (user?.user_metadata?.avatar_url) setAvatarUrl(user.user_metadata.avatar_url);
@@ -545,13 +564,16 @@ const Profile = () => {
                 <button
                   onClick={() => setShowInviteSql(v => !v)}
                   className={cn(
-                    'flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors',
-                    showInviteSql
+                    'relative flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors',
+                    showInviteSql || dbSetupNeeded
                       ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/25'
                       : 'bg-muted text-muted-foreground border-border hover:text-foreground'
                   )}
                   title="Toggle DB setup SQL"
                 >
+                  {dbSetupNeeded && !showInviteSql && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  )}
                   <Database size={9} /> DB Setup
                 </button>
               </div>
@@ -680,20 +702,80 @@ const Profile = () => {
 
             {/* Invite DB setup SQL panel */}
             {showInviteSql && (
-              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5 space-y-3" data-testid="panel-invite-sql">
+              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5 space-y-4" data-testid="panel-invite-sql">
+                {/* Header */}
                 <div className="flex items-start gap-2">
-                  <AlertTriangle size={13} className="text-amber-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">One-time database setup required</p>
+                  <AlertTriangle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                        One-time database setup required
+                      </p>
+                      {dbSetupNeeded && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                          Auto-detected
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-amber-600/80 mt-0.5">
-                      Copy this SQL and run it in your <strong>Supabase → SQL Editor</strong>.
-                      This sets up team invite columns and the login/submission functions members need.
+                      Your database needs new columns and functions for the member login system.
+                      This only needs to be done once.
                     </p>
                   </div>
                 </div>
-                <SqlCopyBlock sql={INVITE_FIX_SQL} />
-                <p className="text-[11px] text-amber-600/70">Run once, then refresh. Members can then submit invite requests and sign in.</p>
-                <button onClick={() => setShowInviteSql(false)} className="text-[11px] text-muted-foreground hover:text-foreground underline">Dismiss</button>
+
+                {/* Steps */}
+                <div className="space-y-2.5">
+                  {/* Step 1: Copy SQL */}
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
+                    <div className="flex-1">
+                      <p className="text-[11px] font-semibold text-foreground mb-1.5">Copy the SQL below</p>
+                      <SqlCopyBlock sql={INVITE_FIX_SQL} />
+                    </div>
+                  </div>
+
+                  {/* Step 2: Open SQL Editor */}
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
+                    <div className="flex-1">
+                      <p className="text-[11px] font-semibold text-foreground mb-1.5">Open your Supabase SQL Editor</p>
+                      {(() => {
+                        const conn = getActiveConnection();
+                        const url = conn?.url || '';
+                        const match = url.match(/https?:\/\/([^.]+)\.supabase\.co/);
+                        const ref = match?.[1];
+                        const editorUrl = ref
+                          ? `https://supabase.com/dashboard/project/${ref}/sql/new`
+                          : 'https://supabase.com/dashboard';
+                        return (
+                          <a
+                            href={editorUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold transition-colors"
+                          >
+                            <Link2 size={11} /> Open SQL Editor ↗
+                          </a>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Step 3: Paste & Run */}
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
+                    <div className="flex-1">
+                      <p className="text-[11px] font-semibold text-foreground">Paste the SQL and click <strong>Run</strong></p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">Then refresh this page — setup complete!</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-amber-500/10">
+                  <p className="text-[10px] text-amber-600/60">Run once per Supabase project</p>
+                  <button onClick={() => { setShowInviteSql(false); setDbSetupNeeded(false); }} className="text-[11px] text-muted-foreground hover:text-foreground underline">Dismiss</button>
+                </div>
               </div>
             )}
 
