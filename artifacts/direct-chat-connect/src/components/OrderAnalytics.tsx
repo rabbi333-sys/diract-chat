@@ -10,7 +10,8 @@ import { format, subDays, startOfWeek, startOfMonth, isWithinInterval, parseISO 
 import {
   TrendingUp, Package, Truck, XCircle, CheckCircle,
   ArrowUpRight, ArrowDownRight, Clock, PackageCheck, Loader2,
-  ShoppingBag, RefreshCw, BarChart2, Download,
+  ShoppingBag, RefreshCw, BarChart2, Download, TrendingDown,
+  BarChart3 as BarChartIcon, PieChart as PieChartIcon,
 } from 'lucide-react';
 
 type ViewMode = 'daily' | 'weekly' | 'monthly';
@@ -430,20 +431,40 @@ const OrderAnalytics = () => {
 
       {/* ── Revenue trend chart ───────────────────────────────────── */}
       {chartData.length > 0 && (
-        <ChartCard title="Revenue Trend">
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={chartData}>
+        <ChartCard
+          title="Revenue Trend"
+          subtitle={`Total ৳${summary.revenue.toLocaleString()} · ${viewMode} breakdown`}
+          icon={TrendingUp}
+          accentColor="text-primary"
+        >
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
               <defs>
                 <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(217,91%,60%)" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="hsl(217,91%,60%)" stopOpacity={0.02} />
+                  <stop offset="0%" stopColor="hsl(217,91%,60%)" stopOpacity={0.28} />
+                  <stop offset="70%" stopColor="hsl(217,91%,60%)" stopOpacity={0.06} />
+                  <stop offset="100%" stopColor="hsl(217,91%,60%)" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="revenue" name="Revenue (৳)" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#revGrad)" dot={false} activeDot={{ r: 5, strokeWidth: 2, fill: 'hsl(var(--background))' }} />
+              <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" strokeOpacity={0.35} vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }}
+                axisLine={false} tickLine={false} dy={6}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                axisLine={false} tickLine={false}
+                tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}`}
+              />
+              <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 1, strokeDasharray: '4 2' }} />
+              <Area
+                type="monotone" dataKey="revenue" name="Revenue (৳)"
+                stroke="hsl(217,91%,60%)" strokeWidth={2.5}
+                fill="url(#revGrad)"
+                dot={false}
+                activeDot={{ r: 5, strokeWidth: 2.5, stroke: 'hsl(217,91%,60%)', fill: 'hsl(var(--background))' }}
+              />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -451,17 +472,48 @@ const OrderAnalytics = () => {
 
       {/* ── Orders bar chart ──────────────────────────────────────── */}
       {chartData.length > 0 && (
-        <ChartCard title={`Orders by ${viewMode === 'daily' ? 'Day' : viewMode === 'weekly' ? 'Week' : 'Month'}`}>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={chartData} barGap={3}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-              <Bar dataKey="total" name="Total" fill="hsl(var(--primary))" radius={[5, 5, 0, 0]} />
-              <Bar dataKey="delivered" name="Delivered" fill="hsl(142,71%,45%)" radius={[5, 5, 0, 0]} />
-              <Bar dataKey="cancelled" name="Cancelled" fill="hsl(0,84%,60%)" radius={[5, 5, 0, 0]} />
+        <ChartCard
+          title={`Orders by ${viewMode === 'daily' ? 'Day' : viewMode === 'weekly' ? 'Week' : 'Month'}`}
+          subtitle={`${summary.total} total · ${summary.statuses.delivered.count} delivered · ${summary.statuses.cancelled.count} cancelled`}
+          icon={BarChartIcon}
+          accentColor="text-violet-500"
+        >
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={chartData} barGap={4} barCategoryGap="30%" margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
+              <defs>
+                <linearGradient id="totalGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(217,91%,60%)" />
+                  <stop offset="100%" stopColor="hsl(217,91%,45%)" />
+                </linearGradient>
+                <linearGradient id="delivGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(142,71%,50%)" />
+                  <stop offset="100%" stopColor="hsl(142,71%,38%)" />
+                </linearGradient>
+                <linearGradient id="cancGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(0,84%,65%)" />
+                  <stop offset="100%" stopColor="hsl(0,84%,52%)" />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" strokeOpacity={0.35} vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }}
+                axisLine={false} tickLine={false} dy={6}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                axisLine={false} tickLine={false} allowDecimals={false}
+              />
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(var(--muted))', fillOpacity: 0.4, radius: 4 }} />
+              <Legend
+                wrapperStyle={{ fontSize: '11px', paddingTop: '14px' }}
+                iconType="circle"
+                iconSize={8}
+                formatter={(value: string) => <span style={{ color: 'hsl(var(--foreground))', fontWeight: 600 }}>{value}</span>}
+              />
+              <Bar dataKey="total" name="Total" fill="url(#totalGrad)" radius={[5, 5, 0, 0]} maxBarSize={40} />
+              <Bar dataKey="delivered" name="Delivered" fill="url(#delivGrad)" radius={[5, 5, 0, 0]} maxBarSize={40} />
+              <Bar dataKey="cancelled" name="Cancelled" fill="url(#cancGrad)" radius={[5, 5, 0, 0]} maxBarSize={40} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -469,16 +521,39 @@ const OrderAnalytics = () => {
 
       {/* ── Status split pie ──────────────────────────────────────── */}
       {statusPieData.length > 0 && (
-        <ChartCard title="Status Split">
-          <ResponsiveContainer width="100%" height={200}>
+        <ChartCard
+          title="Status Distribution"
+          subtitle={`${statusPieData.length} active statuses · ${summary.total} total orders`}
+          icon={PieChartIcon}
+          accentColor="text-amber-500"
+        >
+          <ResponsiveContainer width="100%" height={220}>
             <PieChart>
-              <Pie data={statusPieData} cx="50%" cy="50%" innerRadius={48} outerRadius={75}
-                dataKey="value" strokeWidth={2} stroke="hsl(var(--background))"
+              <defs>
+                {statusPieData.map((entry, i) => (
+                  <radialGradient key={i} id={`pieGrad${i}`} cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stopColor={entry.color} stopOpacity={1} />
+                    <stop offset="100%" stopColor={entry.color} stopOpacity={0.8} />
+                  </radialGradient>
+                ))}
+              </defs>
+              <Pie
+                data={statusPieData} cx="50%" cy="50%"
+                innerRadius={55} outerRadius={85}
+                dataKey="value" strokeWidth={3} stroke="hsl(var(--background))"
+                paddingAngle={3}
               >
-                {statusPieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                {statusPieData.map((entry, i) => (
+                  <Cell key={i} fill={`url(#pieGrad${i})`} />
+                ))}
               </Pie>
               <Tooltip content={<CustomTooltip />} />
-              <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '8px' }} />
+              <Legend
+                wrapperStyle={{ fontSize: '11px', paddingTop: '12px' }}
+                iconType="circle"
+                iconSize={8}
+                formatter={(value: string) => <span style={{ color: 'hsl(var(--foreground))', fontWeight: 600 }}>{value}</span>}
+              />
             </PieChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -599,22 +674,40 @@ const StatusCard = ({ icon: Icon, label, count, change, pct, color, bg, barColor
   );
 };
 
-const ChartCard = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <div className="rounded-2xl border border-border bg-card p-4 transition-all hover:shadow-sm">
-    <h3 className="text-xs font-semibold text-foreground mb-4 tracking-tight">{title}</h3>
-    {children}
+const ChartCard = ({
+  title, subtitle, icon: Icon, accentColor = 'text-primary', children,
+}: {
+  title: string; subtitle?: string; icon?: any; accentColor?: string; children: React.ReactNode;
+}) => (
+  <div className="rounded-2xl border border-border/60 bg-card overflow-hidden transition-all hover:shadow-md hover:border-border">
+    {/* Header */}
+    <div className="flex items-center gap-3 px-5 py-4 border-b border-border/40 bg-muted/20">
+      {Icon && (
+        <div className={cn('p-1.5 rounded-lg bg-background/80 border border-border/40')}>
+          <Icon size={13} className={accentColor} />
+        </div>
+      )}
+      <div>
+        <h3 className="text-[13px] font-bold text-foreground leading-tight">{title}</h3>
+        {subtitle && <p className="text-[10px] text-muted-foreground mt-0.5">{subtitle}</p>}
+      </div>
+    </div>
+    {/* Body */}
+    <div className="p-4 pt-5">{children}</div>
   </div>
 );
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-card border border-border rounded-xl shadow-lg p-3 min-w-[130px]">
-      {label && <p className="text-[11px] font-semibold text-foreground mb-2">{label}</p>}
+    <div className="bg-card/95 backdrop-blur-sm border border-border/60 rounded-xl shadow-xl p-3 min-w-[140px]">
+      {label && (
+        <p className="text-[11px] font-bold text-foreground mb-2 pb-2 border-b border-border/40">{label}</p>
+      )}
       {payload.map((entry: any, i: number) => (
         <div key={i} className="flex items-center justify-between gap-4 py-0.5">
           <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+            <div className="w-2 h-2 rounded-full shadow-sm" style={{ backgroundColor: entry.color }} />
             <span className="text-[10px] text-muted-foreground">{entry.name}</span>
           </div>
           <span className="text-[10px] font-bold text-foreground">
