@@ -144,6 +144,7 @@ const FAILURES_SQL: Record<MainDbType, string> = {
   error_details jsonb DEFAULT '{}',
   source text DEFAULT 'n8n',
   session_id text,
+  sender_id text,
   recipient text,
   severity text DEFAULT 'error',
   resolved boolean DEFAULT false,
@@ -155,7 +156,9 @@ DROP POLICY IF EXISTS "Allow all" ON public.failed_automations;
 -- Dev policy: allows public insert from n8n/webhooks.
 -- Production: use service_role key in n8n (bypasses RLS) and tighten this policy.
 CREATE POLICY "Allow all" ON public.failed_automations FOR ALL USING (true);
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.failed_automations; EXCEPTION WHEN OTHERS THEN NULL; END $$;`,
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.failed_automations; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+-- ⚠️ If you already have a failed_automations table, add the new column:
+ALTER TABLE public.failed_automations ADD COLUMN IF NOT EXISTS sender_id text;`,
 
   postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
 CREATE TABLE IF NOT EXISTS failed_automations (
@@ -164,11 +167,14 @@ CREATE TABLE IF NOT EXISTS failed_automations (
   error_message TEXT NOT NULL,
   source VARCHAR(100) DEFAULT 'n8n',
   session_id VARCHAR(255),
+  sender_id VARCHAR(255),
   recipient VARCHAR(255),
   severity VARCHAR(50) DEFAULT 'error',
   resolved BOOLEAN DEFAULT false,
   created_at TIMESTAMP DEFAULT NOW()
-);`,
+);
+-- If you already have the table, add the new column:
+ALTER TABLE failed_automations ADD COLUMN IF NOT EXISTS sender_id VARCHAR(255);`,
 
   mysql: `-- Requires MySQL 8.0.13+ for DEFAULT (UUID()); use app-generated UUIDs on older versions
 CREATE TABLE IF NOT EXISTS failed_automations (
@@ -177,20 +183,25 @@ CREATE TABLE IF NOT EXISTS failed_automations (
   error_message TEXT NOT NULL,
   source VARCHAR(100) DEFAULT 'n8n',
   session_id VARCHAR(255),
+  sender_id VARCHAR(255),
   recipient VARCHAR(255),
   severity VARCHAR(50) DEFAULT 'error',
   resolved TINYINT(1) DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);`,
+);
+-- If you already have the table, add the new column:
+ALTER TABLE failed_automations ADD COLUMN IF NOT EXISTS sender_id VARCHAR(255);`,
 
   mongodb: `// MongoDB creates collections automatically on first insert.
-db.createCollection("failed_automations");`,
+db.createCollection("failed_automations");
+// Recommended index for fast lookup by sender:
+db.failed_automations.createIndex({ sender_id: 1 });`,
 
   redis: `# Redis key pattern for failures:
 #   failure:{workflow}:{timestamp}
 #
-# HSET failure:WorkflowName:1234567890 workflow_name "WorkflowName" error_message "..." severity "error"
-# Or JSON: SET failure:{workflow}:{ts} '{"error":"..."}' EX 604800`,
+# HSET failure:WorkflowName:1234567890 workflow_name "WorkflowName" sender_id "1234567890" error_message "..." severity "error"
+# Or JSON: SET failure:{workflow}:{ts} '{"sender_id":"1234567890","error":"..."}' EX 604800`,
 };
 
 /* orders */
@@ -417,7 +428,7 @@ const FULL_SETUP_SQL_REDIS = `# ════════════════
 # HSET handoff:{session_id} sender_id "1234567890" recipient "Name" reason "..." priority "normal"
 
 # Failed Automations  →  failure:{workflow}:{timestamp}
-# HSET failure:BotFlow:1234567890 workflow_name "BotFlow" error_message "..."
+# HSET failure:BotFlow:1234567890 workflow_name "BotFlow" sender_id "1234567890" error_message "..."
 
 # AI Control  →  ai_control:{session_id}
 # SET ai_control:{session_id} "true"
@@ -506,30 +517,33 @@ VALUES (
     colorBg: 'bg-destructive/10',
     colorBorder: 'border-destructive/25',
     fields: [
+      { name: 'sender_id',    example: 'Facebook / WhatsApp User ID' },
       { name: 'workflow_name', example: 'WhatsApp Bot' },
       { name: 'error_message', example: 'API timeout after 30s' },
       { name: 'severity',      example: 'error / warning / critical' },
       { name: 'source',        example: 'n8n' },
     ],
-    bodyJson: { workflow_name: 'WhatsApp Bot Flow', error_message: 'API timeout after 30s', severity: 'error', source: 'n8n' },
+    bodyJson: { sender_id: '1234567890', workflow_name: 'WhatsApp Bot Flow', error_message: 'API timeout after 30s', severity: 'error', source: 'n8n' },
     createSql: FAILURES_SQL,
     n8nInsertQuery: {
-      pg: `INSERT INTO failed_automations (workflow_name, error_message, severity, source, session_id, recipient)
+      pg: `INSERT INTO failed_automations (workflow_name, error_message, severity, source, session_id, sender_id, recipient)
 VALUES (
   '{{ $json.workflow_name }}',
   '{{ $json.error_message }}',
   '{{ $json.severity }}',
   '{{ $json.source }}',
   '{{ $json.session_id }}',
+  '{{ $json.sender_id }}',
   '{{ $json.recipient }}'
 );`,
-      mysql: `INSERT INTO failed_automations (workflow_name, error_message, severity, source, session_id, recipient)
+      mysql: `INSERT INTO failed_automations (workflow_name, error_message, severity, source, session_id, sender_id, recipient)
 VALUES (
   '{{ $json.workflow_name }}',
   '{{ $json.error_message }}',
   '{{ $json.severity }}',
   '{{ $json.source }}',
   '{{ $json.session_id }}',
+  '{{ $json.sender_id }}',
   '{{ $json.recipient }}'
 );`,
     },
@@ -538,7 +552,8 @@ VALUES (
   "error_message": "{{ $json.error_message }}",
   "severity":      "{{ $json.severity }}",
   "source":        "{{ $json.source }}",
-  "session_id":    "{{ $json.session_id }}"
+  "session_id":    "{{ $json.session_id }}",
+  "sender_id":     "{{ $json.sender_id }}"
 }`,
     redisKey: 'failure:{{ $json.workflow_name }}:{{ Date.now() }}',
     redisValue: '{{ JSON.stringify($json) }}',
