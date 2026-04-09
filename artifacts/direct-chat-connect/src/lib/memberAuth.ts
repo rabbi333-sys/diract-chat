@@ -160,6 +160,20 @@ export async function createMemberUser(opts: {
   };
 }
 
+// ── Admin: confirm a member's email (bypasses email verification) ────────────
+// Returns true if confirmation succeeded (service role key was valid).
+export async function confirmMemberEmail(url: string, serviceKey: string, userId: string): Promise<boolean> {
+  try {
+    const admin = createClient(url, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { error } = await admin.auth.admin.updateUserById(userId, { email_confirm: true });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 // ── Admin: delete a member user (service role key required) ─────────────────
 
 export async function deleteMemberUser(url: string, serviceKey: string, userId: string) {

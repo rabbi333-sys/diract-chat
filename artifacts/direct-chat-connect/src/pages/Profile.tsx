@@ -595,7 +595,22 @@ const Profile = () => {
                         <Copy size={9} /> Copy
                       </button>
                     </div>
-                    <p className="text-[10px] text-muted-foreground/60">The person signs up using this link to get team access.</p>
+                    {(() => {
+                      const conn = getActiveConnection();
+                      const stored = getStoredConnection();
+                      const srvKey = conn?.serviceRoleKey || stored?.service_role_key || '';
+                      const hasRealServiceKey = srvKey && srvKey !== conn?.anonKey;
+                      return hasRealServiceKey ? (
+                        <p className="text-[10px] text-emerald-600 dark:text-emerald-400/70">
+                          ✓ Members get instant access — no email verification required.
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                          ⚠ Service Role Key not found. Members may receive a verification email.
+                          Add it in your connection settings to enable instant access.
+                        </p>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

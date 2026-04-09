@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Loader2, ShieldCheck, ShieldAlert, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { getConnections, setActiveConnection } from '@/lib/db-config';
-import { createMemberUser, getMemberClient, setMemberSetup } from '@/lib/memberAuth';
+import { confirmMemberEmail, createMemberUser, getMemberClient, setMemberSetup } from '@/lib/memberAuth';
 
 const DB_SETTINGS_KEY = 'chat_monitor_db_settings';
 const PLATFORM_CONNS_KEY = 'chat_monitor_platform_connections';
@@ -245,6 +245,14 @@ const InviteAccept = () => {
 
       const newUserId = createData?.user?.id;
 
+      // Confirm email immediately (bypasses Supabase email verification requirement).
+      // This uses the service role key — if admin API succeeds, no verification email needed.
+      if (newUserId) {
+        await confirmMemberEmail(supabaseUrl, effectiveServiceKey, newUserId);
+        // Ignore result — if it fails (anon key instead of service key), sign-in will
+        // surface the right error and guide the user accordingly.
+      }
+
       // Sign in immediately
       const memberClient = getMemberClient();
       if (!memberClient) throw new Error('No workspace client available');
@@ -332,7 +340,7 @@ const InviteAccept = () => {
     return (
       <Screen>
         <Loader2 size={28} className="animate-spin text-primary mx-auto" />
-        <p className="text-sm text-muted-foreground text-center mt-3">Creating your account…</p>
+        <p className="text-sm text-muted-foreground text-center mt-3">Accepting invitation…</p>
       </Screen>
     );
   }
@@ -385,17 +393,9 @@ const InviteAccept = () => {
             </div>
           )}
 
-          {!hasServiceKey && (
-            <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3">
-              <p className="text-xs text-blue-600 dark:text-blue-400">
-                For instant access, make sure "Email confirmations" is disabled in your Supabase project (Auth → Settings).
-              </p>
-            </div>
-          )}
-
           <form onSubmit={handleRegister} className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Your Email</Label>
               <Input
                 id="email"
                 type="email"
@@ -431,8 +431,8 @@ const InviteAccept = () => {
                 autoComplete="new-password"
               />
             </div>
-            <Button type="submit" className="w-full mt-1">
-              Create Account & Sign In
+            <Button type="submit" className="w-full mt-1 gap-2">
+              <ShieldCheck size={15} /> Accept Invitation
             </Button>
           </form>
 
