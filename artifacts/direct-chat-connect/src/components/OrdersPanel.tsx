@@ -1,24 +1,24 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { format } from 'date-fns';
+import { format, isToday, isYesterday } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
   Package, Clock, CheckCircle, XCircle, Truck, PackageCheck,
-  Download, Search, Trash2, Webhook,
+  Download, Search, Trash2, Webhook, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrderDetailSheet from './OrderDetailSheet';
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
-const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; icon: any }> = {
-  pending:    { label: 'pending',    bg: 'bg-amber-100 dark:bg-amber-900/40',   text: 'text-amber-700 dark:text-amber-300',  icon: Clock },
-  confirmed:  { label: 'confirmed',  bg: 'bg-blue-100 dark:bg-blue-900/40',     text: 'text-blue-700 dark:text-blue-300',    icon: CheckCircle },
-  processing: { label: 'processing', bg: 'bg-violet-100 dark:bg-violet-900/40', text: 'text-violet-700 dark:text-violet-300',icon: Package },
-  shipped:    { label: 'shipped',    bg: 'bg-cyan-100 dark:bg-cyan-900/40',     text: 'text-cyan-700 dark:text-cyan-300',    icon: Truck },
-  delivered:  { label: 'delivered',  bg: 'bg-emerald-100 dark:bg-emerald-900/40',text: 'text-emerald-700 dark:text-emerald-300',icon: PackageCheck },
-  cancelled:  { label: 'cancelled',  bg: 'bg-red-100 dark:bg-red-900/40',       text: 'text-red-700 dark:text-red-300',      icon: XCircle },
+const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; dot: string; icon: any }> = {
+  pending:    { label: 'Pending',    bg: 'bg-amber-50 dark:bg-amber-900/30',    text: 'text-amber-700 dark:text-amber-300',   dot: 'bg-amber-400',   icon: Clock },
+  confirmed:  { label: 'Confirmed',  bg: 'bg-blue-50 dark:bg-blue-900/30',      text: 'text-blue-700 dark:text-blue-300',     dot: 'bg-blue-500',    icon: CheckCircle },
+  processing: { label: 'Processing', bg: 'bg-violet-50 dark:bg-violet-900/30',  text: 'text-violet-700 dark:text-violet-300', dot: 'bg-violet-500',  icon: Package },
+  shipped:    { label: 'Shipped',    bg: 'bg-cyan-50 dark:bg-cyan-900/30',      text: 'text-cyan-700 dark:text-cyan-300',     dot: 'bg-cyan-500',    icon: Truck },
+  delivered:  { label: 'Delivered',  bg: 'bg-emerald-50 dark:bg-emerald-900/30',text: 'text-emerald-700 dark:text-emerald-300',dot: 'bg-emerald-500', icon: PackageCheck },
+  cancelled:  { label: 'Cancelled',  bg: 'bg-red-50 dark:bg-red-900/30',        text: 'text-red-600 dark:text-red-400',       dot: 'bg-red-500',     icon: XCircle },
 };
 
 // ─── Order interface ──────────────────────────────────────────────────────────
@@ -129,6 +129,34 @@ function exportToCSV(orders: Order[]) {
   toast.success(`${orders.length} orders exported`);
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function smartDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (isToday(d))     return `Today, ${format(d, 'h:mm a')}`;
+  if (isYesterday(d)) return `Yesterday, ${format(d, 'h:mm a')}`;
+  return format(d, 'dd MMM yyyy');
+}
+
+function initials(name?: string): string {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  return parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase();
+}
+
+const AVATAR_COLORS = [
+  'bg-blue-500', 'bg-violet-500', 'bg-emerald-500',
+  'bg-amber-500', 'bg-cyan-500', 'bg-pink-500', 'bg-indigo-500',
+];
+
+function avatarColor(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[h];
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const OrdersPanel = () => {
@@ -173,131 +201,188 @@ const OrdersPanel = () => {
   const newLocalCount = localOrders.length;
 
   return (
-    <div className="flex flex-col h-full gap-2.5">
+    <div className="flex flex-col h-full gap-3">
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 flex-shrink-0">
+      {/* ── Toolbar ─────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2.5 flex-shrink-0">
+        {/* Search */}
         <div className="relative flex-1">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none" />
           <input
             type="text"
-            placeholder="Search by product, customer, phone, order ID..."
+            placeholder="Search orders, customers, phone..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 placeholder:text-muted-foreground/50"
+            className="w-full pl-9 pr-8 py-2.5 text-[13px] rounded-xl border border-border/60 bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all placeholder:text-muted-foreground/40"
           />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground transition-colors"
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
+
+        {/* Live badge */}
         {newLocalCount > 0 && (
-          <div className="flex items-center gap-1.5 text-[10px] text-amber-600 bg-amber-500/10 px-2.5 py-2 rounded-xl border border-amber-500/20 flex-shrink-0">
-            <Webhook size={11} />
-            <span className="font-bold">{newLocalCount} live</span>
+          <div className="flex items-center gap-1.5 text-[11px] text-amber-600 bg-amber-500/10 px-3 py-2.5 rounded-xl border border-amber-500/20 flex-shrink-0 font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+            {newLocalCount} live
           </div>
         )}
+
+        {/* Result count */}
+        {orders.length > 0 && (
+          <span className="text-[11px] text-muted-foreground font-medium flex-shrink-0 hidden sm:block">
+            {filtered.length === orders.length ? `${orders.length} orders` : `${filtered.length} / ${orders.length}`}
+          </span>
+        )}
+
+        {/* CSV button */}
         <button
           onClick={() => exportToCSV(filtered)}
           disabled={!filtered.length}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all flex-shrink-0",
+            "flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold transition-all flex-shrink-0",
             filtered.length
-              ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+              ? "bg-primary text-white hover:bg-primary/90 shadow-sm hover:shadow-md"
               : "bg-muted text-muted-foreground cursor-not-allowed"
           )}
         >
-          <Download size={13} /> CSV
+          <Download size={13} /> Export CSV
         </button>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto scrollbar-hide min-h-0 rounded-xl border border-border bg-card">
+      {/* ── Table / Empty states ─────────────────────────────────────── */}
+      <div className="flex-1 overflow-auto scrollbar-hide min-h-0 rounded-2xl border border-border/60 bg-card">
         {!orders.length ? (
-          <div className="flex flex-col items-center justify-center h-full py-20 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center mb-3">
-              <Package size={24} className="text-muted-foreground/40" />
+          <div className="flex flex-col items-center justify-center h-full py-20 text-center gap-3">
+            <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center">
+              <Package size={28} className="text-muted-foreground/30" />
             </div>
-            <p className="text-sm font-semibold text-muted-foreground">No orders yet</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Orders from n8n will appear here</p>
+            <div>
+              <p className="text-sm font-semibold text-foreground">No orders yet</p>
+              <p className="text-xs text-muted-foreground mt-1">Orders from n8n will appear here automatically</p>
+            </div>
           </div>
         ) : !filtered.length ? (
-          <div className="flex flex-col items-center justify-center h-full py-20 text-center">
-            <Search size={24} className="text-muted-foreground/40 mb-3" />
-            <p className="text-sm font-semibold text-muted-foreground">No matches found</p>
+          <div className="flex flex-col items-center justify-center h-full py-20 text-center gap-3">
+            <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center">
+              <Search size={22} className="text-muted-foreground/30" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">No results</p>
+              <p className="text-xs text-muted-foreground mt-1">Try a different search term</p>
+            </div>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full">
             <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Order Number</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Customer</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Phone</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Total</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Status</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Date</th>
-                <th className="px-3 py-3 w-8"></th>
+              <tr className="border-b border-border/60 bg-muted/30 sticky top-0">
+                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3">Order</th>
+                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3">Customer</th>
+                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3 hidden md:table-cell">Phone</th>
+                <th className="text-right text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3">Total</th>
+                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3">Status</th>
+                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3 hidden sm:table-cell">Date</th>
+                <th className="w-10 px-3 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-border/50">
-              {filtered.map(order => {
+            <tbody>
+              {filtered.map((order, idx) => {
                 const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.pending;
+                const StatusIcon = cfg.icon;
                 const total = Number(order.total_price) || Number(order.amount_to_collect) || 0;
+                const orderId = order.merchant_order_id || order.id.slice(0, 8).toUpperCase();
+                const initStr = initials(order.customer_name);
+                const avatarBg = avatarColor(order.id);
 
                 return (
                   <tr
                     key={order.id}
                     onClick={() => setSelectedOrderId(order.id)}
-                    className="hover:bg-muted/30 transition-colors cursor-pointer group"
+                    className={cn(
+                      "cursor-pointer group transition-colors hover:bg-primary/4",
+                      idx % 2 === 0 ? 'bg-transparent' : 'bg-muted/10',
+                      idx !== filtered.length - 1 && 'border-b border-border/30'
+                    )}
                   >
-                    {/* Order Number */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="font-semibold text-foreground text-xs">
-                        {order.merchant_order_id || order.id.slice(0, 8).toUpperCase()}
-                      </span>
-                      {order._source === 'local' && (
-                        <span className="ml-1.5 text-[8px] font-bold text-amber-600 bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">
-                          LIVE
+                    {/* Order ID */}
+                    <td className="px-4 py-3.5 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[12px] font-bold text-foreground">
+                          {orderId}
                         </span>
+                        {order._source === 'local' && (
+                          <span className="text-[8px] font-bold text-amber-600 bg-amber-400/15 px-1.5 py-0.5 rounded-full border border-amber-400/30">
+                            LIVE
+                          </span>
+                        )}
+                      </div>
+                      {order.product_name && (
+                        <p className="text-[10px] text-muted-foreground/60 mt-0.5 truncate max-w-[120px]">
+                          {order.product_name}
+                        </p>
                       )}
                     </td>
 
                     {/* Customer */}
-                    <td className="px-4 py-3">
-                      <span className="text-xs text-foreground font-medium">
-                        {order.customer_name || '—'}
-                      </span>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2.5">
+                        <div className={cn(
+                          'w-7 h-7 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0',
+                          avatarBg
+                        )}>
+                          {initStr}
+                        </div>
+                        <span className="text-[12px] text-foreground font-medium truncate max-w-[100px]">
+                          {order.customer_name || '—'}
+                        </span>
+                      </div>
                     </td>
 
                     {/* Phone */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs text-muted-foreground">
+                    <td className="px-4 py-3.5 whitespace-nowrap hidden md:table-cell">
+                      <span className="text-[12px] text-muted-foreground font-mono">
                         {order.customer_phone || '—'}
                       </span>
                     </td>
 
                     {/* Total */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs font-semibold text-foreground">
+                    <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                      <span className="text-[13px] font-bold text-foreground">
                         ৳{total.toLocaleString()}
                       </span>
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       <span className={cn(
-                        "inline-block text-[11px] font-semibold px-2.5 py-1 rounded-md",
-                        cfg.bg, cfg.text
+                        "inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border",
+                        cfg.bg, cfg.text,
+                        order.status === 'pending'    && 'border-amber-200 dark:border-amber-800/50',
+                        order.status === 'confirmed'  && 'border-blue-200 dark:border-blue-800/50',
+                        order.status === 'processing' && 'border-violet-200 dark:border-violet-800/50',
+                        order.status === 'shipped'    && 'border-cyan-200 dark:border-cyan-800/50',
+                        order.status === 'delivered'  && 'border-emerald-200 dark:border-emerald-800/50',
+                        order.status === 'cancelled'  && 'border-red-200 dark:border-red-800/50',
                       )}>
+                        <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot)} />
                         {cfg.label}
                       </span>
                     </td>
 
                     {/* Date */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs text-muted-foreground">
-                        {format(new Date(order.created_at), 'M/d/yyyy')}
+                    <td className="px-4 py-3.5 whitespace-nowrap hidden sm:table-cell">
+                      <span className="text-[11px] text-muted-foreground">
+                        {smartDate(order.created_at)}
                       </span>
                     </td>
 
                     {/* Delete */}
-                    <td className="px-3 py-3 text-right">
+                    <td className="px-3 py-3.5 text-right">
                       <button
                         onClick={e => {
                           e.stopPropagation();
@@ -306,7 +391,7 @@ const OrdersPanel = () => {
                           }
                         }}
                         disabled={deleteMutation.isPending}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-red-500 p-1 rounded disabled:opacity-30"
+                        className="opacity-0 group-hover:opacity-100 transition-all text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 p-1.5 rounded-lg disabled:opacity-20"
                       >
                         <Trash2 size={13} />
                       </button>
