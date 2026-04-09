@@ -10,7 +10,7 @@ import { format, subDays, startOfWeek, startOfMonth, isWithinInterval, parseISO 
 import {
   TrendingUp, TrendingDown, Package, Truck, XCircle, CheckCircle,
   ArrowUpRight, ArrowDownRight, Clock, PackageCheck, Loader2,
-  ShoppingBag, CreditCard, Banknote, RefreshCw, BarChart2,
+  ShoppingBag, RefreshCw, BarChart2,
 } from 'lucide-react';
 
 type ViewMode = 'daily' | 'weekly' | 'monthly';
@@ -70,14 +70,11 @@ const OrderAnalytics = () => {
     const total = filteredOrders.length;
     const revenue = filteredOrders.reduce((s, o) => s + (Number(o.total_price) || 0), 0);
     const collectAmount = filteredOrders.reduce((s, o) => s + (Number(o.amount_to_collect) || 0), 0);
-    const paid = filteredOrders.filter(o => o.payment_status === 'paid').length;
-    const unpaid = filteredOrders.filter(o => o.payment_status !== 'paid').length;
-
     const prevTotal = previousOrders.length;
     const prevRevenue = previousOrders.reduce((s, o) => s + (Number(o.total_price) || 0), 0);
 
     return {
-      total, revenue, collectAmount, paid, unpaid,
+      total, revenue, collectAmount,
       totalChange: calcChange(total, prevTotal),
       revenueChange: calcChange(revenue, prevRevenue),
       statuses: {
@@ -122,10 +119,6 @@ const OrderAnalytics = () => {
     [summary]
   );
 
-  const paymentData = useMemo(() => [
-    { name: 'Paid', value: summary.paid, color: 'hsl(142,71%,45%)' },
-    { name: 'Unpaid', value: summary.unpaid, color: 'hsl(38,92%,50%)' },
-  ].filter(d => d.value > 0), [summary]);
 
   if (isLoading) {
     return (
@@ -202,24 +195,14 @@ const OrderAnalytics = () => {
       </div>
 
       {/* ── Order summary row ─────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard
-          icon={ShoppingBag}
-          label="Total Orders"
-          value={summary.total}
-          change={summary.totalChange}
-          iconColor="text-foreground"
-          iconBg="bg-muted/60"
-        />
-        <StatCard
-          icon={CreditCard}
-          label="Paid"
-          value={summary.paid}
-          iconColor="text-emerald-600"
-          iconBg="bg-emerald-500/10"
-          suffix={summary.total > 0 ? `${Math.round((summary.paid / summary.total) * 100)}%` : undefined}
-        />
-      </div>
+      <StatCard
+        icon={ShoppingBag}
+        label="Total Orders"
+        value={summary.total}
+        change={summary.totalChange}
+        iconColor="text-foreground"
+        iconBg="bg-muted/60"
+      />
 
       {/* ── Status breakdown grid (all 6 statuses) ───────────────── */}
       <div>
@@ -245,45 +228,6 @@ const OrderAnalytics = () => {
         </div>
       </div>
 
-      {/* ── Payment status bar ────────────────────────────────────── */}
-      {summary.total > 0 && (
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Banknote size={14} className="text-muted-foreground" />
-              <span className="text-xs font-semibold text-foreground">Payment Status</span>
-            </div>
-            <div className="flex items-center gap-3 text-[11px]">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-                <span className="text-muted-foreground">Paid: <span className="font-semibold text-foreground">{summary.paid}</span></span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-                <span className="text-muted-foreground">Unpaid: <span className="font-semibold text-foreground">{summary.unpaid}</span></span>
-              </span>
-            </div>
-          </div>
-          <div className="w-full h-3 rounded-full bg-muted overflow-hidden flex">
-            {summary.paid > 0 && (
-              <div
-                className="h-full bg-emerald-500 transition-all duration-700 rounded-l-full"
-                style={{ width: `${Math.round((summary.paid / summary.total) * 100)}%` }}
-              />
-            )}
-            {summary.unpaid > 0 && (
-              <div
-                className="h-full bg-amber-400 transition-all duration-700 rounded-r-full"
-                style={{ width: `${Math.round((summary.unpaid / summary.total) * 100)}%` }}
-              />
-            )}
-          </div>
-          <div className="flex justify-between text-[10px] text-muted-foreground mt-1.5">
-            <span>{summary.total > 0 ? Math.round((summary.paid / summary.total) * 100) : 0}% paid</span>
-            <span>{summary.total > 0 ? Math.round((summary.unpaid / summary.total) * 100) : 0}% unpaid</span>
-          </div>
-        </div>
-      )}
 
       {/* ── Revenue trend chart ───────────────────────────────────── */}
       {chartData.length > 0 && (
@@ -324,40 +268,21 @@ const OrderAnalytics = () => {
         </ChartCard>
       )}
 
-      {/* ── Pie charts row ────────────────────────────────────────── */}
-      {(statusPieData.length > 0 || paymentData.length > 1) && (
-        <div className="grid grid-cols-2 gap-3">
-          {statusPieData.length > 0 && (
-            <ChartCard title="Status Split">
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie data={statusPieData} cx="50%" cy="50%" innerRadius={48} outerRadius={75}
-                    dataKey="value" strokeWidth={2} stroke="hsl(var(--background))"
-                  >
-                    {statusPieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '8px' }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          )}
-          {paymentData.length > 1 && (
-            <ChartCard title="Payment Split">
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie data={paymentData} cx="50%" cy="50%" innerRadius={48} outerRadius={75}
-                    dataKey="value" strokeWidth={2} stroke="hsl(var(--background))"
-                  >
-                    {paymentData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '8px' }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          )}
-        </div>
+      {/* ── Status split pie ──────────────────────────────────────── */}
+      {statusPieData.length > 0 && (
+        <ChartCard title="Status Split">
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={statusPieData} cx="50%" cy="50%" innerRadius={48} outerRadius={75}
+                dataKey="value" strokeWidth={2} stroke="hsl(var(--background))"
+              >
+                {statusPieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+              </Pie>
+              <Tooltip content={<CustomTooltip />} />
+              <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '8px' }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
       )}
 
       {/* Empty state */}
