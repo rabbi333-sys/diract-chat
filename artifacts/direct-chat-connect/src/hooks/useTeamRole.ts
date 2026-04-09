@@ -7,6 +7,7 @@ import { hasMemberSetup, getMemberUser, getMemberClient } from '@/lib/memberAuth
 export interface TeamRole {
   user: User | null;
   isAdmin: boolean;
+  role: string;
   permissions: string[];
   notAuthorized: boolean;
   displayName: string;
@@ -34,6 +35,7 @@ function getDisplayName(user: User): string {
 export function useTeamRole(): TeamRole {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [role, setRole] = useState('');
   const [permissions, setPermissions] = useState<string[]>([]);
   const [notAuthorized, setNotAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -56,6 +58,7 @@ export function useTeamRole(): TeamRole {
             setUser(null);
             setIsGuest(true); // treats member like a restricted guest (respects permissions)
             setIsAdmin(role === 'admin' || role === 'sub-admin');
+            setRole(role);
             setPermissions(perms);
             setNotAuthorized(false);
             setDisplayName(name);
@@ -167,5 +170,5 @@ export function useTeamRole(): TeamRole {
 
   const initials = getInitials(displayName);
 
-  return { user, isAdmin, permissions, notAuthorized, displayName, initials, loading, isGuest };
+  return { user, isAdmin, role, permissions, notAuthorized, displayName, initials, loading, isGuest };
 }

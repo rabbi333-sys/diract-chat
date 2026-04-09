@@ -57,7 +57,7 @@ function restoreSubAdminDb(): void {
         is_active: true,
       }));
     } else if (creds.dbType && creds.dbType !== 'supabase') {
-      storeMemberProxyCreds({
+      const proxyCreds: DbCreds = {
         dbType: creds.dbType as DbCreds['dbType'],
         host: creds.host,
         port: creds.port,
@@ -65,7 +65,33 @@ function restoreSubAdminDb(): void {
         dbPassword: creds.dbPassword,
         dbName: creds.dbName,
         connectionString: creds.connectionString,
-      });
+      };
+      storeMemberProxyCreds(proxyCreds);
+      // Also register as an active connection so db-config hooks see it
+      const existing = getConnections();
+      const label = `${creds.dbType}://${creds.host || creds.connectionString?.slice(0, 20) || 'subadmin'}`;
+      const alreadyExists = existing.find(c => c.connectionString === creds.connectionString && c.url === creds.host);
+      let connId: string;
+      if (!alreadyExists) {
+        const newConn = {
+          id: `subadmin-${Date.now()}`,
+          name: label,
+          dbType: creds.dbType as MainDbType,
+          url: creds.host || '',
+          anonKey: '',
+          connectionString: creds.connectionString,
+          host: creds.host,
+          port: creds.port,
+          dbUsername: creds.dbUsername,
+          dbName: creds.dbName,
+          createdAt: new Date().toISOString(),
+        };
+        localStorage.setItem('meta_db_connections', JSON.stringify([...existing, newConn]));
+        connId = newConn.id;
+      } else {
+        connId = alreadyExists.id;
+      }
+      setActiveConnection(connId);
     }
   } catch { /* ignore */ }
 }
@@ -91,10 +117,30 @@ const MemberLogin = () => {
   const [wsDbName, setWsDbName] = useState('');
   const [wsConnStr, setWsConnStr] = useState('');
 
+  // Own DB form (Sub-Admin only)
+  const [showOwnDbForm, setShowOwnDbForm] = useState(false);
+  const [ownDbType, setOwnDbType] = useState<MainDbType>('supabase');
+  const [ownUrl, setOwnUrl] = useState('');
+  const [ownAnonKey, setOwnAnonKey] = useState('');
+  const [ownShowKey, setOwnShowKey] = useState(false);
+  const [ownHost, setOwnHost] = useState('');
+  const [ownPort, setOwnPort] = useState('');
+  const [ownUsername, setOwnUsername] = useState('');
+  const [ownPassword, setOwnPassword] = useState('');
+  const [ownDbName, setOwnDbName] = useState('');
+  const [ownConnStr, setOwnConnStr] = useState('');
+  const [ownSaving, setOwnSaving] = useState(false);
+
   useEffect(() => {
     const connected = hasWorkspaceCreds();
     setWsConnected(connected);
     if (!connected) setShowWsForm(true);
+    // If already logged in as sub-admin without own DB, show form immediately
+    getMemberSession().then(session => {
+      if (session?.role === 'sub-admin' && !localStorage.getItem(SUBADMIN_DB_KEY)) {
+        setShowOwnDbForm(true);
+      }
+    });
   }, []);
 
   const handleConnectWorkspace = async () => {
@@ -180,7 +226,13 @@ const MemberLogin = () => {
           inviteId: member.id as string,
           isSelfDb,
         });
-        if (isSelfDb) restoreSubAdminDb();
+        if (isSelfDb) {
+          restoreSubAdminDb();
+          if (!localStorage.getItem(SUBADMIN_DB_KEY)) {
+            setShowOwnDbForm(true);
+            return;
+          }
+        }
         navigate('/');
         return;
       }
@@ -194,7 +246,13 @@ const MemberLogin = () => {
         }
       } else {
         const session = await getMemberSession();
-        if (session?.role === 'sub-admin') restoreSubAdminDb();
+        if (session?.role === 'sub-admin') {
+          restoreSubAdminDb();
+          if (!localStorage.getItem(SUBADMIN_DB_KEY)) {
+            setShowOwnDbForm(true);
+            return;
+          }
+        }
         navigate('/');
       }
     } catch (err) {
@@ -208,6 +266,141 @@ const MemberLogin = () => {
   const currentDbType = DB_TYPES.find(t => t.value === wsDbType);
   const needsConnStr = wsDbType === 'mongodb' || wsDbType === 'redis';
   const needsHostFields = wsDbType === 'postgresql' || wsDbType === 'mysql';
+  const ownNeedsConnStr = ownDbType === 'mongodb' || ownDbType === 'redis';
+  const ownNeedsHostFields = ownDbType === 'postgresql' || ownDbType === 'mysql';
+  const ownCurrentDbType = DB_TYPES.find(t => t.value === ownDbType);
+
+  const handleSaveOwnDb = async () => {
+    setOwnSaving(true);
+    try {
+      let credsObj: Record<string, string>;
+      if (ownDbType === 'supabase') {
+        if (!ownUrl.trim() || !ownAnonKey.trim()) {
+          toast.error('Please enter Supabase URL and Anon Key');
+          return;
+        }
+        credsObj = { dbType: 'supabase', url: ownUrl.trim(), anonKey: ownAnonKey.trim() };
+        localStorage.setItem(SUBADMIN_DB_KEY, JSON.stringify(credsObj));
+      } else if (ownNeedsConnStr) {
+        if (!ownConnStr.trim()) { toast.error('Please enter a connection string'); return; }
+        credsObj = { dbType: ownDbType, connectionString: ownConnStr.trim() };
+        localStorage.setItem(SUBADMIN_DB_KEY, JSON.stringify(credsObj));
+      } else {
+        if (!ownHost.trim() || !ownUsername.trim()) { toast.error('Please enter host and username'); return; }
+        credsObj = { dbType: ownDbType, host: ownHost.trim(), port: ownPort.trim(), dbUsername: ownUsername.trim(), dbPassword: ownPassword, dbName: ownDbName.trim() };
+        localStorage.setItem(SUBADMIN_DB_KEY, JSON.stringify(credsObj));
+      }
+      restoreSubAdminDb();
+      toast.success('Your database connected!');
+      navigate('/');
+    } catch {
+      toast.error('Failed to save database credentials');
+    } finally {
+      setOwnSaving(false);
+    }
+  };
+
+  // If sub-admin needs to connect own DB, show that form
+  if (showOwnDbForm) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="w-full max-w-md space-y-4">
+          <Card className="shadow-lg border-violet-200/60 dark:border-violet-800/40">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                  <Database size={17} className="text-violet-600 dark:text-violet-400" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Connect Your Database</CardTitle>
+                  <CardDescription className="text-xs">Sub-Admin — your own database, separate from the workspace</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-lg bg-violet-50 dark:bg-violet-950/30 border border-violet-200/60 dark:border-violet-800/40 px-3.5 py-2.5">
+                <p className="text-[11px] text-violet-700 dark:text-violet-300 leading-relaxed">
+                  As a Sub-Admin, you manage your own database. Connect it below to access your own dashboard data — completely separate from the workspace owner's data.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Database Type</Label>
+                <div className="relative">
+                  <select
+                    value={ownDbType}
+                    onChange={e => setOwnDbType(e.target.value as MainDbType)}
+                    className="w-full appearance-none h-9 rounded-xl border border-border/60 bg-muted/30 px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-violet-500/25 focus:border-violet-500/40 transition-colors"
+                  >
+                    {DB_TYPES.map(t => (
+                      <option key={t.value} value={t.value}>{t.icon} {t.label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={12} className="absolute right-2.5 top-2.5 text-muted-foreground pointer-events-none" />
+                </div>
+              </div>
+
+              {ownDbType === 'supabase' && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Supabase Project URL</Label>
+                    <Input value={ownUrl} onChange={e => setOwnUrl(e.target.value)} placeholder="https://xxx.supabase.co" className="h-9 text-sm rounded-xl" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Anon Key</Label>
+                    <div className="relative">
+                      <Input type={ownShowKey ? 'text' : 'password'} value={ownAnonKey} onChange={e => setOwnAnonKey(e.target.value)} placeholder="eyJ..." className="h-9 text-sm rounded-xl pr-9" />
+                      <button type="button" onClick={() => setOwnShowKey(s => !s)} className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground transition-colors">
+                        {ownShowKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+              {ownNeedsHostFields && (
+                <>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-2 space-y-1.5">
+                      <Label className="text-xs">Host</Label>
+                      <Input value={ownHost} onChange={e => setOwnHost(e.target.value)} placeholder="localhost" className="h-9 text-sm rounded-xl" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Port</Label>
+                      <Input value={ownPort} onChange={e => setOwnPort(e.target.value)} placeholder={ownCurrentDbType?.defaultPort || ''} className="h-9 text-sm rounded-xl" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Username</Label>
+                      <Input value={ownUsername} onChange={e => setOwnUsername(e.target.value)} placeholder="admin" className="h-9 text-sm rounded-xl" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Password</Label>
+                      <Input type="password" value={ownPassword} onChange={e => setOwnPassword(e.target.value)} placeholder="••••••••" className="h-9 text-sm rounded-xl" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Database Name</Label>
+                    <Input value={ownDbName} onChange={e => setOwnDbName(e.target.value)} placeholder="my_database" className="h-9 text-sm rounded-xl" />
+                  </div>
+                </>
+              )}
+              {ownNeedsConnStr && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Connection String</Label>
+                  <Input value={ownConnStr} onChange={e => setOwnConnStr(e.target.value)} placeholder={ownDbType === 'mongodb' ? 'mongodb://...' : 'redis://...'} className="h-9 text-sm rounded-xl" />
+                </div>
+              )}
+
+              <Button onClick={handleSaveOwnDb} disabled={ownSaving} className="w-full bg-violet-600 hover:bg-violet-700 text-white rounded-xl">
+                {ownSaving ? 'Connecting…' : 'Connect My Database'}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">

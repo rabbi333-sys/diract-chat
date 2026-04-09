@@ -232,6 +232,7 @@ function normRow(r: Record<string, unknown>): InviteRecord {
     submitted_email:         r.submitted_email ? String(r.submitted_email) : null,
     submitted_at:            r.submitted_at ? String(r.submitted_at) : null,
     last_login_at:           r.last_login_at ? String(r.last_login_at) : null,
+    subadmin_db_creds:       r.subadmin_db_creds ? String(r.subadmin_db_creds) : null,
     created_at:              r.created_at ? String(r.created_at) : new Date().toISOString(),
   };
 }
@@ -582,7 +583,7 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
   if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds" });
 
   try {
-    type MemberResult = { id: string; role: string; permissions: string[]; submitted_name: string | null; submitted_email: string | null; last_login_at: string | null };
+    type MemberResult = { id: string; role: string; permissions: string[]; submitted_name: string | null; submitted_email: string | null; last_login_at: string | null; subadmin_db_creds: string | null };
     let member: MemberResult | null = null;
     const normEmail = email.toLowerCase().trim();
     const loginNow = new Date().toISOString();
@@ -590,7 +591,7 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
     if (creds.dbType === "postgresql") {
       const rows = await pgQuery<Record<string, unknown>>(
         creds,
-        "UPDATE team_invites SET last_login_at=NOW() WHERE submitted_email=$1 AND submitted_password_hash=$2 AND status='accepted' RETURNING id,role,permissions,submitted_name,submitted_email,last_login_at",
+        "UPDATE team_invites SET last_login_at=NOW() WHERE submitted_email=$1 AND submitted_password_hash=$2 AND status='accepted' RETURNING id,role,permissions,submitted_name,submitted_email,last_login_at,subadmin_db_creds",
         [normEmail, passwordHash],
       );
       if (rows[0]) {
@@ -601,13 +602,14 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
           submitted_name: rows[0].submitted_name ? String(rows[0].submitted_name) : null,
           submitted_email: rows[0].submitted_email ? String(rows[0].submitted_email) : null,
           last_login_at: rows[0].last_login_at ? String(rows[0].last_login_at) : loginNow,
+          subadmin_db_creds: rows[0].subadmin_db_creds ? String(rows[0].subadmin_db_creds) : null,
         };
       }
     } else if (creds.dbType === "mysql") {
       await mysqlQuery(creds, "UPDATE team_invites SET last_login_at=NOW(6) WHERE submitted_email=? AND submitted_password_hash=? AND status='accepted'", [normEmail, passwordHash]);
       const rows = await mysqlQuery<Record<string, unknown>>(
         creds,
-        "SELECT id,role,permissions,submitted_name,submitted_email,last_login_at FROM team_invites WHERE submitted_email=? AND submitted_password_hash=? AND status='accepted'",
+        "SELECT id,role,permissions,submitted_name,submitted_email,last_login_at,subadmin_db_creds FROM team_invites WHERE submitted_email=? AND submitted_password_hash=? AND status='accepted'",
         [normEmail, passwordHash],
       );
       if (rows[0]) {
@@ -618,6 +620,7 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
           submitted_name: rows[0].submitted_name ? String(rows[0].submitted_name) : null,
           submitted_email: rows[0].submitted_email ? String(rows[0].submitted_email) : null,
           last_login_at: rows[0].last_login_at ? String(rows[0].last_login_at) : loginNow,
+          subadmin_db_creds: rows[0].subadmin_db_creds ? String(rows[0].subadmin_db_creds) : null,
         };
       }
     } else if (creds.dbType === "mongodb") {

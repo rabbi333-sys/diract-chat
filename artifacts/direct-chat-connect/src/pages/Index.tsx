@@ -26,7 +26,7 @@ import {
   BarChart3, MessageSquare, Settings, Menu, X, HandMetal,
   AlertOctagon, ShoppingBag, Bell, BellOff, Volume2, VolumeX,
   Bot, ChevronRight, ArrowLeft, Globe, Webhook, Database, ShieldAlert,
-  Power, Play, Loader2, List,
+  Power, Play, Loader2, List, Link2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -62,7 +62,10 @@ const NAV_LABEL_KEYS: Record<string, 'overview'|'messages'|'handoff'|'failed'|'o
 const Index = () => {
   const navigate = useNavigate();
   const { t } = useLanguage();
-  const { user, isAdmin, permissions, notAuthorized, displayName, initials, loading: roleLoading } = useTeamRole();
+  const { user, isAdmin, role, permissions, notAuthorized, displayName, initials, loading: roleLoading } = useTeamRole();
+
+  const subAdminNeedsDb = !roleLoading && role === 'sub-admin' &&
+    !localStorage.getItem('meta_subadmin_db_creds');
 
   const [activeNav, setActiveNav] = useState('Messages');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -192,6 +195,44 @@ const Index = () => {
           >
             {t('signOut')}
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Sub-Admin gate: must connect their own DB before seeing any data
+  if (subAdminNeedsDb) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+        <div className="text-center space-y-5 max-w-sm">
+          <div className="w-16 h-16 rounded-2xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center mx-auto">
+            <Database size={30} className="text-violet-600 dark:text-violet-400" />
+          </div>
+          <div>
+            <p className="text-lg font-bold text-foreground">Connect Your Database</p>
+            <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+              As a Sub-Admin, you need to connect your own database before accessing the dashboard.
+              Your data is completely separate from the workspace owner's data.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/member-login')}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors"
+          >
+            <Link2 size={15} />
+            Connect Database
+          </button>
+          <div>
+            <button
+              onClick={async () => {
+                await signOutMember();
+                window.location.href = '/member-login';
+              }}
+              className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </div>
     );
