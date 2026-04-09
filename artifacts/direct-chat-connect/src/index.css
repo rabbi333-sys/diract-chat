@@ -110,6 +110,18 @@
   }
 }
 
+/* ── Global scrollbar hide ──────────────────────────────────────────────── */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+*::-webkit-scrollbar-button {
+  display: none;
+}
+
 @layer utilities {
   .scrollbar-hide {
     -ms-overflow-style: none;
