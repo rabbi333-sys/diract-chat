@@ -1,35 +1,52 @@
-import { createClient, Session, User } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
-const MEMBER_AUTH_STORAGE_KEY = 'meta_member_auth';
-const MEMBER_SETUP_KEY = 'meta_member_setup'; // flag: browser is set up as a member workspace
+const MEMBER_SETUP_KEY = 'meta_member_setup';
+const MEMBER_SESSION_KEY = 'meta_member_session';
+
+export type MemberSession = {
+  email: string;
+  role: string;
+  permissions: string[];
+  displayName: string;
+  inviteId: string;
+};
+
+// ── Password hashing (Web Crypto SHA-256, browser-native) ───────────────────
+
+export async function hashPassword(password: string): Promise<string> {
+  const buf = new TextEncoder().encode(password);
+  const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hashBuf))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 // ── Credential helpers ──────────────────────────────────────────────────────
 
-function getStoredCreds(): { url: string; anonKey: string; serviceKey?: string } | null {
+function getStoredCreds(): { url: string; anonKey: string } | null {
   try {
     const raw = localStorage.getItem('chat_monitor_db_settings');
     if (!raw) return null;
     const cfg = JSON.parse(raw);
     if (!cfg?.supabase_url) return null;
-    // anon_key is the anon key; service_role_key may be the service key or a fallback
     const anonKey = cfg.anon_key ?? cfg.service_role_key;
     if (!anonKey) return null;
-    return { url: cfg.supabase_url, anonKey, serviceKey: cfg.service_role_key };
+    return { url: cfg.supabase_url, anonKey };
   } catch {
     return null;
   }
 }
 
-// ── External Supabase client (persists member session under custom storageKey) ─
+// ── External Supabase client (kept for dashboard data fetching) ──────────────
 
 export function getMemberClient() {
   const creds = getStoredCreds();
   if (!creds) return null;
   return createClient(creds.url, creds.anonKey, {
     auth: {
-      storageKey: MEMBER_AUTH_STORAGE_KEY,
-      persistSession: true,
-      autoRefreshToken: true,
+      storageKey: 'meta_member_auth',
+      persistSession: false,
+      autoRefreshToken: false,
     },
   });
 }
@@ -48,49 +65,101 @@ export function clearMemberSetup(): void {
   localStorage.removeItem(MEMBER_SETUP_KEY);
 }
 
-// ── Session helpers (async) ─────────────────────────────────────────────────
+// ── Custom session (stored in localStorage) ─────────────────────────────────
 
-export async function getMemberSession(): Promise<Session | null> {
-  const client = getMemberClient();
-  if (!client) return null;
+function getMemberSessionSync(): MemberSession | null {
   try {
-    const { data } = await client.auth.getSession();
-    return data?.session ?? null;
+    const raw = localStorage.getItem(MEMBER_SESSION_KEY);
+    return raw ? (JSON.parse(raw) as MemberSession) : null;
   } catch {
     return null;
   }
 }
 
-export async function getMemberUser(): Promise<User | null> {
-  const client = getMemberClient();
-  if (!client) return null;
-  try {
-    const { data } = await client.auth.getUser();
-    return data?.user ?? null;
-  } catch {
-    return null;
-  }
+export async function getMemberSession(): Promise<MemberSession | null> {
+  return getMemberSessionSync();
 }
 
-// ── Sign in ─────────────────────────────────────────────────────────────────
+export async function getMemberUser(): Promise<{
+  id: string;
+  email: string;
+  user_metadata: Record<string, unknown>;
+} | null> {
+  const session = getMemberSessionSync();
+  if (!session) return null;
+  return {
+    id: session.inviteId,
+    email: session.email,
+    user_metadata: {
+      role: session.role,
+      permissions: session.permissions,
+      display_name: session.displayName,
+      is_member: true,
+    },
+  };
+}
 
-export async function signInMember(email: string, password: string) {
-  const client = getMemberClient();
-  if (!client) throw new Error('No workspace configured. Please use your invite link first.');
-  return client.auth.signInWithPassword({ email, password });
+// ── Sign in (checks team_invites table — no Supabase Auth) ─────────────────
+
+export async function signInMember(
+  email: string,
+  password: string,
+): Promise<{ error: { message: string } | null }> {
+  const creds = getStoredCreds();
+  if (!creds) {
+    throw new Error('No workspace configured. Please use your invite link first.');
+  }
+
+  const hash = await hashPassword(password);
+  const client = createClient(creds.url, creds.anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data, error } = await client
+    .from('team_invites')
+    .select('id, role, permissions, submitted_name, submitted_email')
+    .eq('submitted_email', email.toLowerCase().trim())
+    .eq('submitted_password_hash', hash)
+    .eq('status', 'accepted')
+    .maybeSingle();
+
+  if (error || !data) {
+    return {
+      error: {
+        message:
+          'Invalid email or password, or your access has not been approved yet.',
+      },
+    };
+  }
+
+  const row = data as {
+    id: string;
+    role: string;
+    permissions: string[];
+    submitted_name: string | null;
+    submitted_email: string;
+  };
+
+  const session: MemberSession = {
+    email: row.submitted_email ?? email,
+    role: row.role ?? 'viewer',
+    permissions: row.permissions ?? [],
+    displayName: row.submitted_name ?? email.split('@')[0],
+    inviteId: row.id,
+  };
+  localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(session));
+  setMemberSetup(); // ensure setup flag is set on login
+  return { error: null };
 }
 
 // ── Sign out ────────────────────────────────────────────────────────────────
 
 export async function signOutMember(): Promise<void> {
-  try {
-    const client = getMemberClient();
-    if (client) await client.auth.signOut();
-  } catch { /* ignore */ }
-  // Clear all member-related local state
   clearMemberSetup();
   try {
     [
+      MEMBER_SESSION_KEY,
+      'meta_member_auth',
       'meta_guest_session',
       'chat_monitor_db_settings',
       'chat_monitor_platform_connections',
@@ -101,84 +170,15 @@ export async function signOutMember(): Promise<void> {
   } catch { /* ignore */ }
 }
 
-// ── Admin: create a member user ─────────────────────────────────────────────
-// Tries admin API (service role key) first; falls back to signUp (anon key).
+// ── Legacy: try to delete old Supabase Auth account (no-op in new system) ──
 
-export async function createMemberUser(opts: {
-  url: string;
-  serviceKey: string;   // may be the actual service role key OR anon key
-  anonKey?: string;     // always the anon key (used as fallback)
-  email: string;
-  password: string;
-  role: string;
-  permissions: string[];
-  displayName?: string;
-}) {
-  const metadata = {
-    role: opts.role,
-    permissions: opts.permissions,
-    display_name: opts.displayName ?? opts.email.split('@')[0],
-    is_member: true,
-  };
-
-  // 1. Try admin API — only works if serviceKey is the real service_role JWT
-  try {
-    const admin = createClient(opts.url, opts.serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    const result = await admin.auth.admin.createUser({
-      email: opts.email,
-      password: opts.password,
-      email_confirm: true,
-      user_metadata: metadata,
-    });
-    // Success — return as-is (matches admin API shape)
-    if (!result.error) return result;
-    // Only fall through on "Bearer token" error (means key is the anon key)
-    if (!result.error.message?.toLowerCase().includes('bearer')) {
-      return result;
-    }
-  } catch { /* fall through to signUp */ }
-
-  // 2. Fallback: signUp with anon key — works without service role key
-  //    Note: if Supabase "Email confirmations" is ON the user gets an email.
-  //    Turn it OFF in Supabase → Auth → Settings for instant access.
-  const anonKey = opts.anonKey ?? opts.serviceKey;
-  const anon = createClient(opts.url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const signUpResult = await anon.auth.signUp({
-    email: opts.email,
-    password: opts.password,
-    options: { data: metadata },
-  });
-  // Normalise to the same shape as admin API result
-  if (signUpResult.error) return signUpResult as { data: null; error: typeof signUpResult.error };
-  return {
-    data: { user: signUpResult.data?.user ?? null },
-    error: null,
-  };
-}
-
-// ── Admin: confirm a member's email (bypasses email verification) ────────────
-// Returns true if confirmation succeeded (service role key was valid).
-export async function confirmMemberEmail(url: string, serviceKey: string, userId: string): Promise<boolean> {
+export async function deleteMemberUser(url: string, serviceKey: string, userId: string) {
   try {
     const admin = createClient(url, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const { error } = await admin.auth.admin.updateUserById(userId, { email_confirm: true });
-    return !error;
+    return admin.auth.admin.deleteUser(userId);
   } catch {
-    return false;
+    return { data: null, error: null };
   }
-}
-
-// ── Admin: delete a member user (service role key required) ─────────────────
-
-export async function deleteMemberUser(url: string, serviceKey: string, userId: string) {
-  const admin = createClient(url, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  return admin.auth.admin.deleteUser(userId);
 }

@@ -6,10 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, ShieldCheck, ShieldAlert, UserPlus } from 'lucide-react';
+import { Loader2, ShieldCheck, ShieldAlert, UserPlus, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { getConnections, setActiveConnection } from '@/lib/db-config';
-import { confirmMemberEmail, createMemberUser, getMemberClient, setMemberSetup } from '@/lib/memberAuth';
+import { hashPassword, setMemberSetup } from '@/lib/memberAuth';
 
 const DB_SETTINGS_KEY = 'chat_monitor_db_settings';
 const PLATFORM_CONNS_KEY = 'chat_monitor_platform_connections';
@@ -38,16 +38,17 @@ const InviteAccept = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const [stage, setStage] = useState<'loading' | 'register' | 'creating' | 'done' | 'error'>('loading');
+  const [stage, setStage] = useState<'loading' | 'register' | 'submitting' | 'done' | 'error'>('loading');
   const [error, setError] = useState('');
   const [invite, setInvite] = useState<Invite | null>(null);
 
-  // Registration form state
+  // Form state
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Decoded invite params — held in state for use during registration
+  // Decoded invite params
   const [params, setParams] = useState<{
     supabaseUrl: string | null;
     supabaseKey: string | null;
@@ -65,14 +66,6 @@ const InviteAccept = () => {
     if (!token) { navigate('/'); return; }
     validateInvite(token);
   }, [token]);
-
-  // Pre-fill email from invite or member name param
-  useEffect(() => {
-    const nParam = searchParams.get('n');
-    if (nParam) {
-      try { /* pre-fill with name later */ } catch { /* ignore */ }
-    }
-  }, []);
 
   const validateInvite = async (tok: string) => {
     try {
@@ -121,23 +114,19 @@ const InviteAccept = () => {
       const row: Invite | null = Array.isArray(data) ? data[0] ?? null : data ?? null;
 
       if (!row) {
-        // Token not found or already used — may have an account already
         setError('already_used');
         setStage('error');
         return;
       }
-      if (row.status === 'revoked') {
+      if (row.status === 'revoked' || row.status === 'rejected') {
         setError('This invite has been revoked. Please contact your admin for a new link.');
         setStage('error');
         return;
       }
 
-      // Store DB credentials in localStorage so dashboard can fetch data
-      storeCredentials(supabaseUrl, supabaseKey, serviceRoleKey, tableName, platformConnsJson, n8nSettingsJson);
-      setMemberSetup();
-
       setInvite(row);
-      // Pre-fill email if name looks like email, otherwise leave blank
+      // Pre-fill from invite email or memberName param
+      if (memberName) setName(memberName);
       if (row.email && row.email.includes('@')) setEmail(row.email);
       setStage('register');
     } catch {
@@ -147,15 +136,13 @@ const InviteAccept = () => {
   };
 
   const storeCredentials = (
-    url: string | null,
-    anonKey: string | null,
+    url: string,
+    anonKey: string,
     serviceKey: string | null,
     tableName: string | null,
     platformJson: string | null,
     n8nJson: string | null,
   ) => {
-    if (!url || !anonKey) return;
-
     const existing = getConnections();
     const alreadyExists = existing.some(c => c.url === url);
     if (!alreadyExists) {
@@ -175,7 +162,6 @@ const InviteAccept = () => {
       setActiveConnection(match.id);
     }
 
-    // Legacy key for data-fetching hooks
     const existingLegacy = (() => {
       try { return JSON.parse(localStorage.getItem(DB_SETTINGS_KEY) || 'null'); } catch { return null; }
     })();
@@ -199,90 +185,57 @@ const InviteAccept = () => {
     }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!invite) return;
+    if (!invite || !token) return;
+    if (!name.trim()) { toast.error('Please enter your name'); return; }
+    if (!email.trim()) { toast.error('Please enter your email'); return; }
     if (password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     if (password !== confirmPassword) { toast.error('Passwords do not match'); return; }
 
-    const { supabaseUrl, supabaseKey, serviceRoleKey, memberName } = params;
-    if (!supabaseUrl || (!serviceRoleKey && !supabaseKey)) {
+    const { supabaseUrl, supabaseKey, serviceRoleKey, tableName, platformConnsJson, n8nSettingsJson } = params;
+    if (!supabaseUrl || !supabaseKey) {
       toast.error('Missing workspace credentials. Please ask your admin for a new invite link.');
       return;
     }
-    // Use service role key if available, otherwise fall back to anon key
-    const effectiveServiceKey = serviceRoleKey ?? supabaseKey!;
 
-    setStage('creating');
+    setStage('submitting');
 
     try {
-      const displayName = memberName || email.split('@')[0];
+      const passwordHash = await hashPassword(password);
 
-      // Create user in external Supabase auth (no email verification)
-      const { data: createData, error: createErr } = await createMemberUser({
-        url: supabaseUrl,
-        serviceKey: effectiveServiceKey,
-        anonKey: supabaseKey ?? effectiveServiceKey,  // fallback if admin API fails
-        email,
-        password,
-        role: invite.role,
-        permissions: invite.permissions ?? [],
-        displayName,
+      const client = createClient(supabaseUrl, supabaseKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
       });
 
-      if (createErr) {
-        // If user already exists, try to sign in (they may have registered before)
-        if (createErr.message?.toLowerCase().includes('already') || createErr.message?.toLowerCase().includes('exists')) {
-          // Guide them to login instead
-          setError('An account with this email already exists. Please sign in.');
-          setStage('error');
-          return;
-        }
-        toast.error('Failed to create account: ' + createErr.message);
-        setStage('register');
-        return;
-      }
-
-      const newUserId = createData?.user?.id;
-
-      // Confirm email immediately (bypasses Supabase email verification requirement).
-      // This uses the service role key — if admin API succeeds, no verification email needed.
-      if (newUserId) {
-        await confirmMemberEmail(supabaseUrl, effectiveServiceKey, newUserId);
-        // Ignore result — if it fails (anon key instead of service key), sign-in will
-        // surface the right error and guide the user accordingly.
-      }
-
-      // Sign in immediately
-      const memberClient = getMemberClient();
-      if (!memberClient) throw new Error('No workspace client available');
-      const { error: signInErr } = await memberClient.auth.signInWithPassword({ email, password });
-      if (signInErr) {
-        const needsConfirm = signInErr.message?.toLowerCase().includes('confirm')
-          || signInErr.message?.toLowerCase().includes('not confirmed');
-        if (needsConfirm) {
-          // Email confirmation is required in this Supabase project
-          setError('email_confirmation');
-          setStage('error');
-          return;
-        }
-        toast.error('Account created but sign-in failed: ' + signInErr.message);
-        setStage('register');
-        return;
-      }
-
-      // Mark invite as accepted in team_invites
-      const anonClient = createClient(supabaseUrl, supabaseKey ?? effectiveServiceKey);
-      await anonClient
+      // Save submitted credentials to team_invites (keeping status = 'pending' for admin to approve)
+      const { error: updateErr } = await client
         .from('team_invites')
         .update({
-          status: 'accepted',
-          ...(newUserId ? { accepted_user_id: newUserId } : {}),
+          submitted_name: name.trim(),
+          submitted_email: email.toLowerCase().trim(),
+          submitted_password_hash: passwordHash,
+          submitted_at: new Date().toISOString(),
         })
-        .eq('token', invite.token);
+        .eq('token', token);
+
+      if (updateErr) {
+        // If the columns don't exist yet, show SQL error
+        if (updateErr.message?.includes('column') || updateErr.message?.includes('submitted')) {
+          toast.error('Database needs updating. Ask your admin to run the SQL setup.');
+          setStage('register');
+          return;
+        }
+        toast.error('Failed to submit: ' + updateErr.message);
+        setStage('register');
+        return;
+      }
+
+      // Store DB credentials and mark member setup so /member-login works later
+      storeCredentials(supabaseUrl, supabaseKey, serviceRoleKey, tableName, platformConnsJson, n8nSettingsJson);
+      setMemberSetup();
 
       setStage('done');
-      setTimeout(() => { window.location.href = '/'; }, 1500);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong';
       toast.error(msg);
@@ -303,30 +256,27 @@ const InviteAccept = () => {
   // ── Error ────────────────────────────────────────────────────────────────────
   if (stage === 'error') {
     const alreadyUsed = error === 'already_used';
-    const emailConfirm = error === 'email_confirmation';
     return (
       <Screen>
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center pb-2">
             <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 ${
-              alreadyUsed || emailConfirm ? 'bg-amber-500/10' : 'bg-red-500/10'
+              alreadyUsed ? 'bg-amber-500/10' : 'bg-red-500/10'
             }`}>
-              <ShieldAlert size={22} className={alreadyUsed || emailConfirm ? 'text-amber-500' : 'text-red-500'} />
+              <ShieldAlert size={22} className={alreadyUsed ? 'text-amber-500' : 'text-red-500'} />
             </div>
             <CardTitle className="text-base">
-              {alreadyUsed ? 'Invite Already Used' : emailConfirm ? 'Check Your Email' : 'Invalid Invite'}
+              {alreadyUsed ? 'Invite Already Used' : 'Invalid Invite'}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-center space-y-4">
             <p className="text-sm text-muted-foreground">
               {alreadyUsed
-                ? 'This invite link has already been used. If you already registered, please sign in.'
-                : emailConfirm
-                ? 'Your account was created! Please check your email and click the confirmation link, then sign in.'
+                ? 'This invite link has already been used. If you already submitted a request, please sign in.'
                 : error}
             </p>
-            {emailConfirm || alreadyUsed
-              ? <Button asChild className="w-full"><Link to="/member-login">Go to Sign In</Link></Button>
+            {alreadyUsed
+              ? <Button asChild className="w-full"><Link to="/member-login">Sign In</Link></Button>
               : <Button onClick={() => navigate('/')} variant="outline" className="w-full">Go to Dashboard</Button>
             }
           </CardContent>
@@ -335,12 +285,12 @@ const InviteAccept = () => {
     );
   }
 
-  // ── Creating ─────────────────────────────────────────────────────────────────
-  if (stage === 'creating') {
+  // ── Submitting ───────────────────────────────────────────────────────────────
+  if (stage === 'submitting') {
     return (
       <Screen>
         <Loader2 size={28} className="animate-spin text-primary mx-auto" />
-        <p className="text-sm text-muted-foreground text-center mt-3">Accepting invitation…</p>
+        <p className="text-sm text-muted-foreground text-center mt-3">Submitting your request…</p>
       </Screen>
     );
   }
@@ -349,21 +299,28 @@ const InviteAccept = () => {
   if (stage === 'done') {
     return (
       <Screen>
-        <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto">
-          <ShieldCheck size={28} className="text-emerald-500" />
-        </div>
-        <div className="text-center">
-          <p className="text-lg font-bold text-foreground">Account Created!</p>
-          <p className="text-sm text-muted-foreground mt-1">Signing you in…</p>
-        </div>
-        <Loader2 size={16} className="animate-spin text-muted-foreground mx-auto" />
+        <Card className="w-full max-w-sm shadow-lg">
+          <CardHeader className="text-center pb-2">
+            <div className="w-14 h-14 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
+              <Clock size={26} className="text-emerald-500" />
+            </div>
+            <CardTitle className="text-lg">Request Submitted!</CardTitle>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Your request has been sent to your admin for review. Once approved, you can sign in with your email and password.
+            </p>
+            <Button asChild className="w-full">
+              <Link to="/member-login">Go to Sign In</Link>
+            </Button>
+          </CardContent>
+        </Card>
       </Screen>
     );
   }
 
   // ── Register form ────────────────────────────────────────────────────────────
   const visiblePerms = (invite?.permissions ?? []).filter(p => p in PERMISSION_LABELS);
-  const hasServiceKey = !!params.serviceRoleKey;
 
   return (
     <Screen>
@@ -393,7 +350,25 @@ const InviteAccept = () => {
             </div>
           )}
 
-          <form onSubmit={handleRegister} className="space-y-3">
+          <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3">
+            <p className="text-xs text-blue-600 dark:text-blue-400">
+              Fill in your details and click "Accept Invitation". Your admin will then approve your access.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="name">Your Name</Label>
+              <Input
+                id="name"
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Full name"
+                required
+                autoComplete="name"
+              />
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="email">Your Email</Label>
               <Input
@@ -437,7 +412,7 @@ const InviteAccept = () => {
           </form>
 
           <p className="text-center text-xs text-muted-foreground">
-            Already registered?{' '}
+            Already approved?{' '}
             <Link to="/member-login" className="text-primary hover:underline">Sign in here</Link>
           </p>
         </CardContent>

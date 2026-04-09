@@ -17,7 +17,7 @@ import {
 } from '@/lib/db-config';
 import { clearGuestSession } from '@/lib/guestSession';
 import { getStoredConnection } from '@/lib/externalDb';
-import { deleteMemberUser, signOutMember, hasMemberSetup } from '@/lib/memberAuth';
+import { signOutMember, hasMemberSetup } from '@/lib/memberAuth';
 
 const PLATFORM_CONNS_KEY = 'chat_monitor_platform_connections';
 const N8N_SETTINGS_KEY = 'chat_monitor_n8n_settings';
@@ -31,6 +31,9 @@ type Invite = {
   status: string;
   accepted_user_id: string | null;
   created_at: string;
+  submitted_name: string | null;
+  submitted_email: string | null;
+  submitted_at: string | null;
 };
 
 const PERMISSION_OPTIONS = [
@@ -60,9 +63,10 @@ function timeAgo(dateStr: string) {
 
 const StatusPill = ({ status }: { status: string }) => {
   const map: Record<string, { dot: string; text: string; label: string }> = {
-    pending:  { dot: 'bg-amber-400',   text: 'text-amber-600 dark:text-amber-400',   label: 'Pending' },
+    pending:  { dot: 'bg-amber-400',   text: 'text-amber-600 dark:text-amber-400',    label: 'Pending' },
     accepted: { dot: 'bg-emerald-400', text: 'text-emerald-600 dark:text-emerald-400', label: 'Active' },
-    revoked:  { dot: 'bg-zinc-400',    text: 'text-zinc-500',                          label: 'Revoked' },
+    revoked:  { dot: 'bg-zinc-400',    text: 'text-zinc-500',                           label: 'Revoked' },
+    rejected: { dot: 'bg-red-400',     text: 'text-red-600 dark:text-red-400',          label: 'Rejected' },
   };
   const s = map[status] ?? map.revoked;
   return (
@@ -73,12 +77,20 @@ const StatusPill = ({ status }: { status: string }) => {
   );
 };
 
-const INVITE_FIX_SQL = `ALTER TABLE public.team_invites
+const INVITE_FIX_SQL = `-- Step 1: Add base invite columns
+ALTER TABLE public.team_invites
   ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS permissions text[] DEFAULT '{}' NOT NULL,
   ADD COLUMN IF NOT EXISTS token uuid DEFAULT gen_random_uuid() UNIQUE NOT NULL,
   ADD COLUMN IF NOT EXISTS status text DEFAULT 'pending' NOT NULL,
   ADD COLUMN IF NOT EXISTS accepted_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL;
+
+-- Step 2: Add member-submission columns (approval-based auth)
+ALTER TABLE public.team_invites
+  ADD COLUMN IF NOT EXISTS submitted_name text,
+  ADD COLUMN IF NOT EXISTS submitted_email text,
+  ADD COLUMN IF NOT EXISTS submitted_password_hash text,
+  ADD COLUMN IF NOT EXISTS submitted_at timestamptz;
 
 UPDATE public.team_invites SET created_by = invited_by WHERE created_by IS NULL;
 ALTER TABLE public.team_invites ALTER COLUMN created_by SET NOT NULL;
@@ -164,11 +176,15 @@ const Profile = () => {
   const loadInvites = async (userId: string) => {
     setInvitesLoading(true);
     try {
-      let { data, error } = await supabase.from('team_invites').select('*').eq('created_by', userId).order('created_at', { ascending: false });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const q = supabase.from('team_invites').select('*') as any;
+      let { data, error } = await q.eq('created_by', userId).order('created_at', { ascending: false });
       if (error?.message?.includes('created_by')) {
-        ({ data, error } = await supabase.from('team_invites').select('*').eq('invited_by', userId).order('created_at', { ascending: false }));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const q2 = supabase.from('team_invites').select('*') as any;
+        ({ data, error } = await q2.eq('invited_by', userId).order('created_at', { ascending: false }));
       }
-      setInvites(data ?? []);
+      setInvites((data ?? []) as Invite[]);
     } finally {
       setInvitesLoading(false);
     }
@@ -305,25 +321,22 @@ const Profile = () => {
     } finally { setIsGeneratingInvite(false); }
   };
 
-  // Helper: delete a member's auth account from the external Supabase
-  const tryDeleteMemberAuth = async (acceptedUserId: string | null) => {
-    if (!acceptedUserId) return;
-    try {
-      const raw = localStorage.getItem('chat_monitor_db_settings');
-      if (!raw) return;
-      const cfg = JSON.parse(raw);
-      const url = cfg?.supabase_url;
-      const serviceKey = cfg?.service_role_key;
-      if (!url || !serviceKey || serviceKey === cfg?.anon_key) return; // no proper service key
-      await deleteMemberUser(url, serviceKey, acceptedUserId);
-    } catch { /* ignore — might not have account */ }
+  const handleAccept = async (inviteId: string) => {
+    if (!user) return;
+    const { error } = await supabase.from('team_invites').update({ status: 'accepted' }).eq('id', inviteId);
+    if (error) { toast.error('Failed to approve member'); }
+    else { toast.success('Member approved — they can now sign in'); loadInvites(user.id); }
+  };
+
+  const handleReject = async (inviteId: string) => {
+    if (!user) return;
+    const { error } = await supabase.from('team_invites').update({ status: 'rejected' }).eq('id', inviteId);
+    if (error) { toast.error('Failed to reject request'); }
+    else { toast.success('Request rejected'); loadInvites(user.id); }
   };
 
   const handleRevoke = async (inviteId: string) => {
     if (!user) return;
-    const invite = invites.find(i => i.id === inviteId);
-    // Delete the member's auth account so they can't login anymore
-    await tryDeleteMemberAuth(invite?.accepted_user_id ?? null);
     const { error } = await supabase.from('team_invites').update({ status: 'revoked' }).eq('id', inviteId);
     setRevokeConfirmId(null);
     if (error) { toast.error('Failed to revoke access'); }
@@ -332,13 +345,10 @@ const Profile = () => {
 
   const handleDelete = async (inviteId: string) => {
     if (!user) return;
-    const invite = invites.find(i => i.id === inviteId);
-    // Delete the member's auth account so they can't login anymore
-    await tryDeleteMemberAuth(invite?.accepted_user_id ?? null);
     const { error } = await supabase.from('team_invites').delete().eq('id', inviteId);
     setDeleteConfirmId(null);
     if (error) { toast.error('Failed to delete member'); }
-    else { toast.success('Member removed — their account has been deleted'); loadInvites(user.id); }
+    else { toast.success('Member removed'); loadInvites(user.id); }
   };
 
   const copyLink = async (token: string, memberName?: string) => {
@@ -595,22 +605,9 @@ const Profile = () => {
                         <Copy size={9} /> Copy
                       </button>
                     </div>
-                    {(() => {
-                      const conn = getActiveConnection();
-                      const stored = getStoredConnection();
-                      const srvKey = conn?.serviceRoleKey || stored?.service_role_key || '';
-                      const hasRealServiceKey = srvKey && srvKey !== conn?.anonKey;
-                      return hasRealServiceKey ? (
-                        <p className="text-[10px] text-emerald-600 dark:text-emerald-400/70">
-                          ✓ Members get instant access — no email verification required.
-                        </p>
-                      ) : (
-                        <p className="text-[10px] text-amber-600 dark:text-amber-400">
-                          ⚠ Service Role Key not found. Members may receive a verification email.
-                          Add it in your connection settings to enable instant access.
-                        </p>
-                      );
-                    })()}
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400/70">
+                      ✓ Share this link with your team member. They'll submit their details for your approval.
+                    </p>
                   </div>
                 )}
               </div>
@@ -656,109 +653,155 @@ const Profile = () => {
               ) : (
                 <div className="divide-y divide-border/40">
                   {invites.map((invite) => {
-                    const label = invite.email && invite.email.trim()
-                      ? invite.email
-                      : `Link invite · ${invite.role}`;
-                    const avatarLabel = invite.email && invite.email.trim()
-                      ? getInitials(invite.email.split('@')[0])
-                      : invite.role === 'admin' ? 'AD' : 'VW';
+                    const hasSubmission = invite.status === 'pending' && !!invite.submitted_email;
+                    const label = invite.submitted_name || invite.submitted_email || invite.email || `Link invite · ${invite.role}`;
+                    const avatarLabel = invite.submitted_name
+                      ? getInitials(invite.submitted_name)
+                      : invite.email && invite.email.trim()
+                        ? getInitials(invite.email.split('@')[0])
+                        : invite.role === 'admin' ? 'AD' : 'VW';
                     return (
-                      <div key={invite.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors" data-testid={`member-row-${invite.id}`}>
-                        {/* Avatar */}
-                        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-[10px] font-bold text-primary flex-shrink-0 border border-primary/10">
-                          {avatarLabel}
-                        </div>
-
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium text-foreground truncate">{label}</p>
-                            <span className={cn(
-                              'text-[9px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0',
-                              invite.role === 'admin'
-                                ? 'bg-primary/10 text-primary'
-                                : 'bg-muted text-muted-foreground'
-                            )}>
-                              {invite.role.toUpperCase()}
-                            </span>
+                      <div key={invite.id} data-testid={`member-row-${invite.id}`}>
+                        <div className="flex items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors">
+                          {/* Avatar */}
+                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-[10px] font-bold text-primary flex-shrink-0 border border-primary/10">
+                            {avatarLabel}
                           </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <StatusPill status={invite.status} />
-                            {invite.status !== 'revoked' && invite.permissions?.length > 0 && (
-                              <span className="text-[10px] text-muted-foreground/50 truncate">
-                                {invite.permissions.slice(0, 3).join(', ')}{invite.permissions.length > 3 ? ` +${invite.permissions.length - 3}` : ''}
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-foreground truncate">{label}</p>
+                              <span className={cn(
+                                'text-[9px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0',
+                                invite.role === 'admin'
+                                  ? 'bg-primary/10 text-primary'
+                                  : 'bg-muted text-muted-foreground'
+                              )}>
+                                {invite.role.toUpperCase()}
                               </span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <StatusPill status={hasSubmission ? 'pending' : invite.status} />
+                              {hasSubmission && (
+                                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
+                                  Awaiting approval
+                                </span>
+                              )}
+                              {!hasSubmission && invite.status !== 'revoked' && invite.status !== 'rejected' && invite.permissions?.length > 0 && (
+                                <span className="text-[10px] text-muted-foreground/50 truncate">
+                                  {invite.permissions.slice(0, 3).join(', ')}{invite.permissions.length > 3 ? ` +${invite.permissions.length - 3}` : ''}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <span className="text-[10px] text-muted-foreground/40 hidden sm:flex items-center gap-0.5 mr-1">
+                              <Clock size={9} /> {timeAgo(invite.created_at)}
+                            </span>
+
+                            {/* Pending without submission: copy link + revoke */}
+                            {invite.status === 'pending' && !hasSubmission && (
+                              <button
+                                onClick={() => copyLink(invite.token, invite.email || undefined)}
+                                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                title="Copy invite link"
+                                data-testid={`button-copy-link-${invite.id}`}
+                              >
+                                <Copy size={12} />
+                              </button>
+                            )}
+
+                            {invite.status === 'pending' && !hasSubmission && (
+                              revokeConfirmId === invite.id ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => handleRevoke(invite.id)}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                                    data-testid={`button-revoke-confirm-${invite.id}`}
+                                  >Revoke</button>
+                                  <button
+                                    onClick={() => setRevokeConfirmId(null)}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                  >Cancel</button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setRevokeConfirmId(invite.id)}
+                                  className="p-1.5 rounded-lg hover:bg-amber-500/10 text-muted-foreground hover:text-amber-600 transition-colors"
+                                  title="Revoke"
+                                  data-testid={`button-revoke-${invite.id}`}
+                                >
+                                  <X size={12} />
+                                </button>
+                              )
+                            )}
+
+                            {/* Pending with submission: Accept ✓ / Reject ✗ */}
+                            {hasSubmission && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => handleAccept(invite.id)}
+                                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white transition-colors border border-emerald-500/20"
+                                  title="Approve member"
+                                  data-testid={`button-accept-${invite.id}`}
+                                >
+                                  <Check size={11} /> Accept
+                                </button>
+                                <button
+                                  onClick={() => handleReject(invite.id)}
+                                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white transition-colors border border-red-500/20"
+                                  title="Reject request"
+                                  data-testid={`button-reject-${invite.id}`}
+                                >
+                                  <X size={11} /> Reject
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Accepted/revoked/rejected: delete */}
+                            {(invite.status === 'revoked' || invite.status === 'accepted' || invite.status === 'rejected') && (
+                              deleteConfirmId === invite.id ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => handleDelete(invite.id)}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+                                    data-testid={`button-delete-confirm-${invite.id}`}
+                                  >Delete</button>
+                                  <button
+                                    onClick={() => setDeleteConfirmId(null)}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                  >Cancel</button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setDeleteConfirmId(invite.id)}
+                                  className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                                  title="Remove"
+                                  data-testid={`button-delete-${invite.id}`}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )
                             )}
                           </div>
                         </div>
 
-                        {/* Actions */}
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <span className="text-[10px] text-muted-foreground/40 hidden sm:flex items-center gap-0.5 mr-1">
-                            <Clock size={9} /> {timeAgo(invite.created_at)}
-                          </span>
-
-                          {invite.status === 'pending' && (
-                            <button
-                              onClick={() => copyLink(invite.token, invite.email || undefined)}
-                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                              title="Copy invite link"
-                              data-testid={`button-copy-link-${invite.id}`}
-                            >
-                              <Copy size={12} />
-                            </button>
-                          )}
-
-                          {invite.status === 'pending' && (
-                            revokeConfirmId === invite.id ? (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => handleRevoke(invite.id)}
-                                  className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors"
-                                  data-testid={`button-revoke-confirm-${invite.id}`}
-                                >Revoke</button>
-                                <button
-                                  onClick={() => setRevokeConfirmId(null)}
-                                  className="px-2 py-1 rounded-lg text-[10px] font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                >Cancel</button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setRevokeConfirmId(invite.id)}
-                                className="p-1.5 rounded-lg hover:bg-amber-500/10 text-muted-foreground hover:text-amber-600 transition-colors"
-                                title="Revoke"
-                                data-testid={`button-revoke-${invite.id}`}
-                              >
-                                <X size={12} />
-                              </button>
-                            )
-                          )}
-
-                          {(invite.status === 'revoked' || invite.status === 'accepted') && (
-                            deleteConfirmId === invite.id ? (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => handleDelete(invite.id)}
-                                  className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
-                                  data-testid={`button-delete-confirm-${invite.id}`}
-                                >Delete</button>
-                                <button
-                                  onClick={() => setDeleteConfirmId(null)}
-                                  className="px-2 py-1 rounded-lg text-[10px] font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                >Cancel</button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setDeleteConfirmId(invite.id)}
-                                className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                                title="Remove"
-                                data-testid={`button-delete-${invite.id}`}
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            )
-                          )}
-                        </div>
+                        {/* Submission detail row for pending+submitted */}
+                        {hasSubmission && (
+                          <div className="px-5 pb-3 -mt-1 ml-11">
+                            <div className="rounded-lg bg-amber-500/6 border border-amber-500/15 px-3 py-2 text-[11px] text-muted-foreground space-y-0.5">
+                              {invite.submitted_email && (
+                                <p><span className="font-semibold text-foreground">Email:</span> {invite.submitted_email}</p>
+                              )}
+                              {invite.submitted_at && (
+                                <p><span className="font-semibold text-foreground">Submitted:</span> {timeAgo(invite.submitted_at)}</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

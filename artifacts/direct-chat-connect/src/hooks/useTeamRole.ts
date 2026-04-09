@@ -50,9 +50,9 @@ export function useTeamRole(): TeamRole {
           const memberUser = await getMemberUser();
           if (!cancelled && memberUser) {
             const meta = memberUser.user_metadata ?? {};
-            const role = meta.role ?? 'viewer';
-            const perms: string[] = meta.permissions ?? [];
-            const name = meta.display_name || memberUser.email?.split('@')[0] || 'Member';
+            const role = (meta.role as string) ?? 'viewer';
+            const perms: string[] = (meta.permissions as string[]) ?? [];
+            const name = (meta.display_name as string) || memberUser.email?.split('@')[0] || 'Member';
             setUser(null);
             setIsGuest(true); // treats member like a restricted guest (respects permissions)
             setIsAdmin(role === 'admin');
