@@ -332,6 +332,36 @@ export const useAutoResolveNames = (
     Promise.all(
       unresolved.map(async (recipientId): Promise<boolean> => {
         for (const token of tokens) {
+          // ── Method 1: conversations endpoint (reliable with Page tokens) ──
+          // This is the same approach used in n8n:
+          // GET /me/conversations?user_id={id}&fields=participants{name,email,id}
+          try {
+            const convRes = await fetch(
+              `https://graph.facebook.com/v19.0/me/conversations?user_id=${recipientId}&fields=participants%7Bname%2Cemail%2Cid%7D&access_token=${token}`
+            );
+            const convData = await convRes.json();
+            // Name is at data[0].participants.data[0].name (first participant who is the user)
+            const participants: Array<{ id: string; name: string }> =
+              convData?.data?.[0]?.participants?.data ?? [];
+            // The page itself is also a participant — pick the one whose id matches the sender
+            const senderParticipant =
+              participants.find((p) => p.id === recipientId) ||
+              participants.find((p) => p.id !== recipientId);
+            const resolvedName = senderParticipant?.name;
+            if (resolvedName && !convData.error) {
+              await supabase
+                .from('recipient_names')
+                .upsert(
+                  { recipient_id: recipientId, name: resolvedName, updated_at: new Date().toISOString() },
+                  { onConflict: 'recipient_id' }
+                );
+              return true;
+            }
+          } catch {
+            // fall through to method 2
+          }
+
+          // ── Method 2: direct profile (fallback for WhatsApp/Instagram) ──
           try {
             const res = await fetch(
               `https://graph.facebook.com/v19.0/${recipientId}?fields=name&access_token=${token}`
