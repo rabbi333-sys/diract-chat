@@ -10,7 +10,7 @@ import { format, subDays, startOfWeek, startOfMonth, isWithinInterval, parseISO 
 import {
   TrendingUp, Package, Truck, XCircle, CheckCircle,
   ArrowUpRight, ArrowDownRight, Clock, PackageCheck, Loader2,
-  ShoppingBag, RefreshCw, BarChart2,
+  ShoppingBag, RefreshCw, BarChart2, Download,
 } from 'lucide-react';
 
 type ViewMode = 'daily' | 'weekly' | 'monthly';
@@ -25,6 +25,28 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string; ic
 };
 
 const PIE_COLORS = ['hsl(38,92%,50%)', 'hsl(217,91%,60%)', 'hsl(270,70%,60%)', 'hsl(185,85%,45%)', 'hsl(142,71%,45%)', 'hsl(0,84%,60%)'];
+
+function downloadCSV(orders: any[], days: number) {
+  if (!orders.length) return;
+  const headers = ['Order Number', 'Customer', 'Phone', 'Address', 'Status', 'Total Price', 'Date'];
+  const rows = orders.map(o => [
+    o.order_number ?? '',
+    o.customer_name ?? '',
+    o.customer_phone ?? '',
+    o.delivery_address ?? '',
+    o.status ?? '',
+    o.total_price ?? '',
+    o.created_at ? format(parseISO(o.created_at), 'dd MMM yyyy') : '',
+  ]);
+  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `analytics-report-last-${days}d.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const OrderAnalytics = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('daily');
@@ -134,42 +156,47 @@ const OrderAnalytics = () => {
     <div className="space-y-5">
 
       {/* ── Controls bar ────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
-          {/* View mode */}
-          <div className="flex items-center bg-muted/50 rounded-xl p-1 gap-0.5">
-            {(['daily', 'weekly', 'monthly'] as ViewMode[]).map(m => (
-              <button key={m} onClick={() => setViewMode(m)}
-                className={cn(
-                  'text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-all',
-                  viewMode === m ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {m === 'daily' ? 'Daily' : m === 'weekly' ? 'Weekly' : 'Monthly'}
-              </button>
-            ))}
-          </div>
-          {/* Day range */}
-          <div className="flex items-center bg-muted/50 rounded-xl p-1 gap-0.5">
-            {[7, 30, 90].map(d => (
-              <button key={d} onClick={() => setDays(d)}
-                className={cn(
-                  'text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-all',
-                  days === d ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {d}d
-              </button>
-            ))}
-          </div>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        {/* Single unified filter strip */}
+        <div className="flex items-center bg-muted/50 rounded-xl p-1 gap-0.5">
+          {(['daily', 'weekly', 'monthly'] as ViewMode[]).map(m => (
+            <button key={m} onClick={() => setViewMode(m)}
+              className={cn(
+                'text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-all',
+                viewMode === m ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {m === 'daily' ? 'Daily' : m === 'weekly' ? 'Weekly' : 'Monthly'}
+            </button>
+          ))}
+          <span className="w-px h-4 bg-border mx-0.5" />
+          {[7, 30, 90].map(d => (
+            <button key={d} onClick={() => setDays(d)}
+              className={cn(
+                'text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-all',
+                days === d ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {d}d
+            </button>
+          ))}
         </div>
 
-        <button onClick={() => refetch()} disabled={isFetching}
-          className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-muted/50 transition-colors"
-        >
-          <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        {/* Action buttons */}
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => downloadCSV(filteredOrders, days)}
+            className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-muted/50 transition-colors"
+          >
+            <Download size={12} />
+            Download
+          </button>
+          <button onClick={() => refetch()} disabled={isFetching}
+            className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-muted/50 transition-colors"
+          >
+            <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* ── Revenue hero card ─────────────────────────────────────── */}

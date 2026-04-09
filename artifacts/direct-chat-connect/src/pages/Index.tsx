@@ -434,7 +434,7 @@ const Index = () => {
 
               {/* Analytics view */}
               {ordersView === 'analytics' && (
-                <div className="flex-1 overflow-auto">
+                <div className="flex-1 overflow-auto scrollbar-hide">
                   <OrderAnalytics />
                 </div>
               )}
