@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
@@ -132,12 +132,31 @@ function exportToCSV(orders: Order[]) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const OrdersPanel = () => {
+  const queryClient = useQueryClient();
   const { data: localOrders = [] } = useLocalOrders();
   const { data: supabaseOrders = [] } = useSupabaseOrders();
   const orders = mergeOrders(localOrders, supabaseOrders);
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+
+  const deleteMutation = useMutation({
+    mutationFn: async ({ id, source }: { id: string; source?: string }) => {
+      if (source === 'local') {
+        const res = await fetch(`/api/local/orders/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed to delete local order');
+        return;
+      }
+      const { error } = await supabase.from('orders').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['local-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['supabase-orders'] });
+      toast.success('Order deleted');
+    },
+    onError: () => toast.error('Failed to delete order'),
+  });
 
   const filtered = useMemo(() => {
     if (!search.trim()) return orders;
@@ -211,7 +230,6 @@ const OrdersPanel = () => {
                 <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Customer</th>
                 <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Phone</th>
                 <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Total</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Payment</th>
                 <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Status</th>
                 <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Date</th>
                 <th className="px-3 py-3 w-8"></th>
@@ -221,7 +239,6 @@ const OrdersPanel = () => {
               {filtered.map(order => {
                 const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.pending;
                 const total = Number(order.total_price) || Number(order.amount_to_collect) || 0;
-                const paymentStatus = order.payment_status || 'unpaid';
 
                 return (
                   <tr
@@ -262,13 +279,6 @@ const OrdersPanel = () => {
                       </span>
                     </td>
 
-                    {/* Payment */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs text-muted-foreground">
-                        {paymentStatus}
-                      </span>
-                    </td>
-
                     {/* Status */}
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className={cn(
@@ -286,11 +296,17 @@ const OrdersPanel = () => {
                       </span>
                     </td>
 
-                    {/* Delete icon (visual only) */}
+                    {/* Delete */}
                     <td className="px-3 py-3 text-right">
                       <button
-                        onClick={e => { e.stopPropagation(); toast.info('Select order to manage'); }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-red-500 p-1 rounded"
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (window.confirm('Delete this order?')) {
+                            deleteMutation.mutate({ id: order.id, source: order._source });
+                          }
+                        }}
+                        disabled={deleteMutation.isPending}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-red-500 p-1 rounded disabled:opacity-30"
                       >
                         <Trash2 size={13} />
                       </button>
