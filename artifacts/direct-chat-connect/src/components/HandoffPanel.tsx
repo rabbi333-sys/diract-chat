@@ -30,12 +30,13 @@ interface HandoffRequest {
   _source?: 'local' | 'supabase';
 }
 
-// ─── Auto-disable AI for a session (fire-and-forget, silent fail) ──────────
-async function autoDisableAi(session_id: string) {
-  if (!session_id) return;
+// ─── Auto-disable AI for a session ───────────────────────────────────────────
+// Returns true on success so the caller can decide whether to keep the ID in the Set.
+async function autoDisableAi(session_id: string): Promise<boolean> {
+  if (!session_id) return false;
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from('ai_control').upsert(
+    const { error } = await supabase.from('ai_control').upsert(
       {
         session_id,
         ai_enabled: false,
@@ -44,7 +45,10 @@ async function autoDisableAi(session_id: string) {
       },
       { onConflict: 'session_id' }
     );
-  } catch { /* silent — guest sessions or table missing */ }
+    return !error;
+  } catch {
+    return false; // let caller retry next cycle
+  }
 }
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
@@ -117,8 +121,12 @@ export const HandoffPanel = () => {
   useEffect(() => {
     for (const req of requests) {
       if (req.status === 'pending' && req.session_id && !aiDisabledRef.current.has(req.session_id)) {
+        // Add to Set optimistically to prevent parallel duplicate calls;
+        // remove again if the upsert fails so the next render can retry.
         aiDisabledRef.current.add(req.session_id);
-        autoDisableAi(req.session_id);
+        autoDisableAi(req.session_id).then(ok => {
+          if (!ok) aiDisabledRef.current.delete(req.session_id!);
+        });
       }
     }
   }, [requests]);
@@ -278,7 +286,10 @@ export const HandoffPanel = () => {
               )}
             >
               {/* ── Card header (clickable → open conversation) ──────────── */}
-              <button
+              {/* Using div to avoid nesting <button> inside <button> (invalid HTML) */}
+              <div
+                role="button"
+                tabIndex={hasSession ? 0 : -1}
                 className={cn(
                   "w-full text-left p-4 transition-all duration-150",
                   req.status === 'pending'
@@ -287,6 +298,7 @@ export const HandoffPanel = () => {
                   hasSession ? "cursor-pointer" : "cursor-default"
                 )}
                 onClick={(e) => hasSession && openChat(req, e)}
+                onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && hasSession) openChat(req, e as any); }}
                 title={hasSession ? `Open conversation with ${customerName}` : 'No session ID — cannot navigate'}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -364,7 +376,7 @@ export const HandoffPanel = () => {
                     {formatDistanceToNow(parseISO(req.created_at), { addSuffix: true })}
                   </span>
                 </div>
-              </button>
+              </div>{/* end card header div[role=button] */}
 
               {/* ── Expand toggle for notes/resolve (stopPropagation) ──── */}
               <div
