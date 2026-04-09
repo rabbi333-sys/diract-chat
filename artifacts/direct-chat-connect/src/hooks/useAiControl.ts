@@ -32,8 +32,8 @@ export function useGlobalAiControl() {
         .maybeSingle();
       return data?.ai_enabled ?? true;
     },
-    staleTime: 10_000,
-    refetchInterval: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
   });
 
   const globalOn = stateQuery.data ?? true;
@@ -92,7 +92,7 @@ export function useAiControl(session_id: string | undefined) {
     },
     enabled: !!session_id,
     staleTime: 0,          // always re-fetch on mount / focus
-    refetchInterval: 10_000, // poll every 10 s as safety net
+    refetchInterval: 3_000,  // poll every 3 s as safety net (realtime handles instant)
   });
 
   // ── Realtime subscription: update cache the moment DB row changes ──────────

@@ -212,8 +212,10 @@ export const useChatHistory = (sessionId?: string) => {
     queryKey: ['chat-history', sessionId],
     enabled: !!sessionId,
     retry: 1,
-    staleTime: 60_000,       // cache for 60s — no refetch on back navigation
+    staleTime: 0,            // always treat as stale → re-fetch when window focuses
     gcTime: 5 * 60_000,      // keep in memory for 5 min
+    refetchInterval: 3_000,  // poll every 3 s for new messages
+    refetchIntervalInBackground: false, // pause when tab is hidden to save bandwidth
     queryFn: () => fetchMessages(sessionId!),
   });
 };
@@ -222,8 +224,8 @@ export const useChatHistory = (sessionId?: string) => {
 export const useSessions = (filterDate?: Date | null) => {
   return useQuery({
     queryKey: ['sessions', filterDate ? format(filterDate, 'yyyy-MM-dd') : 'all'],
-    staleTime: 30_000,
-    refetchInterval: 60_000,  // auto-refresh every minute
+    staleTime: 5_000,
+    refetchInterval: 10_000,  // auto-refresh every 10 s
     retry: 1,
     queryFn: async () => {
       const conn = getStoredConnection();

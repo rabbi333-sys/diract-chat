@@ -61,7 +61,7 @@ export const SessionList = () => {
   const prefetchSession = useCallback((sessionId: string) => {
     queryClient.prefetchQuery({
       queryKey: ['chat-history', sessionId],
-      staleTime: 60_000,
+      staleTime: 0,
       queryFn: () => fetchMessages(sessionId),
     });
   }, [queryClient]);

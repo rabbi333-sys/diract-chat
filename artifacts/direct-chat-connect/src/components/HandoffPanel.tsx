@@ -71,7 +71,7 @@ const useSupabaseHandoffs = () => {
   return useQuery({
     queryKey: ['supabase-handoffs'],
     retry: false,
-    refetchInterval: 15000,
+    refetchInterval: 3000,
     queryFn: async (): Promise<HandoffRequest[]> => {
       try {
         const { data, error } = await supabase
