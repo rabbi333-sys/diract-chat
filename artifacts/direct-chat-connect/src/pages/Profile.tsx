@@ -125,6 +125,7 @@ const Profile = () => {
 
   const [inviteRole, setInviteRole] = useState('viewer');
   const [invitePerms, setInvitePerms] = useState<string[]>(['overview', 'messages']);
+  const [inviteName, setInviteName] = useState('');
   const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
   const [lastInviteLink, setLastInviteLink] = useState('');
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
@@ -222,7 +223,7 @@ const Profile = () => {
   const togglePerm = (key: string) =>
     setInvitePerms((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
 
-  const buildInviteLink = (token: string) => {
+  const buildInviteLink = (token: string, memberName?: string) => {
     const base = `${window.location.origin}/invite/${token}`;
     const conn = getActiveConnection();
     if (conn?.url && conn?.anonKey) {
@@ -240,6 +241,10 @@ const Profile = () => {
       if (tbl) {
         link += `&t=${encodeURIComponent(btoa(tbl))}`;
       }
+      // Embed member name so the invited user's display name is set
+      if (memberName) {
+        link += `&n=${encodeURIComponent(btoa(memberName))}`;
+      }
       return link;
     }
     return base;
@@ -252,7 +257,7 @@ const Profile = () => {
       const perms = inviteRole === 'admin' ? PERMISSION_OPTIONS.map((p) => p.key) : invitePerms;
       const { data, error } = await supabase.from('team_invites').insert({
         created_by: user.id,
-        email: '',
+        email: inviteName.trim() || '',
         role: inviteRole,
         permissions: perms,
       }).select().single();
@@ -265,12 +270,13 @@ const Profile = () => {
         }
         return;
       }
-      const link = buildInviteLink(data.token);
+      const link = buildInviteLink(data.token, inviteName.trim());
       setLastInviteLink(link);
       try { await navigator.clipboard.writeText(link); } catch { /* ignore */ }
       toast.success('Invite link generated & copied!');
       setInviteRole('viewer');
       setInvitePerms(['overview', 'messages']);
+      setInviteName('');
       loadInvites(user.id);
     } finally { setIsGeneratingInvite(false); }
   };
@@ -291,8 +297,8 @@ const Profile = () => {
     else { toast.success('Member removed'); loadInvites(user.id); }
   };
 
-  const copyLink = async (token: string) => {
-    const link = buildInviteLink(token);
+  const copyLink = async (token: string, memberName?: string) => {
+    const link = buildInviteLink(token, memberName);
     try { await navigator.clipboard.writeText(link); toast.success('Link copied!'); }
     catch { toast.error('Could not copy'); }
   };
@@ -442,6 +448,19 @@ const Profile = () => {
               </div>
 
               <div className="p-5 space-y-4">
+                {/* Member Name */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Member Name <span className="normal-case text-muted-foreground/40">(optional)</span></label>
+                  <input
+                    type="text"
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    placeholder="e.g. Rahim, Support Team..."
+                    className="w-full h-9 rounded-xl border border-border/60 bg-muted/30 px-3 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-colors"
+                    data-testid="input-invite-name"
+                  />
+                </div>
+
                 {/* Role selector */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Role</label>
@@ -622,7 +641,7 @@ const Profile = () => {
 
                           {invite.status === 'pending' && (
                             <button
-                              onClick={() => copyLink(invite.token)}
+                              onClick={() => copyLink(invite.token, invite.email || undefined)}
                               className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                               title="Copy invite link"
                               data-testid={`button-copy-link-${invite.id}`}

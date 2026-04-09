@@ -52,9 +52,11 @@ const InviteAccept = () => {
       const kParam = searchParams.get('k');
       const sParam = searchParams.get('s'); // service role key
       const tParam = searchParams.get('t'); // table name
+      const nParam = searchParams.get('n'); // member name
 
       let serviceRoleKey: string | null = null;
       let tableName: string | null = null;
+      let memberName: string | null = null;
 
       if (uParam && kParam) {
         try {
@@ -62,6 +64,7 @@ const InviteAccept = () => {
           supabaseKey = atob(decodeURIComponent(kParam));
           if (sParam) serviceRoleKey = atob(decodeURIComponent(sParam));
           if (tParam) tableName = atob(decodeURIComponent(tParam));
+          if (nParam) memberName = atob(decodeURIComponent(nParam));
         } catch {
           // ignore decode error — will fall back to default client
         }
@@ -139,11 +142,14 @@ const InviteAccept = () => {
       }
 
       // ── Store guest session ────────────────────────────────────────────
+      // Name priority: URL param → invite.email → fallback
+      const resolvedName = memberName || (row.email && !row.email.includes('@') ? row.email : null) || null;
       setGuestSession({
         token: row.token,
         role: row.role,
         permissions: row.permissions ?? [],
         email: row.email,
+        ...(resolvedName ? { name: resolvedName } : {}),
       });
 
       // ── Mark invite accepted ───────────────────────────────────────────

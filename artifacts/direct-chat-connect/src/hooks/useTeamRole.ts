@@ -137,9 +137,9 @@ export function useTeamRole(): TeamRole {
     };
   }, []);
 
-  // Guest display name from email
+  // Guest display name: prefer explicit name, then email prefix
   const guest = getGuestSession();
-  const guestDisplayName = guest?.email?.split('@')[0] ?? 'Guest';
+  const guestDisplayName = guest?.name || guest?.email?.split('@')[0] || 'Guest';
   const displayName = isGuest ? guestDisplayName : (user ? getDisplayName(user) : 'User');
   const initials = getInitials(displayName);
 

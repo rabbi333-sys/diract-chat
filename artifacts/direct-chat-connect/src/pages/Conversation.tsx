@@ -7,6 +7,7 @@ import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb
 import { ChatMessage } from '@/components/ChatMessage';
 import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw } from 'lucide-react';
 import { useAiControl } from '@/hooks/useAiControl';
+import { useTeamRole } from '@/hooks/useTeamRole';
 import { Button } from '@/components/ui/button';
 import { usePlatformConnections, PlatformConnection } from '@/hooks/usePlatformConnections';
 import { toast } from 'sonner';
@@ -98,6 +99,7 @@ const Conversation = () => {
   const { data: messages, isLoading, error } = useChatHistory(sessionId);
   const { data: recipientNames } = useRecipientNames();
   const { data: platformConns = [] } = usePlatformConnections();
+  const { displayName: agentName } = useTeamRole();
 
   const [replyText, setReplyText] = useState('');
   const [localMessages, setLocalMessages] = useState<ChatMessageType[]>([]);
@@ -614,7 +616,7 @@ const Conversation = () => {
               <div className="w-0.5 h-8 bg-primary rounded-full flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] font-bold text-primary">
-                  {replyingTo.sender === 'User' ? '👤 Customer' : replyingTo.sender === 'Agent' ? '🧑‍💼 You' : '🤖 AI'}
+                  {replyingTo.sender === 'User' ? '👤 Customer' : replyingTo.sender === 'Agent' ? `🧑‍💼 ${agentName}` : '🤖 AI'}
                 </p>
                 <p className="text-[11px] text-muted-foreground truncate">{replyingTo.message_text.slice(0, 60)}</p>
               </div>

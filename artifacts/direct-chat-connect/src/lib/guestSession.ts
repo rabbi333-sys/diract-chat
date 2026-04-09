@@ -5,6 +5,7 @@ export interface GuestSession {
   role: string;
   permissions: string[];
   email: string;
+  name?: string; // friendly display name set by admin when generating invite
 }
 
 export function getGuestSession(): GuestSession | null {
