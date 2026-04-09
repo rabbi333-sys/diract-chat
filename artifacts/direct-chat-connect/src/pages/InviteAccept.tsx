@@ -6,9 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, ShieldCheck, ShieldAlert, UserPlus, Clock } from 'lucide-react';
+import { Loader2, ShieldCheck, ShieldAlert, UserPlus, Clock, Database, Eye, EyeOff, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
-import { getConnections, setActiveConnection } from '@/lib/db-config';
+import { getConnections, setActiveConnection, DB_TYPES, type MainDbType } from '@/lib/db-config';
 import { hashPassword, setMemberSetup } from '@/lib/memberAuth';
 import {
   decodeNonSupabaseCreds, proxyGetInviteByToken, proxySubmitInvite,
@@ -42,7 +42,7 @@ const InviteAccept = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const [stage, setStage] = useState<'loading' | 'register' | 'submitting' | 'done' | 'error'>('loading');
+  const [stage, setStage] = useState<'loading' | 'register' | 'submitting' | 'setup-db' | 'done' | 'error'>('loading');
   const [error, setError] = useState('');
   const [invite, setInvite] = useState<Invite | null>(null);
   const [nonSupabaseCreds, setNonSupabaseCreds] = useState<DbCreds | null>(null);
@@ -52,6 +52,19 @@ const InviteAccept = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Sub-Admin own DB setup state
+  const [saDbType, setSaDbType] = useState<MainDbType>('supabase');
+  const [saUrl, setSaUrl] = useState('');
+  const [saAnonKey, setSaAnonKey] = useState('');
+  const [saShowAnonKey, setSaShowAnonKey] = useState(false);
+  const [saHost, setSaHost] = useState('');
+  const [saPort, setSaPort] = useState('');
+  const [saUsername, setSaUsername] = useState('');
+  const [saPassword, setSaPassword] = useState('');
+  const [saDbName, setSaDbName] = useState('');
+  const [saConnStr, setSaConnStr] = useState('');
+  const [saConnecting, setSaConnecting] = useState(false);
 
   // Decoded invite params
   const [params, setParams] = useState<{
@@ -245,6 +258,7 @@ const InviteAccept = () => {
         setMemberSetup();
         if (platformConnsJson) { try { localStorage.setItem(PLATFORM_CONNS_KEY, platformConnsJson); } catch { /* ignore */ } }
         if (n8nSettingsJson) { try { if (!localStorage.getItem(N8N_SETTINGS_KEY)) localStorage.setItem(N8N_SETTINGS_KEY, n8nSettingsJson); } catch { /* ignore */ } }
+        if (invite.role === 'sub-admin') { setStage('setup-db'); return; }
         setStage('done');
         return;
       }
@@ -286,11 +300,62 @@ const InviteAccept = () => {
 
       storeCredentials(supabaseUrl, supabaseKey, tableName, platformConnsJson, n8nSettingsJson);
       setMemberSetup();
+      if (invite.role === 'sub-admin') { setStage('setup-db'); return; }
       setStage('done');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong';
       toast.error(msg);
       setStage('register');
+    }
+  };
+
+  // ── Sub-Admin: save own DB ────────────────────────────────────────────────────
+  const SUBADMIN_DB_KEY = 'meta_subadmin_db_creds';
+
+  const handleSaveOwnDb = async () => {
+    setSaConnecting(true);
+    try {
+      const needsConnStr = saDbType === 'mongodb' || saDbType === 'redis';
+      if (saDbType === 'supabase') {
+        if (!saUrl.trim() || !saAnonKey.trim()) { toast.error('Please enter Supabase URL and Anon Key'); return; }
+        const credsObj = { dbType: 'supabase', url: saUrl.trim(), anonKey: saAnonKey.trim() };
+        localStorage.setItem(SUBADMIN_DB_KEY, JSON.stringify(credsObj));
+        const existing = getConnections();
+        const alreadyExists = existing.find(c => c.url === saUrl.trim());
+        let connId: string;
+        if (!alreadyExists) {
+          const newConn = {
+            id: `subadmin-${Date.now()}`,
+            name: 'My Database',
+            dbType: 'supabase' as const,
+            url: saUrl.trim(),
+            anonKey: saAnonKey.trim(),
+            createdAt: new Date().toISOString(),
+          };
+          localStorage.setItem('meta_db_connections', JSON.stringify([...existing, newConn]));
+          connId = newConn.id;
+        } else {
+          connId = alreadyExists.id;
+        }
+        setActiveConnection(connId);
+      } else if (needsConnStr) {
+        if (!saConnStr.trim()) { toast.error('Please enter a connection string'); return; }
+        const credsObj = { dbType: saDbType, connectionString: saConnStr.trim() };
+        localStorage.setItem(SUBADMIN_DB_KEY, JSON.stringify(credsObj));
+        storeMemberProxyCreds({ dbType: saDbType, connectionString: saConnStr.trim() });
+      } else {
+        if (!saHost.trim() || !saUsername.trim()) { toast.error('Please enter host and username'); return; }
+        const credsObj = {
+          dbType: saDbType, host: saHost.trim(), port: saPort.trim(), dbUsername: saUsername.trim(),
+          dbPassword: saPassword, dbName: saDbName.trim(),
+        };
+        localStorage.setItem(SUBADMIN_DB_KEY, JSON.stringify(credsObj));
+        storeMemberProxyCreds({ dbType: saDbType, host: saHost.trim(), port: saPort.trim(), dbUsername: saUsername.trim(), dbPassword: saPassword, dbName: saDbName.trim() });
+      }
+      toast.success('Your database connected!');
+      setStage('done');
+    } finally {
+      setSaConnecting(false);
     }
   };
 
@@ -342,6 +407,127 @@ const InviteAccept = () => {
       <Screen>
         <Loader2 size={28} className="animate-spin text-primary mx-auto" />
         <p className="text-sm text-muted-foreground text-center mt-3">Submitting your request…</p>
+      </Screen>
+    );
+  }
+
+  // ── Setup DB (Sub-Admin) ──────────────────────────────────────────────────────
+  if (stage === 'setup-db') {
+    const saCurrentDbType = DB_TYPES.find(t => t.value === saDbType);
+    const saNeedsConnStr = saDbType === 'mongodb' || saDbType === 'redis';
+    const saNeedsHostFields = saDbType === 'postgresql' || saDbType === 'mysql';
+
+    return (
+      <Screen>
+        <Card className="w-full max-w-sm shadow-lg">
+          <CardHeader className="text-center pb-2">
+            <div className="w-12 h-12 rounded-full bg-violet-500/10 flex items-center justify-center mx-auto mb-3">
+              <Database size={22} className="text-violet-600 dark:text-violet-400" />
+            </div>
+            <CardTitle className="text-xl font-bold">Connect Your Database</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              As a Sub-Admin, connect your <strong>own database</strong> — you'll see only your data.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-2">
+            <div className="rounded-lg bg-violet-500/5 border border-violet-500/20 px-3 py-2.5">
+              <p className="text-xs text-violet-700 dark:text-violet-400 leading-relaxed">
+                Your admin will still need to approve your account. After approval, you'll be logged into your own database workspace.
+              </p>
+            </div>
+
+            {/* DB Type */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Database Type</label>
+              <div className="relative">
+                <select
+                  value={saDbType}
+                  onChange={e => setSaDbType(e.target.value as MainDbType)}
+                  className="w-full appearance-none h-9 rounded-xl border border-border/60 bg-muted/30 px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors"
+                >
+                  {DB_TYPES.map(t => (
+                    <option key={t.value} value={t.value}>{t.icon} {t.label}</option>
+                  ))}
+                </select>
+                <ChevronDown size={12} className="absolute right-2.5 top-2.5 text-muted-foreground pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Supabase fields */}
+            {saDbType === 'supabase' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Supabase Project URL</Label>
+                  <Input value={saUrl} onChange={e => setSaUrl(e.target.value)} placeholder="https://xxx.supabase.co" className="h-9 rounded-xl" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Anon Key</Label>
+                  <div className="relative">
+                    <Input
+                      type={saShowAnonKey ? 'text' : 'password'}
+                      value={saAnonKey}
+                      onChange={e => setSaAnonKey(e.target.value)}
+                      placeholder="eyJ..."
+                      className="h-9 rounded-xl pr-9"
+                    />
+                    <button type="button" onClick={() => setSaShowAnonKey(s => !s)} className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground">
+                      {saShowAnonKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* PG / MySQL fields */}
+            {saNeedsHostFields && (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2 space-y-1.5">
+                    <Label>Host</Label>
+                    <Input value={saHost} onChange={e => setSaHost(e.target.value)} placeholder="localhost" className="h-9 rounded-xl" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Port</Label>
+                    <Input value={saPort} onChange={e => setSaPort(e.target.value)} placeholder={saCurrentDbType?.defaultPort || ''} className="h-9 rounded-xl" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <Label>Username</Label>
+                    <Input value={saUsername} onChange={e => setSaUsername(e.target.value)} placeholder="root" className="h-9 rounded-xl" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Password</Label>
+                    <Input type="password" value={saPassword} onChange={e => setSaPassword(e.target.value)} placeholder="••••••••" className="h-9 rounded-xl" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Database Name</Label>
+                  <Input value={saDbName} onChange={e => setSaDbName(e.target.value)} placeholder="mydb" className="h-9 rounded-xl" />
+                </div>
+              </>
+            )}
+
+            {/* MongoDB / Redis */}
+            {saNeedsConnStr && (
+              <div className="space-y-1.5">
+                <Label>Connection String</Label>
+                <Input value={saConnStr} onChange={e => setSaConnStr(e.target.value)} placeholder={saDbType === 'mongodb' ? 'mongodb+srv://...' : 'redis://...'} className="h-9 rounded-xl" />
+              </div>
+            )}
+
+            <Button onClick={handleSaveOwnDb} disabled={saConnecting} className="w-full mt-1 gap-2 bg-violet-600 hover:bg-violet-700">
+              {saConnecting ? <><Loader2 size={14} className="animate-spin" /> Connecting…</> : <><Database size={14} /> Save My Database</>}
+            </Button>
+
+            <button
+              onClick={() => setStage('done')}
+              className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition-colors py-1"
+            >
+              Skip for now — I'll connect later
+            </button>
+          </CardContent>
+        </Card>
       </Screen>
     );
   }

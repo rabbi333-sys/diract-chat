@@ -9,6 +9,7 @@ export type MemberSession = {
   permissions: string[];
   displayName: string;
   inviteId: string;
+  isSelfDb?: boolean;
 };
 
 // ── Password hashing (Web Crypto SHA-256, browser-native) ───────────────────

@@ -824,7 +824,7 @@ const Profile = () => {
     if (!user) return;
     setIsGeneratingInvite(true);
     try {
-      const perms = inviteRole === 'admin' ? PERMISSION_OPTIONS.map((p) => p.key) : invitePerms;
+      const perms = (inviteRole === 'admin' || inviteRole === 'sub-admin') ? PERMISSION_OPTIONS.map((p) => p.key) : invitePerms;
       const conn = getActiveConnection();
       let token = '';
 
@@ -1113,6 +1113,7 @@ const Profile = () => {
                     >
                       <option value="viewer">Viewer</option>
                       <option value="admin">Admin</option>
+                      <option value="sub-admin">Sub-Admin (Own DB)</option>
                     </select>
                     <ChevronDown size={12} className="absolute right-2.5 top-2.5 text-muted-foreground pointer-events-none" />
                   </div>
@@ -1154,6 +1155,18 @@ const Profile = () => {
                   <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/15">
                     <ShieldCheck size={13} className="text-primary flex-shrink-0" />
                     <p className="text-[11px] text-muted-foreground">Admin members have full access to all sections.</p>
+                  </div>
+                )}
+
+                {inviteRole === 'sub-admin' && (
+                  <div className="space-y-2 px-3 py-2.5 rounded-xl bg-violet-500/5 border border-violet-500/20">
+                    <div className="flex items-center gap-2">
+                      <Database size={13} className="text-violet-600 dark:text-violet-400 flex-shrink-0" />
+                      <p className="text-[11px] font-semibold text-violet-700 dark:text-violet-400">Sub-Admin — Own Database</p>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      This member will connect their <strong>own database</strong> after accepting the invite. They'll have full access to their own data — completely separate from yours.
+                    </p>
                   </div>
                 )}
 
@@ -1230,7 +1243,7 @@ const Profile = () => {
                       ? getInitials(invite.submitted_name)
                       : invite.email && invite.email.trim()
                         ? getInitials(invite.email.split('@')[0])
-                        : invite.role === 'admin' ? 'AD' : 'VW';
+                        : invite.role === 'admin' ? 'AD' : invite.role === 'sub-admin' ? 'SA' : 'VW';
                     return (
                       <div key={invite.id} data-testid={`member-row-${invite.id}`}>
                         <div className="flex items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors">
@@ -1247,9 +1260,11 @@ const Profile = () => {
                                 'text-[9px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0',
                                 invite.role === 'admin'
                                   ? 'bg-primary/10 text-primary'
-                                  : 'bg-muted text-muted-foreground'
+                                  : invite.role === 'sub-admin'
+                                    ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400'
+                                    : 'bg-muted text-muted-foreground'
                               )}>
-                                {invite.role.toUpperCase()}
+                                {invite.role === 'sub-admin' ? 'OWN DB' : invite.role.toUpperCase()}
                               </span>
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
@@ -1264,7 +1279,12 @@ const Profile = () => {
                                   Waiting for member to fill form
                                 </span>
                               )}
-                              {!isPending && invite.status !== 'revoked' && invite.status !== 'rejected' && invite.permissions?.length > 0 && (
+                              {!isPending && invite.status !== 'revoked' && invite.status !== 'rejected' && invite.role === 'sub-admin' && (
+                                <span className="text-[10px] text-violet-600/60 dark:text-violet-400/60 truncate flex items-center gap-1">
+                                  <Database size={9} /> Connects own database
+                                </span>
+                              )}
+                              {!isPending && invite.status !== 'revoked' && invite.status !== 'rejected' && invite.role !== 'sub-admin' && invite.permissions?.length > 0 && (
                                 <span className="text-[10px] text-muted-foreground/50 truncate">
                                   {invite.permissions.slice(0, 3).join(', ')}{invite.permissions.length > 3 ? ` +${invite.permissions.length - 3}` : ''}
                                 </span>
