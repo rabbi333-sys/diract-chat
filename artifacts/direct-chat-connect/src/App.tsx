@@ -13,6 +13,7 @@ import ConnectDB from "./pages/ConnectDB";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 import PermissionRoute from "./components/PermissionRoute";
+import MemberLogin from "./pages/MemberLogin";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +30,9 @@ const App = () => (
 
           {/* Public: invite acceptance */}
           <Route path="/invite/:token" element={<InviteAccept />} />
+
+          {/* Public: member login (email/password for invited users) */}
+          <Route path="/member-login" element={<MemberLogin />} />
 
           {/* Protected routes — require active DB connection + auth */}
           <Route path="/" element={

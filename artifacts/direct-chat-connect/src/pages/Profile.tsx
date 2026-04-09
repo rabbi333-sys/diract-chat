@@ -17,6 +17,7 @@ import {
 } from '@/lib/db-config';
 import { clearGuestSession } from '@/lib/guestSession';
 import { getStoredConnection } from '@/lib/externalDb';
+import { deleteMemberUser, signOutMember, hasMemberSetup } from '@/lib/memberAuth';
 
 const PLATFORM_CONNS_KEY = 'chat_monitor_platform_connections';
 const N8N_SETTINGS_KEY = 'chat_monitor_n8n_settings';
@@ -218,9 +219,14 @@ const Profile = () => {
   };
 
   const handleSignOut = async () => {
-    clearGuestSession();
-    await supabase.auth.signOut();
-    navigate('/');
+    if (hasMemberSetup()) {
+      await signOutMember();
+      window.location.href = '/member-login';
+    } else {
+      clearGuestSession();
+      await supabase.auth.signOut();
+      navigate('/');
+    }
   };
 
   const togglePerm = (key: string) =>
@@ -299,20 +305,40 @@ const Profile = () => {
     } finally { setIsGeneratingInvite(false); }
   };
 
+  // Helper: delete a member's auth account from the external Supabase
+  const tryDeleteMemberAuth = async (acceptedUserId: string | null) => {
+    if (!acceptedUserId) return;
+    try {
+      const raw = localStorage.getItem('chat_monitor_db_settings');
+      if (!raw) return;
+      const cfg = JSON.parse(raw);
+      const url = cfg?.supabase_url;
+      const serviceKey = cfg?.service_role_key;
+      if (!url || !serviceKey || serviceKey === cfg?.anon_key) return; // no proper service key
+      await deleteMemberUser(url, serviceKey, acceptedUserId);
+    } catch { /* ignore — might not have account */ }
+  };
+
   const handleRevoke = async (inviteId: string) => {
     if (!user) return;
+    const invite = invites.find(i => i.id === inviteId);
+    // Delete the member's auth account so they can't login anymore
+    await tryDeleteMemberAuth(invite?.accepted_user_id ?? null);
     const { error } = await supabase.from('team_invites').update({ status: 'revoked' }).eq('id', inviteId);
     setRevokeConfirmId(null);
     if (error) { toast.error('Failed to revoke access'); }
-    else { toast.success('Access revoked'); loadInvites(user.id); }
+    else { toast.success('Access revoked — member can no longer sign in'); loadInvites(user.id); }
   };
 
   const handleDelete = async (inviteId: string) => {
     if (!user) return;
+    const invite = invites.find(i => i.id === inviteId);
+    // Delete the member's auth account so they can't login anymore
+    await tryDeleteMemberAuth(invite?.accepted_user_id ?? null);
     const { error } = await supabase.from('team_invites').delete().eq('id', inviteId);
     setDeleteConfirmId(null);
     if (error) { toast.error('Failed to delete member'); }
-    else { toast.success('Member removed'); loadInvites(user.id); }
+    else { toast.success('Member removed — their account has been deleted'); loadInvites(user.id); }
   };
 
   const copyLink = async (token: string, memberName?: string) => {

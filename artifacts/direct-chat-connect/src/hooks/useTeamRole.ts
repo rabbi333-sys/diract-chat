@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { createClient } from '@supabase/supabase-js';
 import type { User } from '@supabase/supabase-js';
 import { getGuestSession, clearGuestSession } from '@/lib/guestSession';
+import { hasMemberSetup, getMemberUser, getMemberClient } from '@/lib/memberAuth';
 
 export interface TeamRole {
   user: User | null;
@@ -31,93 +31,6 @@ function getDisplayName(user: User): string {
   );
 }
 
-// Keys to wipe when a guest's access is revoked
-const REVOKE_KEYS = [
-  'meta_guest_session',
-  'chat_monitor_db_settings',
-  'chat_monitor_platform_connections',
-  'chat_monitor_n8n_settings',
-  'meta_db_connections',
-  'meta_db_active_id',
-];
-
-function wipeGuestAccess() {
-  clearGuestSession();
-  try {
-    REVOKE_KEYS.forEach(k => localStorage.removeItem(k));
-  } catch { /* ignore */ }
-}
-
-// Derive the best Supabase URL + anon key to use for token validation.
-// Priority: guest session itself → chat_monitor_db_settings → meta_db_connections
-function getValidationCredentials(): { url: string; key: string } | null {
-  try {
-    // 1. Guest session carries the credentials (set during InviteAccept)
-    const guestRaw = localStorage.getItem('meta_guest_session');
-    if (guestRaw) {
-      const gs = JSON.parse(guestRaw);
-      if (gs?.dbUrl && gs?.dbAnonKey) {
-        return { url: gs.dbUrl, key: gs.dbAnonKey };
-      }
-    }
-
-    // 2. Legacy settings (anon key stored as 'anon_key')
-    const legacyRaw = localStorage.getItem('chat_monitor_db_settings');
-    if (legacyRaw) {
-      const cfg = JSON.parse(legacyRaw);
-      if (cfg?.supabase_url && cfg?.anon_key) {
-        return { url: cfg.supabase_url, key: cfg.anon_key };
-      }
-      // Some old saves stored the key directly as service_role_key
-      if (cfg?.supabase_url && cfg?.service_role_key) {
-        return { url: cfg.supabase_url, key: cfg.service_role_key };
-      }
-    }
-
-    // 3. New multi-connection system
-    const connsRaw = localStorage.getItem('meta_db_connections');
-    const activeId = localStorage.getItem('meta_db_active_id');
-    if (connsRaw) {
-      const conns = JSON.parse(connsRaw) as Array<{
-        id: string; url?: string; anonKey?: string; serviceRoleKey?: string;
-      }>;
-      const active = conns.find(c => c.id === activeId) ?? conns[0];
-      if (active?.url && (active.anonKey || active.serviceRoleKey)) {
-        return { url: active.url, key: active.anonKey ?? active.serviceRoleKey! };
-      }
-    }
-  } catch { /* ignore */ }
-  return null;
-}
-
-// Validate a guest token using the get_invite_by_token RPC (works with anon key).
-// Returns: 'valid' | 'revoked' | 'unknown'
-async function validateGuestToken(token: string): Promise<'valid' | 'revoked' | 'unknown'> {
-  try {
-    const creds = getValidationCredentials();
-    if (!creds) return 'unknown';
-
-    const client = createClient(creds.url, creds.key, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
-    const { data, error } = await client.rpc('get_invite_by_token', { p_token: token });
-    if (error) return 'unknown';
-
-    // RPC returns empty → row was deleted
-    const row = Array.isArray(data) ? (data[0] ?? null) : (data ?? null);
-    if (!row) return 'revoked';
-
-    // Explicit revoke status
-    if (row.status === 'revoked') return 'revoked';
-
-    // Accepted or pending → still valid
-    return 'valid';
-  } catch {
-    return 'unknown';
-  }
-}
-
 export function useTeamRole(): TeamRole {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -125,45 +38,44 @@ export function useTeamRole(): TeamRole {
   const [notAuthorized, setNotAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isGuest, setIsGuest] = useState(false);
+  const [displayName, setDisplayName] = useState('User');
 
   useEffect(() => {
     let cancelled = false;
 
-    const handleGuestSession = async () => {
-      const guest = getGuestSession();
-      if (!guest) return false; // not a guest
-
-      const validity = await validateGuestToken(guest.token);
-      if (cancelled) return true;
-
-      if (validity === 'revoked') {
-        wipeGuestAccess();
-        setUser(null);
-        setIsGuest(false);
-        setIsAdmin(false);
-        setPermissions([]);
-        setNotAuthorized(true);
-        return true;
-      }
-
-      // 'valid' or 'unknown' → grant access
-      setUser(null);
-      setIsGuest(true);
-      setIsAdmin(guest.role === 'admin');
-      setPermissions(guest.permissions ?? []);
-      setNotAuthorized(false);
-      return true;
-    };
-
     const check = async () => {
       try {
+        // ── 1. External Supabase member session (email/password auth) ────────
+        if (hasMemberSetup()) {
+          const memberUser = await getMemberUser();
+          if (!cancelled && memberUser) {
+            const meta = memberUser.user_metadata ?? {};
+            const role = meta.role ?? 'viewer';
+            const perms: string[] = meta.permissions ?? [];
+            const name = meta.display_name || memberUser.email?.split('@')[0] || 'Member';
+            setUser(null);
+            setIsGuest(true); // treats member like a restricted guest (respects permissions)
+            setIsAdmin(role === 'admin');
+            setPermissions(perms);
+            setNotAuthorized(false);
+            setDisplayName(name);
+            return;
+          }
+          // member setup but no session → not authorized (ProtectedRoute handles redirect)
+          if (!cancelled) {
+            setNotAuthorized(false); // Let ProtectedRoute handle the redirect
+          }
+          return;
+        }
+
+        // ── 2. Main Supabase admin session ───────────────────────────────────
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (cancelled) return;
 
-        // ── Supabase authenticated user ──────────────────────────────────
         if (authUser) {
           setUser(authUser);
           setIsGuest(false);
+          setDisplayName(getDisplayName(authUser));
 
           try {
             const { data: ownerRow, error: ownerError } = await supabase
@@ -207,20 +119,34 @@ export function useTeamRole(): TeamRole {
           return;
         }
 
-        // ── No Supabase session — check for guest invite session ─────────
-        const wasGuest = await handleGuestSession();
-        if (wasGuest || cancelled) return;
+        // ── 3. Old-style guest session (backward compat) ─────────────────────
+        const guest = getGuestSession();
+        if (guest) {
+          setUser(null);
+          setIsGuest(true);
+          setIsAdmin(guest.role === 'admin');
+          setPermissions(guest.permissions ?? []);
+          setNotAuthorized(false);
+          setDisplayName(guest.name || guest.email?.split('@')[0] || 'Guest');
+          return;
+        }
 
-        // No auth and no guest session
+        // No auth
         setUser(null);
         setIsGuest(false);
         setIsAdmin(false);
         setPermissions([]);
         setNotAuthorized(false);
       } catch {
-        // supabase.auth failed (e.g. placeholder URL on first load) — still check guest
-        if (!cancelled) {
-          await handleGuestSession();
+        // Auth call failed — fall back to guest session
+        const guest = getGuestSession();
+        if (guest && !cancelled) {
+          setUser(null);
+          setIsGuest(true);
+          setIsAdmin(guest.role === 'admin');
+          setPermissions(guest.permissions ?? []);
+          setNotAuthorized(false);
+          setDisplayName(guest.name || guest.email?.split('@')[0] || 'Guest');
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -239,10 +165,6 @@ export function useTeamRole(): TeamRole {
     };
   }, []);
 
-  // Guest display name: prefer explicit name, then email prefix
-  const guest = getGuestSession();
-  const guestDisplayName = guest?.name || guest?.email?.split('@')[0] || 'Guest';
-  const displayName = isGuest ? guestDisplayName : (user ? getDisplayName(user) : 'User');
   const initials = getInitials(displayName);
 
   return { user, isAdmin, permissions, notAuthorized, displayName, initials, loading, isGuest };

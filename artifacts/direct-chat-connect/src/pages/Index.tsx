@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { AiControlGuide } from '@/components/AiControlGuide';
 import { getActiveConnection } from '@/lib/db-config';
 import { clearGuestSession } from '@/lib/guestSession';
+import { signOutMember, hasMemberSetup } from '@/lib/memberAuth';
 import { toast } from 'sonner';
 import { SessionList } from '@/components/SessionList';
 import { AnalyticsCard } from '@/components/AnalyticsCard';
@@ -177,7 +178,16 @@ const Index = () => {
             </p>
           </div>
           <button
-            onClick={() => { clearGuestSession(); supabase.auth.signOut(); navigate('/'); }}
+            onClick={async () => {
+              if (hasMemberSetup()) {
+                await signOutMember();
+                window.location.href = '/member-login';
+              } else {
+                clearGuestSession();
+                supabase.auth.signOut();
+                navigate('/');
+              }
+            }}
             className="text-sm text-primary hover:underline"
           >
             {t('signOut')}
