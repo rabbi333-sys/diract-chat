@@ -263,28 +263,50 @@ export const useSessions = (filterDate?: Date | null) => {
   });
 };
 
+// ─── localStorage name cache (works even without recipient_names table) ────────
+const LOCAL_NAMES_KEY = 'chat_monitor_recipient_names';
+
+export function getLocalNames(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(LOCAL_NAMES_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+export function saveLocalName(id: string, name: string) {
+  try {
+    const cur = getLocalNames();
+    cur[id] = name;
+    localStorage.setItem(LOCAL_NAMES_KEY, JSON.stringify(cur));
+  } catch { /* ignore */ }
+}
+
 // ─── useRecipientNames ────────────────────────────────────────────────────────
 export const useRecipientNames = () => {
   return useQuery({
     queryKey: ['recipient-names'],
-    staleTime: 30_000,       // 30s — pick up newly extracted names quickly
+    staleTime: 15_000,
     gcTime: 30 * 60_000,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('recipient_names')
-        .select('recipient_id, name');
-      if (error) throw error;
-      const map: Record<string, string> = {};
-      data?.forEach((item: RecipientName) => { map[item.recipient_id] = item.name; });
+      // Always start with localStorage (works without Supabase table)
+      const map: Record<string, string> = getLocalNames();
+      // Try to merge with Supabase table (optional — ignore if table missing)
+      try {
+        const { data } = await supabase
+          .from('recipient_names')
+          .select('recipient_id, name');
+        data?.forEach((item: RecipientName) => {
+          map[item.recipient_id] = item.name;
+          saveLocalName(item.recipient_id, item.name);
+        });
+      } catch { /* table may not exist — local cache is enough */ }
       return map;
     },
   });
 };
 
 // TTL-based cache: maps recipient ID → timestamp of last attempt
-// IDs that failed will be retried after RETRY_TTL_MS (default: 1 hour)
+// Reduced to 5 min so failed attempts retry quickly on the same session
 const _autoResolveAttemptedAt = new Map<string, number>();
-const RETRY_TTL_MS = 60 * 60 * 1000; // 1 hour
+const RETRY_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface PlatformConnLike {
   platform: string;
@@ -349,12 +371,15 @@ export const useAutoResolveNames = (
               participants.find((p) => p.id !== recipientId);
             const resolvedName = senderParticipant?.name;
             if (resolvedName && !convData.error) {
-              await supabase
-                .from('recipient_names')
-                .upsert(
+              // Save to localStorage immediately (no Supabase table required)
+              saveLocalName(recipientId, resolvedName);
+              // Also try Supabase (optional — ignore if table missing)
+              try {
+                await supabase.from('recipient_names').upsert(
                   { recipient_id: recipientId, name: resolvedName, updated_at: new Date().toISOString() },
                   { onConflict: 'recipient_id' }
                 );
+              } catch { /* ignore */ }
               return true;
             }
           } catch {
@@ -368,12 +393,13 @@ export const useAutoResolveNames = (
             );
             const data = await res.json();
             if (data.name && !data.error) {
-              await supabase
-                .from('recipient_names')
-                .upsert(
+              saveLocalName(recipientId, data.name);
+              try {
+                await supabase.from('recipient_names').upsert(
                   { recipient_id: recipientId, name: data.name, updated_at: new Date().toISOString() },
                   { onConflict: 'recipient_id' }
                 );
+              } catch { /* ignore */ }
               return true;
             }
           } catch {
@@ -396,19 +422,59 @@ export const useUpdateRecipientName = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ recipientId, name }: { recipientId: string; name: string }) => {
-      const { error } = await supabase
-        .from('recipient_names')
-        .upsert(
+      // Always save to localStorage first
+      saveLocalName(recipientId, name);
+      // Also try Supabase (optional)
+      try {
+        await supabase.from('recipient_names').upsert(
           { recipient_id: recipientId, name, updated_at: new Date().toISOString() },
           { onConflict: 'recipient_id' }
         );
-      if (error) throw error;
+      } catch { /* ignore if table doesn't exist */ }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recipient-names'] });
     },
   });
 };
+
+// ─── fetchNameFromMeta (standalone — used by manual refresh button) ───────────
+export async function fetchNameFromMeta(
+  recipientId: string,
+  tokens: string[]
+): Promise<string | null> {
+  for (const token of tokens) {
+    // Method 1: conversations endpoint (Facebook Page tokens)
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/v19.0/me/conversations?user_id=${recipientId}&fields=participants%7Bname%2Cemail%2Cid%7D&access_token=${token}`
+      );
+      const convData = await res.json();
+      const participants: Array<{ id: string; name: string }> =
+        convData?.data?.[0]?.participants?.data ?? [];
+      const match =
+        participants.find((p) => p.id === recipientId) ||
+        participants.find((p) => p.id !== recipientId);
+      if (match?.name && !convData.error) {
+        saveLocalName(recipientId, match.name);
+        return match.name;
+      }
+    } catch { /* fall through */ }
+
+    // Method 2: direct profile
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/v19.0/${recipientId}?fields=name&access_token=${token}`
+      );
+      const data = await res.json();
+      if (data.name && !data.error) {
+        saveLocalName(recipientId, data.name);
+        return data.name;
+      }
+    } catch { /* try next token */ }
+  }
+  return null;
+}
 
 // Re-export for components that need it
 export { normalizeRow };

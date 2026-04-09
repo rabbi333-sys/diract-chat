@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useChatHistory, useRecipientNames, useAutoResolveNames, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
+import { useQueryClient } from '@tanstack/react-query';
+import { useChatHistory, useRecipientNames, useAutoResolveNames, fetchNameFromMeta, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage } from '@/components/ChatMessage';
-import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw } from 'lucide-react';
 import { useAiControl } from '@/hooks/useAiControl';
 import { Button } from '@/components/ui/button';
 import { usePlatformConnections, PlatformConnection } from '@/hooks/usePlatformConnections';
@@ -120,15 +121,20 @@ const Conversation = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollEndRef = useRef<HTMLDivElement>(null);
 
+  const queryClient = useQueryClient();
+  const [fetchingName, setFetchingName] = useState(false);
+
   const searchParams = new URLSearchParams(window.location.search);
   const recipient = searchParams.get('recipient') || '';
   const displayName = recipient ? recipientNames?.[recipient] || recipient : 'Conversation';
+  const nameIsId = displayName === recipient && /^\d{10,}$/.test(recipient);
   const initials = displayName.slice(0, 2).toUpperCase();
   const grad = getGradient(recipient);
 
   const waConn = platformConns.find(c => c.platform === 'whatsapp' && c.is_active);
   const fbConn = platformConns.find(c => c.platform === 'facebook' && c.is_active);
-  const activeConn = waConn || fbConn;
+  const igConn = platformConns.find(c => c.platform === 'instagram' && c.is_active);
+  const activeConn = waConn || fbConn || igConn;
   const canReply = !!activeConn && !!recipient;
 
   const { aiEnabled, toggle: toggleAi, isPending: aiTogglePending } = useAiControl(sessionId);
@@ -138,6 +144,42 @@ const Conversation = () => {
     recipientNames,
     platformConns
   );
+
+  // Auto-fetch name when conversation opens and name is still an ID
+  useEffect(() => {
+    if (!nameIsId || fetchingName) return;
+    const metaTokens = platformConns
+      .filter(c => c.is_active && (c.platform === 'facebook' || c.platform === 'instagram') && c.access_token)
+      .map(c => c.access_token);
+    if (metaTokens.length === 0) return;
+
+    setFetchingName(true);
+    fetchNameFromMeta(recipient, metaTokens).then(name => {
+      if (name) queryClient.invalidateQueries({ queryKey: ['recipient-names'] });
+    }).finally(() => setFetchingName(false));
+  }, [recipient, nameIsId, platformConns.length]);
+
+  const handleFetchName = async () => {
+    const metaTokens = platformConns
+      .filter(c => c.is_active && (c.platform === 'facebook' || c.platform === 'instagram') && c.access_token)
+      .map(c => c.access_token);
+    if (metaTokens.length === 0) {
+      toast.error('No active Facebook/Instagram connection found in Settings');
+      return;
+    }
+    setFetchingName(true);
+    try {
+      const name = await fetchNameFromMeta(recipient, metaTokens);
+      if (name) {
+        await queryClient.invalidateQueries({ queryKey: ['recipient-names'] });
+        toast.success(`Name resolved: ${name}`);
+      } else {
+        toast.error('Could not fetch name — check your access token');
+      }
+    } finally {
+      setFetchingName(false);
+    }
+  };
 
   const allMessages = [...(messages || []), ...localMessages];
 
@@ -396,8 +438,22 @@ const Conversation = () => {
 
           {/* Name + status */}
           <div className="flex-1 min-w-0">
-            <h2 className="font-bold text-foreground text-[15px] truncate leading-tight">{displayName}</h2>
-            <p className="text-[11px] text-emerald-500 font-medium leading-none mt-0.5">Active now</p>
+            <div className="flex items-center gap-1.5">
+              <h2 className="font-bold text-foreground text-[15px] truncate leading-tight">{displayName}</h2>
+              {nameIsId && (
+                <button
+                  onClick={handleFetchName}
+                  disabled={fetchingName}
+                  title="Fetch real name from Facebook"
+                  className="flex-shrink-0 p-1 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <RefreshCw size={11} className={fetchingName ? 'animate-spin' : ''} />
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-emerald-500 font-medium leading-none mt-0.5">
+              {fetchingName ? 'Fetching name…' : 'Active now'}
+            </p>
           </div>
 
           {/* Actions */}
