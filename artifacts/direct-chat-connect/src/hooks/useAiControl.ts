@@ -1,6 +1,22 @@
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+
+// ─── Shared direct upsert (no auth required — "Allow all" RLS policy) ─────────
+// The ai_control table created by FULL_SETUP_SQL has no user_id column and uses
+// "Allow all" RLS so any client (including guest sessions) can write to it.
+async function directUpsertAi(session_id: string, ai_enabled: boolean): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('ai_control').upsert(
+      { session_id, ai_enabled, updated_at: new Date().toISOString() },
+      { onConflict: 'session_id' }
+    );
+    return !error;
+  } catch {
+    return false;
+  }
+}
 
 /* ── Global Shutdown / Start (all sessions at once) ─────────────── */
 export function useGlobalAiControl() {
@@ -16,24 +32,15 @@ export function useGlobalAiControl() {
         .maybeSingle();
       return data?.ai_enabled ?? true;
     },
-    staleTime: 15_000,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
   });
 
   const globalOn = stateQuery.data ?? true;
 
   const toggleMutation = useMutation({
     mutationFn: async (turnOn: boolean) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-      const { error } = await supabase
-        .from('ai_control')
-        .update({ ai_enabled: turnOn, updated_at: new Date().toISOString() })
-        .eq('user_id', user.id);
-      if (error) throw error;
-      await supabase.from('ai_control').upsert(
-        { session_id: '__global__', ai_enabled: turnOn, user_id: user.id, updated_at: new Date().toISOString() },
-        { onConflict: 'session_id' }
-      );
+      await directUpsertAi('__global__', turnOn);
     },
     onMutate: async (turnOn) => {
       await queryClient.cancelQueries({ queryKey: ['ai-control-global'] });
@@ -70,6 +77,7 @@ export function useAiControl(session_id: string | undefined) {
   const queryClient = useQueryClient();
   const qk = ['ai-control', session_id];
 
+  // ── Initial fetch (staleTime: 0 → always fresh on mount) ──────────────────
   const query = useQuery({
     queryKey: qk,
     queryFn: async (): Promise<boolean> => {
@@ -83,22 +91,43 @@ export function useAiControl(session_id: string | undefined) {
       return data?.ai_enabled ?? true;
     },
     enabled: !!session_id,
-    staleTime: 30_000,
+    staleTime: 0,          // always re-fetch on mount / focus
+    refetchInterval: 10_000, // poll every 10 s as safety net
   });
 
+  // ── Realtime subscription: update cache the moment DB row changes ──────────
+  // This is what makes AI turn off instantly when HandoffPanel writes to ai_control.
+  useEffect(() => {
+    if (!session_id) return;
+    const channel = supabase
+      .channel(`ai-control-${session_id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ai_control',
+          filter: `session_id=eq.${session_id}`,
+        },
+        (payload) => {
+          const row = payload.new as { ai_enabled?: boolean } | undefined;
+          if (row?.ai_enabled !== undefined) {
+            // Push the new value directly into the cache — no round-trip fetch needed
+            queryClient.setQueryData(qk, row.ai_enabled);
+          }
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session_id]);
+
+  // ── Toggle mutation (no auth required — "Allow all" RLS) ──────────────────
   const mutation = useMutation({
     mutationFn: async (ai_enabled: boolean) => {
       if (!session_id) throw new Error('No session_id');
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      const { error } = await supabase
-        .from('ai_control')
-        .upsert(
-          { session_id, ai_enabled, user_id: user.id, updated_at: new Date().toISOString() },
-          { onConflict: 'session_id' }
-        );
-      if (error) throw error;
+      const ok = await directUpsertAi(session_id, ai_enabled);
+      if (!ok) throw new Error('Failed to update AI state');
       return ai_enabled;
     },
     onMutate: async (ai_enabled) => {
@@ -125,22 +154,28 @@ export function useAiControl(session_id: string | undefined) {
     aiEnabled,
     isLoading: query.isLoading || mutation.isPending,
     toggle: () => mutation.mutate(!aiEnabled),
+    setEnabled: (val: boolean) => mutation.mutate(val),
     isPending: mutation.isPending,
   };
 }
 
 export const AI_CONTROL_SQL = `-- AI Control Table (per-conversation AI toggle)
+-- Uses "Allow all" RLS — n8n and guests can write without authentication.
+-- Make sure supabase_realtime is enabled so the dashboard updates instantly.
 CREATE TABLE IF NOT EXISTS public.ai_control (
   session_id  TEXT        PRIMARY KEY,
   ai_enabled  BOOLEAN     NOT NULL DEFAULT TRUE,
-  user_id     UUID        REFERENCES auth.users(id) ON DELETE CASCADE,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE public.ai_control ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "ai_control_own" ON public.ai_control;
-CREATE POLICY "ai_control_own" ON public.ai_control
-  FOR ALL
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);`;
+DROP POLICY IF EXISTS "Allow all for ai_control" ON public.ai_control;
+CREATE POLICY "Allow all for ai_control" ON public.ai_control
+  FOR ALL USING (true) WITH CHECK (true);
+
+-- Enable realtime so the dashboard reflects changes instantly:
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.ai_control;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;`;
