@@ -44,7 +44,7 @@ export const ChatMessage = ({ message, onReply, isFirst = true, isLast = true }:
   const [imgError, setImgError] = useState<Record<string, boolean>>({});
   const [hover, setHover] = useState(false);
 
-  const isRight = message.sender === 'User' || message.sender === 'Agent';
+  const isRight = message.sender === 'Agent';
   const content = message.message_text?.trim();
   if (!content) return null;
 
@@ -90,12 +90,14 @@ export const ChatMessage = ({ message, onReply, isFirst = true, isLast = true }:
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      {/* AI avatar — only on last message of group */}
+      {/* Left-side avatar — only on last message of group */}
       {!isRight && (
         <div className={cn('w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center shadow-sm self-end', !isLast && 'invisible')}>
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-base"
-            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}>
-            🤖
+            style={{ background: message.sender === 'User'
+              ? 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)'
+              : 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}>
+            {message.sender === 'User' ? '👤' : '🤖'}
           </div>
         </div>
       )}
