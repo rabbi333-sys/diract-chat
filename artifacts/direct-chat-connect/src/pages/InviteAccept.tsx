@@ -206,10 +206,12 @@ const InviteAccept = () => {
     if (password !== confirmPassword) { toast.error('Passwords do not match'); return; }
 
     const { supabaseUrl, supabaseKey, serviceRoleKey, memberName } = params;
-    if (!supabaseUrl || !serviceRoleKey) {
+    if (!supabaseUrl || (!serviceRoleKey && !supabaseKey)) {
       toast.error('Missing workspace credentials. Please ask your admin for a new invite link.');
       return;
     }
+    // Use service role key if available, otherwise fall back to anon key
+    const effectiveServiceKey = serviceRoleKey ?? supabaseKey!;
 
     setStage('creating');
 
@@ -219,7 +221,8 @@ const InviteAccept = () => {
       // Create user in external Supabase auth (no email verification)
       const { data: createData, error: createErr } = await createMemberUser({
         url: supabaseUrl,
-        serviceKey: serviceRoleKey,
+        serviceKey: effectiveServiceKey,
+        anonKey: supabaseKey ?? effectiveServiceKey,  // fallback if admin API fails
         email,
         password,
         role: invite.role,
@@ -247,13 +250,21 @@ const InviteAccept = () => {
       if (!memberClient) throw new Error('No workspace client available');
       const { error: signInErr } = await memberClient.auth.signInWithPassword({ email, password });
       if (signInErr) {
+        const needsConfirm = signInErr.message?.toLowerCase().includes('confirm')
+          || signInErr.message?.toLowerCase().includes('not confirmed');
+        if (needsConfirm) {
+          // Email confirmation is required in this Supabase project
+          setError('email_confirmation');
+          setStage('error');
+          return;
+        }
         toast.error('Account created but sign-in failed: ' + signInErr.message);
         setStage('register');
         return;
       }
 
       // Mark invite as accepted in team_invites
-      const anonClient = createClient(supabaseUrl, supabaseKey ?? serviceRoleKey);
+      const anonClient = createClient(supabaseUrl, supabaseKey ?? effectiveServiceKey);
       await anonClient
         .from('team_invites')
         .update({
@@ -284,23 +295,30 @@ const InviteAccept = () => {
   // ── Error ────────────────────────────────────────────────────────────────────
   if (stage === 'error') {
     const alreadyUsed = error === 'already_used';
+    const emailConfirm = error === 'email_confirmation';
     return (
       <Screen>
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center pb-2">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 ${alreadyUsed ? 'bg-amber-500/10' : 'bg-red-500/10'}`}>
-              <ShieldAlert size={22} className={alreadyUsed ? 'text-amber-500' : 'text-red-500'} />
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 ${
+              alreadyUsed || emailConfirm ? 'bg-amber-500/10' : 'bg-red-500/10'
+            }`}>
+              <ShieldAlert size={22} className={alreadyUsed || emailConfirm ? 'text-amber-500' : 'text-red-500'} />
             </div>
-            <CardTitle className="text-base">{alreadyUsed ? 'Invite Already Used' : 'Invalid Invite'}</CardTitle>
+            <CardTitle className="text-base">
+              {alreadyUsed ? 'Invite Already Used' : emailConfirm ? 'Check Your Email' : 'Invalid Invite'}
+            </CardTitle>
           </CardHeader>
           <CardContent className="text-center space-y-4">
             <p className="text-sm text-muted-foreground">
               {alreadyUsed
                 ? 'This invite link has already been used. If you already registered, please sign in.'
+                : emailConfirm
+                ? 'Your account was created! Please check your email and click the confirmation link, then sign in.'
                 : error}
             </p>
-            {alreadyUsed
-              ? <Button asChild className="w-full"><Link to="/member-login">Sign In</Link></Button>
+            {emailConfirm || alreadyUsed
+              ? <Button asChild className="w-full"><Link to="/member-login">Go to Sign In</Link></Button>
               : <Button onClick={() => navigate('/')} variant="outline" className="w-full">Go to Dashboard</Button>
             }
           </CardContent>
@@ -368,9 +386,9 @@ const InviteAccept = () => {
           )}
 
           {!hasServiceKey && (
-            <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3">
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                This invite link is outdated. Ask your admin to generate a new invite link for proper account setup.
+            <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3">
+              <p className="text-xs text-blue-600 dark:text-blue-400">
+                For instant access, make sure "Email confirmations" is disabled in your Supabase project (Auth → Settings).
               </p>
             </div>
           )}
@@ -413,7 +431,7 @@ const InviteAccept = () => {
                 autoComplete="new-password"
               />
             </div>
-            <Button type="submit" className="w-full mt-1" disabled={!hasServiceKey}>
+            <Button type="submit" className="w-full mt-1">
               Create Account & Sign In
             </Button>
           </form>

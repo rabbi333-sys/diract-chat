@@ -101,31 +101,63 @@ export async function signOutMember(): Promise<void> {
   } catch { /* ignore */ }
 }
 
-// ── Admin: create a member user (service role key required) ─────────────────
+// ── Admin: create a member user ─────────────────────────────────────────────
+// Tries admin API (service role key) first; falls back to signUp (anon key).
 
 export async function createMemberUser(opts: {
   url: string;
-  serviceKey: string;
+  serviceKey: string;   // may be the actual service role key OR anon key
+  anonKey?: string;     // always the anon key (used as fallback)
   email: string;
   password: string;
   role: string;
   permissions: string[];
   displayName?: string;
 }) {
-  const admin = createClient(opts.url, opts.serviceKey, {
+  const metadata = {
+    role: opts.role,
+    permissions: opts.permissions,
+    display_name: opts.displayName ?? opts.email.split('@')[0],
+    is_member: true,
+  };
+
+  // 1. Try admin API — only works if serviceKey is the real service_role JWT
+  try {
+    const admin = createClient(opts.url, opts.serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const result = await admin.auth.admin.createUser({
+      email: opts.email,
+      password: opts.password,
+      email_confirm: true,
+      user_metadata: metadata,
+    });
+    // Success — return as-is (matches admin API shape)
+    if (!result.error) return result;
+    // Only fall through on "Bearer token" error (means key is the anon key)
+    if (!result.error.message?.toLowerCase().includes('bearer')) {
+      return result;
+    }
+  } catch { /* fall through to signUp */ }
+
+  // 2. Fallback: signUp with anon key — works without service role key
+  //    Note: if Supabase "Email confirmations" is ON the user gets an email.
+  //    Turn it OFF in Supabase → Auth → Settings for instant access.
+  const anonKey = opts.anonKey ?? opts.serviceKey;
+  const anon = createClient(opts.url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  return admin.auth.admin.createUser({
+  const signUpResult = await anon.auth.signUp({
     email: opts.email,
     password: opts.password,
-    email_confirm: true, // skip email verification
-    user_metadata: {
-      role: opts.role,
-      permissions: opts.permissions,
-      display_name: opts.displayName ?? opts.email.split('@')[0],
-      is_member: true,
-    },
+    options: { data: metadata },
   });
+  // Normalise to the same shape as admin API result
+  if (signUpResult.error) return signUpResult as { data: null; error: typeof signUpResult.error };
+  return {
+    data: { user: signUpResult.data?.user ?? null },
+    error: null,
+  };
 }
 
 // ── Admin: delete a member user (service role key required) ─────────────────
