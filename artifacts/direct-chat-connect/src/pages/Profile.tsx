@@ -100,11 +100,37 @@ DROP POLICY IF EXISTS "Admins can manage invites" ON public.team_invites;
 CREATE POLICY "Admins can manage invites" ON public.team_invites
   USING (auth.uid() = created_by);
 
+-- Step 3: RPC for reading a pending invite by token (admin-level, SECURITY DEFINER)
 CREATE OR REPLACE FUNCTION public.get_invite_by_token(p_token uuid)
 RETURNS TABLE (id uuid, email text, role text, permissions text[], status text, created_by uuid, invited_by uuid)
 LANGUAGE sql SECURITY DEFINER AS $$
   SELECT id, email, role, permissions, status, created_by, invited_by
   FROM public.team_invites WHERE token = p_token AND status = 'pending';
+$$;
+
+-- Step 4: RPC for members to submit their registration request (bypasses RLS safely)
+CREATE OR REPLACE FUNCTION public.submit_invite_request(
+  p_token uuid,
+  p_name text,
+  p_email text,
+  p_password_hash text
+)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_id uuid;
+BEGIN
+  SELECT id INTO v_id FROM public.team_invites
+  WHERE token = p_token AND status = 'pending';
+  IF v_id IS NULL THEN RETURN 'not_found'; END IF;
+  UPDATE public.team_invites SET
+    submitted_name = p_name,
+    submitted_email = p_email,
+    submitted_password_hash = p_password_hash,
+    submitted_at = now()
+  WHERE id = v_id;
+  RETURN 'ok';
+END;
 $$;`;
 
 const SqlCopyBlock = ({ sql }: { sql: string }) => {
@@ -176,15 +202,24 @@ const Profile = () => {
   const loadInvites = async (userId: string) => {
     setInvitesLoading(true);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const q = supabase.from('team_invites').select('*') as any;
-      let { data, error } = await q.eq('created_by', userId).order('created_at', { ascending: false });
-      if (error?.message?.includes('created_by')) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const q2 = supabase.from('team_invites').select('*') as any;
-        ({ data, error } = await q2.eq('invited_by', userId).order('created_at', { ascending: false }));
+      const { data: d1, error: e1 } = await supabase
+        .from('team_invites')
+        .select('*')
+        .eq('created_by', userId)
+        .order('created_at', { ascending: false });
+
+      if (e1?.message?.includes('created_by')) {
+        // Legacy schema fallback: older DBs use `invited_by` instead of `created_by`.
+        // Use .filter() which accepts arbitrary column names as strings.
+        const { data: d2 } = await supabase
+          .from('team_invites')
+          .select('*')
+          .filter('invited_by', 'eq', userId)
+          .order('created_at', { ascending: false });
+        setInvites((d2 ?? []) as unknown as Invite[]);
+      } else {
+        setInvites((d1 ?? []) as unknown as Invite[]);
       }
-      setInvites((data ?? []) as Invite[]);
     } finally {
       setInvitesLoading(false);
     }

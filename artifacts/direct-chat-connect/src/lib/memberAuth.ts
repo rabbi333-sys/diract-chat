@@ -170,15 +170,3 @@ export async function signOutMember(): Promise<void> {
   } catch { /* ignore */ }
 }
 
-// ── Legacy: try to delete old Supabase Auth account (no-op in new system) ──
-
-export async function deleteMemberUser(url: string, serviceKey: string, userId: string) {
-  try {
-    const admin = createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    return admin.auth.admin.deleteUser(userId);
-  } catch {
-    return { data: null, error: null };
-  }
-}

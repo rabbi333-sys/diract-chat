@@ -208,25 +208,28 @@ const InviteAccept = () => {
         auth: { persistSession: false, autoRefreshToken: false },
       });
 
-      // Save submitted credentials to team_invites (keeping status = 'pending' for admin to approve)
-      const { error: updateErr } = await client
-        .from('team_invites')
-        .update({
-          submitted_name: name.trim(),
-          submitted_email: email.toLowerCase().trim(),
-          submitted_password_hash: passwordHash,
-          submitted_at: new Date().toISOString(),
-        })
-        .eq('token', token);
+      // Use SECURITY DEFINER RPC so anonymous users can write submitted_* fields
+      // without needing direct table write access (bypasses RLS safely).
+      const { data: result, error: rpcErr } = await client.rpc('submit_invite_request', {
+        p_token: token,
+        p_name: name.trim(),
+        p_email: email.toLowerCase().trim(),
+        p_password_hash: passwordHash,
+      });
 
-      if (updateErr) {
-        // If the columns don't exist yet, show SQL error
-        if (updateErr.message?.includes('column') || updateErr.message?.includes('submitted')) {
-          toast.error('Database needs updating. Ask your admin to run the SQL setup.');
+      if (rpcErr) {
+        if (rpcErr.message?.includes('function') || rpcErr.message?.includes('submit_invite')) {
+          toast.error('Database needs updating. Ask your admin to run the SQL setup from their Profile page.');
           setStage('register');
           return;
         }
-        toast.error('Failed to submit: ' + updateErr.message);
+        toast.error('Failed to submit: ' + rpcErr.message);
+        setStage('register');
+        return;
+      }
+
+      if (result === 'not_found') {
+        toast.error('This invite link is no longer valid. Please ask your admin for a new one.');
         setStage('register');
         return;
       }
