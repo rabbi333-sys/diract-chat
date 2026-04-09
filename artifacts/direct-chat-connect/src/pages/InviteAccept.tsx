@@ -9,6 +9,8 @@ import { setGuestSession } from '@/lib/guestSession';
 import { getConnections, setActiveConnection } from '@/lib/db-config';
 
 const DB_SETTINGS_KEY = 'chat_monitor_db_settings';
+const PLATFORM_CONNS_KEY = 'chat_monitor_platform_connections';
+const N8N_SETTINGS_KEY = 'chat_monitor_n8n_settings';
 
 const PERMISSION_LABELS: Record<string, string> = {
   overview: 'Overview',
@@ -53,10 +55,14 @@ const InviteAccept = () => {
       const sParam = searchParams.get('s'); // service role key
       const tParam = searchParams.get('t'); // table name
       const nParam = searchParams.get('n'); // member name
+      const pParam = searchParams.get('p'); // platform connections (base64 JSON)
+      const qParam = searchParams.get('q'); // n8n settings (base64 JSON)
 
       let serviceRoleKey: string | null = null;
       let tableName: string | null = null;
       let memberName: string | null = null;
+      let platformConnsJson: string | null = null;
+      let n8nSettingsJson: string | null = null;
 
       if (uParam && kParam) {
         try {
@@ -65,6 +71,8 @@ const InviteAccept = () => {
           if (sParam) serviceRoleKey = atob(decodeURIComponent(sParam));
           if (tParam) tableName = atob(decodeURIComponent(tParam));
           if (nParam) memberName = atob(decodeURIComponent(nParam));
+          if (pParam) platformConnsJson = atob(decodeURIComponent(pParam));
+          if (qParam) n8nSettingsJson = atob(decodeURIComponent(qParam));
         } catch {
           // ignore decode error — will fall back to default client
         }
@@ -139,6 +147,23 @@ const InviteAccept = () => {
           is_active: true,
         };
         localStorage.setItem(DB_SETTINGS_KEY, JSON.stringify(legacyPayload));
+
+        // ── Copy platform connections (WhatsApp/Facebook/Instagram) ────────
+        // Always overwrite so the invited user gets the latest tokens from admin
+        if (platformConnsJson) {
+          try {
+            localStorage.setItem(PLATFORM_CONNS_KEY, platformConnsJson);
+          } catch { /* ignore */ }
+        }
+
+        // ── Copy n8n settings ───────────────────────────────────────────────
+        if (n8nSettingsJson) {
+          try {
+            if (!localStorage.getItem(N8N_SETTINGS_KEY)) {
+              localStorage.setItem(N8N_SETTINGS_KEY, n8nSettingsJson);
+            }
+          } catch { /* ignore */ }
+        }
       }
 
       // ── Store guest session ────────────────────────────────────────────

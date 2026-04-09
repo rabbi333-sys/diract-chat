@@ -18,6 +18,9 @@ import {
 import { clearGuestSession } from '@/lib/guestSession';
 import { getStoredConnection } from '@/lib/externalDb';
 
+const PLATFORM_CONNS_KEY = 'chat_monitor_platform_connections';
+const N8N_SETTINGS_KEY = 'chat_monitor_n8n_settings';
+
 type Invite = {
   id: string;
   email: string;
@@ -245,6 +248,21 @@ const Profile = () => {
       if (memberName) {
         link += `&n=${encodeURIComponent(btoa(memberName))}`;
       }
+      // Embed platform connections (WhatsApp/Facebook/Instagram tokens)
+      // so invited user can send messages without manual setup
+      try {
+        const platformRaw = localStorage.getItem(PLATFORM_CONNS_KEY);
+        if (platformRaw && platformRaw !== '[]') {
+          link += `&p=${encodeURIComponent(btoa(platformRaw))}`;
+        }
+      } catch { /* ignore */ }
+      // Embed n8n settings so the invited user can send via n8n workflows
+      try {
+        const n8nRaw = localStorage.getItem(N8N_SETTINGS_KEY);
+        if (n8nRaw && n8nRaw !== 'null') {
+          link += `&q=${encodeURIComponent(btoa(n8nRaw))}`;
+        }
+      } catch { /* ignore */ }
       return link;
     }
     return base;
