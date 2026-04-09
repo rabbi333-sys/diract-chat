@@ -49,6 +49,7 @@ const HANDOFF_SQL: Record<MainDbType, string> = {
   supabase: `CREATE TABLE IF NOT EXISTS public.handoff_requests (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   session_id text,
+  sender_id text,
   recipient text,
   reason text NOT NULL DEFAULT 'Human assistance needed',
   message text,
@@ -65,12 +66,15 @@ DROP POLICY IF EXISTS "Allow all" ON public.handoff_requests;
 -- Dev policy: allows public insert from n8n/webhooks.
 -- Production: use service_role key in n8n (bypasses RLS) and tighten this policy.
 CREATE POLICY "Allow all" ON public.handoff_requests FOR ALL USING (true);
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.handoff_requests; EXCEPTION WHEN OTHERS THEN NULL; END $$;`,
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.handoff_requests; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+-- ⚠️ If you already have a handoff_requests table, add the new column:
+ALTER TABLE public.handoff_requests ADD COLUMN IF NOT EXISTS sender_id text;`,
 
   postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
 CREATE TABLE IF NOT EXISTS handoff_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id VARCHAR(255),
+  sender_id VARCHAR(255),
   recipient VARCHAR(255),
   reason TEXT NOT NULL DEFAULT 'Human assistance needed',
   message TEXT,
@@ -78,12 +82,15 @@ CREATE TABLE IF NOT EXISTS handoff_requests (
   status VARCHAR(50) DEFAULT 'pending',
   notes TEXT,
   created_at TIMESTAMP DEFAULT NOW()
-);`,
+);
+-- If you already have the table, add the new column:
+ALTER TABLE handoff_requests ADD COLUMN IF NOT EXISTS sender_id VARCHAR(255);`,
 
   mysql: `-- Requires MySQL 8.0.13+ for DEFAULT (UUID()); use app-generated UUIDs on older versions
 CREATE TABLE IF NOT EXISTS handoff_requests (
   id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
   session_id VARCHAR(255),
+  sender_id VARCHAR(255),
   recipient VARCHAR(255),
   reason TEXT NOT NULL,
   message TEXT,
@@ -91,7 +98,9 @@ CREATE TABLE IF NOT EXISTS handoff_requests (
   status VARCHAR(50) DEFAULT 'pending',
   notes TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);`,
+);
+-- If you already have the table, add the new column:
+ALTER TABLE handoff_requests ADD COLUMN IF NOT EXISTS sender_id VARCHAR(255);`,
 
   mongodb: `// MongoDB creates collections automatically on first insert.
 // Optionally create with schema validation:
@@ -102,6 +111,7 @@ db.createCollection("handoff_requests", {
       required: ["reason"],
       properties: {
         session_id: { bsonType: "string" },
+        sender_id:  { bsonType: "string" },
         recipient:  { bsonType: "string" },
         reason:     { bsonType: "string" },
         message:    { bsonType: "string" },
@@ -110,17 +120,19 @@ db.createCollection("handoff_requests", {
       }
     }
   }
-});`,
+});
+// Recommended index for fast lookup by sender:
+db.handoff_requests.createIndex({ sender_id: 1 });`,
 
   redis: `# Redis uses key-value patterns — no schema needed.
 # Recommended key pattern:
 #   handoff:{session_id}
 #
-# Store as Hash:
-#   HSET handoff:{session_id} recipient "Name" reason "..." message "..." priority "normal"
+# Store as Hash (now includes sender_id):
+#   HSET handoff:{session_id} sender_id "1234567890" recipient "Name" reason "..." message "..." priority "normal"
 #
 # Or store as JSON string:
-#   SET handoff:{session_id} '{"recipient":"Name","reason":"..."}' EX 86400`,
+#   SET handoff:{session_id} '{"sender_id":"1234567890","recipient":"Name","reason":"..."}' EX 86400`,
 };
 
 /* failed_automations */
@@ -402,7 +414,7 @@ const FULL_SETUP_SQL_REDIS = `# ════════════════
 #   payment_status "unpaid" status "pending"
 
 # Human Handoff  →  handoff:{session_id}
-# HSET handoff:{session_id} recipient "Name" reason "..." priority "normal"
+# HSET handoff:{session_id} sender_id "1234567890" recipient "Name" reason "..." priority "normal"
 
 # Failed Automations  →  failure:{workflow}:{timestamp}
 # HSET failure:BotFlow:1234567890 workflow_name "BotFlow" error_message "..."
@@ -447,25 +459,28 @@ const ENDPOINTS: EndpointDef[] = [
     colorBg: 'bg-primary/10',
     colorBorder: 'border-primary/25',
     fields: [
-      { name: 'recipient', example: 'Customer Name' },
+      { name: 'sender_id', example: 'Facebook / WhatsApp User ID' },
+      { name: 'recipient', example: 'Customer Name (display)' },
       { name: 'reason',    example: 'Why human is needed' },
       { name: 'message',   example: "Customer's last message" },
       { name: 'priority',  example: 'normal / high / urgent' },
     ],
-    bodyJson: { recipient: 'Customer Name', reason: 'Human help needed', message: 'Last message', priority: 'normal' },
+    bodyJson: { sender_id: '1234567890', recipient: 'Customer Name', reason: 'Human help needed', message: 'Last message', priority: 'normal' },
     createSql: HANDOFF_SQL,
     n8nInsertQuery: {
-      pg: `INSERT INTO handoff_requests (session_id, recipient, reason, message, priority)
+      pg: `INSERT INTO handoff_requests (session_id, sender_id, recipient, reason, message, priority)
 VALUES (
   '{{ $json.session_id }}',
+  '{{ $json.sender_id }}',
   '{{ $json.recipient }}',
   '{{ $json.reason }}',
   '{{ $json.message }}',
   '{{ $json.priority }}'
 );`,
-      mysql: `INSERT INTO handoff_requests (session_id, recipient, reason, message, priority)
+      mysql: `INSERT INTO handoff_requests (session_id, sender_id, recipient, reason, message, priority)
 VALUES (
   '{{ $json.session_id }}',
+  '{{ $json.sender_id }}',
   '{{ $json.recipient }}',
   '{{ $json.reason }}',
   '{{ $json.message }}',
@@ -474,6 +489,7 @@ VALUES (
     },
     mongoDoc: `{
   "session_id": "{{ $json.session_id }}",
+  "sender_id":  "{{ $json.sender_id }}",
   "recipient":  "{{ $json.recipient }}",
   "reason":     "{{ $json.reason }}",
   "message":    "{{ $json.message }}",

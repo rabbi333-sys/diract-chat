@@ -17,6 +17,7 @@ import { getLocalNames } from '@/hooks/useChatHistory';
 interface HandoffRequest {
   id: string;
   session_id: string | null;
+  sender_id: string | null;
   recipient: string | null;
   reason: string;
   message: string | null;
@@ -203,21 +204,25 @@ export const HandoffPanel = () => {
     }
   };
 
-  // Resolve customer name from local cache
+  // Resolve customer name from local cache.
+  // Prefer sender_id lookup (Facebook user ID) then fall back to recipient string.
   const localNames = getLocalNames();
   function resolveName(req: HandoffRequest): string {
-    if (!req.recipient) return 'Unknown';
-    return localNames[req.recipient] || req.recipient;
+    if (req.sender_id && localNames[req.sender_id]) return localNames[req.sender_id];
+    if (req.recipient && localNames[req.recipient]) return localNames[req.recipient];
+    return req.sender_id || req.recipient || 'Unknown';
   }
 
-  // Navigate to the conversation for this handoff
+  // Navigate to the conversation for this handoff.
+  // Use sender_id as the recipient param when available (more reliable than display name).
   function openChat(req: HandoffRequest, e: React.MouseEvent) {
     e.stopPropagation();
     if (!req.session_id) {
       toast.error('No session ID on this handoff — cannot open conversation');
       return;
     }
-    const params = req.recipient ? `?recipient=${encodeURIComponent(req.recipient)}` : '';
+    const recipientParam = req.sender_id || req.recipient;
+    const params = recipientParam ? `?recipient=${encodeURIComponent(recipientParam)}` : '';
     navigate(`/conversation/${req.session_id}${params}`);
   }
 
@@ -360,15 +365,22 @@ export const HandoffPanel = () => {
 
                 {/* Customer info row */}
                 <div className="flex items-center gap-3 mt-3 ml-[52px]">
-                  {req.recipient && (
+                  {(req.sender_id || req.recipient) && (
                     <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-medium">
                       <User size={11} className="opacity-60" />
-                      {/* Show resolved name, fall back to raw ID */}
+                      {/* Show resolved name (from cache), fall back to sender_id/recipient raw value */}
                       <span className={cn(
-                        localNames[req.recipient] ? 'text-foreground/80' : 'text-muted-foreground'
+                        (req.sender_id ? localNames[req.sender_id] : null) || (req.recipient ? localNames[req.recipient] : null)
+                          ? 'text-foreground/80' : 'text-muted-foreground'
                       )}>
                         {customerName}
                       </span>
+                      {/* Also show the raw sender_id as a subtle hint when present */}
+                      {req.sender_id && req.sender_id !== customerName && (
+                        <span className="text-[9px] text-muted-foreground/50 font-normal ml-0.5">
+                          #{req.sender_id}
+                        </span>
+                      )}
                     </span>
                   )}
                   <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
