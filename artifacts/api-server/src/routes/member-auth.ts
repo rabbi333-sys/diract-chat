@@ -34,6 +34,7 @@ type InviteRecord = {
   submitted_email: string | null;
   submitted_password_hash?: string | null;
   submitted_at: string | null;
+  last_login_at?: string | null;
   created_at: string;
 };
 
@@ -77,8 +78,16 @@ CREATE TABLE IF NOT EXISTS team_invites (
   submitted_email         TEXT,
   submitted_password_hash TEXT,
   submitted_at            TIMESTAMPTZ,
+  last_login_at           TIMESTAMPTZ,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+`;
+
+const PG_MIGRATE_SQL = `
+DO $$ BEGIN
+  ALTER TABLE team_invites ADD COLUMN last_login_at TIMESTAMPTZ;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -123,9 +132,12 @@ CREATE TABLE IF NOT EXISTS team_invites (
   submitted_email         TEXT,
   submitted_password_hash TEXT,
   submitted_at            DATETIME(6),
+  last_login_at           DATETIME(6),
   created_at              DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
 );
 `;
+
+const MYSQL_MIGRATE_SQL = `ALTER TABLE team_invites ADD COLUMN IF NOT EXISTS last_login_at DATETIME(6)`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MongoDB helpers
@@ -209,6 +221,7 @@ function normRow(r: Record<string, unknown>): InviteRecord {
     submitted_name:          r.submitted_name ? String(r.submitted_name) : null,
     submitted_email:         r.submitted_email ? String(r.submitted_email) : null,
     submitted_at:            r.submitted_at ? String(r.submitted_at) : null,
+    last_login_at:           r.last_login_at ? String(r.last_login_at) : null,
     created_at:              r.created_at ? String(r.created_at) : new Date().toISOString(),
   };
 }
@@ -225,8 +238,10 @@ router.post("/member-auth/init", async (req: Request, res: Response) => {
   try {
     if (creds.dbType === "postgresql") {
       await pgQuery(creds, PG_INIT_SQL);
+      await pgQuery(creds, PG_MIGRATE_SQL);
     } else if (creds.dbType === "mysql") {
       await mysqlQuery(creds, MYSQL_INIT_SQL);
+      try { await mysqlQuery(creds, MYSQL_MIGRATE_SQL); } catch { /* column may already exist */ }
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => { await col.countDocuments({}); });
     } else if (creds.dbType === "redis") {
@@ -312,6 +327,7 @@ router.post("/member-auth/invites/create", async (req: Request, res: Response) =
 
     if (creds.dbType === "postgresql") {
       await pgQuery(creds, PG_INIT_SQL);
+      await pgQuery(creds, PG_MIGRATE_SQL);
       const rows = await pgQuery<Record<string, unknown>>(
         creds,
         "INSERT INTO team_invites (id,email,role,permissions,token,status,created_by,created_at) VALUES ($1,$2,$3,$4,$5,'pending',$6,NOW()) RETURNING *",
@@ -320,6 +336,7 @@ router.post("/member-auth/invites/create", async (req: Request, res: Response) =
       record = rows[0] ? normRow(rows[0]) : null;
     } else if (creds.dbType === "mysql") {
       await mysqlQuery(creds, MYSQL_INIT_SQL);
+      try { await mysqlQuery(creds, MYSQL_MIGRATE_SQL); } catch { /* column may already exist */ }
       await mysqlQuery(
         creds,
         "INSERT INTO team_invites (id,email,role,permissions,token,status,created_by,created_at) VALUES (?,?,?,?,?,'pending',?,NOW(6))",
@@ -555,13 +572,15 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
   if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds" });
 
   try {
-    let member: { id: string; role: string; permissions: string[]; submitted_name: string | null; submitted_email: string | null } | null = null;
+    type MemberResult = { id: string; role: string; permissions: string[]; submitted_name: string | null; submitted_email: string | null; last_login_at: string | null };
+    let member: MemberResult | null = null;
     const normEmail = email.toLowerCase().trim();
+    const loginNow = new Date().toISOString();
 
     if (creds.dbType === "postgresql") {
       const rows = await pgQuery<Record<string, unknown>>(
         creds,
-        "SELECT id,role,permissions,submitted_name,submitted_email FROM team_invites WHERE submitted_email=$1 AND submitted_password_hash=$2 AND status='accepted'",
+        "UPDATE team_invites SET last_login_at=NOW() WHERE submitted_email=$1 AND submitted_password_hash=$2 AND status='accepted' RETURNING id,role,permissions,submitted_name,submitted_email,last_login_at",
         [normEmail, passwordHash],
       );
       if (rows[0]) {
@@ -571,12 +590,14 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
           permissions: parsePerms(rows[0].permissions),
           submitted_name: rows[0].submitted_name ? String(rows[0].submitted_name) : null,
           submitted_email: rows[0].submitted_email ? String(rows[0].submitted_email) : null,
+          last_login_at: rows[0].last_login_at ? String(rows[0].last_login_at) : loginNow,
         };
       }
     } else if (creds.dbType === "mysql") {
+      await mysqlQuery(creds, "UPDATE team_invites SET last_login_at=NOW(6) WHERE submitted_email=? AND submitted_password_hash=? AND status='accepted'", [normEmail, passwordHash]);
       const rows = await mysqlQuery<Record<string, unknown>>(
         creds,
-        "SELECT id,role,permissions,submitted_name,submitted_email FROM team_invites WHERE submitted_email=? AND submitted_password_hash=? AND status='accepted'",
+        "SELECT id,role,permissions,submitted_name,submitted_email,last_login_at FROM team_invites WHERE submitted_email=? AND submitted_password_hash=? AND status='accepted'",
         [normEmail, passwordHash],
       );
       if (rows[0]) {
@@ -586,11 +607,17 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
           permissions: parsePerms(rows[0].permissions),
           submitted_name: rows[0].submitted_name ? String(rows[0].submitted_name) : null,
           submitted_email: rows[0].submitted_email ? String(rows[0].submitted_email) : null,
+          last_login_at: rows[0].last_login_at ? String(rows[0].last_login_at) : loginNow,
         };
       }
     } else if (creds.dbType === "mongodb") {
       member = await mongoOp(creds, async (col) => {
-        const doc = await col.findOne({ submitted_email: normEmail, submitted_password_hash: passwordHash, status: "accepted" });
+        const updated = await col.findOneAndUpdate(
+          { submitted_email: normEmail, submitted_password_hash: passwordHash, status: "accepted" },
+          { $set: { last_login_at: loginNow } },
+          { returnDocument: "after" },
+        );
+        const doc = updated as Record<string, unknown> | null;
         if (!doc) return null;
         return {
           id: String(doc._id ?? doc.id ?? ""),
@@ -598,6 +625,7 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
           permissions: parsePerms(doc.permissions),
           submitted_name: doc.submitted_name ? String(doc.submitted_name) : null,
           submitted_email: doc.submitted_email ? String(doc.submitted_email) : null,
+          last_login_at: loginNow,
         };
       });
     } else if (creds.dbType === "redis") {
@@ -608,12 +636,15 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
           if (!raw) continue;
           const doc = JSON.parse(raw) as InviteRecord & { submitted_password_hash?: string };
           if (doc.submitted_email === normEmail && doc.submitted_password_hash === passwordHash && doc.status === "accepted") {
+            const updated = { ...doc, last_login_at: loginNow };
+            await r.set(REDIS_KEY(tok), JSON.stringify(updated));
             return {
               id: doc.id,
               role: doc.role,
               permissions: doc.permissions,
               submitted_name: doc.submitted_name,
               submitted_email: doc.submitted_email,
+              last_login_at: loginNow,
             };
           }
         }

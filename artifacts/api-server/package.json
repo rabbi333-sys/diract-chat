@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@types/pg": "^8.18.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "cookie-parser": "^1.4.7",
@@ -19,6 +20,7 @@
     "ioredis": "^5.10.1",
     "mongodb": "^7.1.1",
     "mysql2": "^3.20.0",
+    "pg": "^8.20.0",
     "pino": "^9",
     "pino-http": "^10"
   },

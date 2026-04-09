@@ -39,6 +39,7 @@ type Invite = {
   submitted_name: string | null;
   submitted_email: string | null;
   submitted_at: string | null;
+  last_login_at?: string | null;
 };
 
 const PERMISSION_OPTIONS = [
@@ -64,6 +65,19 @@ function timeAgo(dateStr: string) {
   if (days === 1) return 'Yesterday';
   if (days < 30) return `${days}d ago`;
   return `${Math.floor(days / 30)}mo ago`;
+}
+
+function lastSeenDisplay(dateStr: string | null | undefined): { label: string; isOnline: boolean } {
+  if (!dateStr) return { label: 'Never logged in', isOnline: false };
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (diff < 5 * 60 * 1000) return { label: 'Online now', isOnline: true };
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return { label: `${mins}m ago`, isOnline: false };
+  const hours = Math.floor(diff / 3600000);
+  if (hours < 24) return { label: `${hours}h ago`, isOnline: false };
+  const days = Math.floor(diff / 86400000);
+  if (days < 30) return { label: `${days}d ago`, isOnline: false };
+  return { label: `${Math.floor(days / 30)}mo ago`, isOnline: false };
 }
 
 const StatusPill = ({ status }: { status: string }) => {
@@ -152,6 +166,10 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
+  UPDATE public.team_invites SET last_login_at = NOW()
+  WHERE submitted_email = lower(trim(p_email))
+    AND submitted_password_hash = p_password_hash
+    AND status = 'accepted';
   RETURN QUERY
   SELECT t.id, t.role, t.permissions, t.submitted_name, t.submitted_email
   FROM public.team_invites t
@@ -159,7 +177,11 @@ BEGIN
     AND t.submitted_password_hash = p_password_hash
     AND t.status = 'accepted';
 END;
-$$;`;
+$$;
+
+-- Step 6: Add last_login_at column (run if upgrading from an earlier version)
+ALTER TABLE public.team_invites
+  ADD COLUMN IF NOT EXISTS last_login_at timestamptz;`;
 
 const PG_SETUP_SQL = `-- PostgreSQL: Create team_invites table (auto-created by API server on first invite)
 CREATE TABLE IF NOT EXISTS team_invites (
@@ -174,6 +196,7 @@ CREATE TABLE IF NOT EXISTS team_invites (
   submitted_email         TEXT,
   submitted_password_hash TEXT,
   submitted_at            TIMESTAMPTZ,
+  last_login_at           TIMESTAMPTZ,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -194,6 +217,7 @@ CREATE TABLE IF NOT EXISTS team_invites (
   submitted_email         VARCHAR(255),
   submitted_password_hash VARCHAR(64),
   submitted_at            DATETIME,
+  last_login_at           DATETIME,
   created_at              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_token (token)
@@ -1294,9 +1318,22 @@ const Profile = () => {
 
                           {/* Actions */}
                           <div className="flex items-center gap-1 flex-shrink-0">
-                            <span className="text-[10px] text-muted-foreground/40 hidden sm:flex items-center gap-0.5 mr-1">
-                              <Clock size={9} /> {timeAgo(invite.created_at)}
-                            </span>
+                            {invite.status === 'accepted' ? (() => {
+                              const seen = lastSeenDisplay(invite.last_login_at);
+                              return (
+                                <span className={`text-[10px] hidden sm:flex items-center gap-1 mr-1 ${seen.isOnline ? 'text-emerald-500 font-semibold' : invite.last_login_at ? 'text-muted-foreground/50' : 'text-muted-foreground/30'}`}>
+                                  {seen.isOnline
+                                    ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                                    : <Clock size={9} />
+                                  }
+                                  {seen.label}
+                                </span>
+                              );
+                            })() : (
+                              <span className="text-[10px] text-muted-foreground/40 hidden sm:flex items-center gap-0.5 mr-1">
+                                <Clock size={9} /> {timeAgo(invite.created_at)}
+                              </span>
+                            )}
 
                             {/* ALL pending: copy link button */}
                             {isPending && (

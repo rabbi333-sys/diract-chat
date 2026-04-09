@@ -56,6 +56,7 @@ export type ProxyInvite = {
   submitted_name: string | null;
   submitted_email: string | null;
   submitted_at: string | null;
+  last_login_at: string | null;
   created_at: string;
 };
 
@@ -65,6 +66,7 @@ export type ProxyMember = {
   permissions: string[];
   submitted_name: string | null;
   submitted_email: string | null;
+  last_login_at?: string | null;
 };
 
 // ── API calls ─────────────────────────────────────────────────────────────────
