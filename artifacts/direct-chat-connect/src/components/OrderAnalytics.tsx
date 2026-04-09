@@ -26,31 +26,206 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string; ic
 
 const PIE_COLORS = ['hsl(38,92%,50%)', 'hsl(217,91%,60%)', 'hsl(270,70%,60%)', 'hsl(185,85%,45%)', 'hsl(142,71%,45%)', 'hsl(0,84%,60%)'];
 
-async function capturePageAsPDF(el: HTMLElement, setDownloading: (v: boolean) => void) {
+type SummaryType = {
+  total: number; revenue: number; totalChange: number; revenueChange: number;
+  statuses: Record<string, { count: number; change: number }>;
+};
+type ChartRow = { label: string; total: number; delivered: number; cancelled: number; pending: number; revenue: number };
+
+async function generateAnalyticsPDF(
+  summary: SummaryType,
+  viewMode: ViewMode,
+  chartData: ChartRow[],
+  filteredOrders: { status: string; total_price: unknown }[],
+  setDownloading: (v: boolean) => void,
+) {
   setDownloading(true);
   try {
-    const html2canvas = (await import('html2canvas')).default;
     const { jsPDF } = await import('jspdf');
+    const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
 
-    const canvas = await html2canvas(el, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      scrollY: -window.scrollY,
-      windowWidth: el.scrollWidth,
-      windowHeight: el.scrollHeight,
+    const W = 210;
+    const MARGIN = 14;
+    const CW = W - MARGIN * 2; // content width
+
+    // ── colour palette (r, g, b) ───────────────────────────────────
+    const C = {
+      primary:  [37,  99,  235] as [number,number,number],
+      indigo:   [67,  56,  202] as [number,number,number],
+      dark:     [15,  23,   42] as [number,number,number],
+      muted:    [100,116,  139] as [number,number,number],
+      light:    [241,245,  249] as [number,number,number],
+      white:    [255,255,  255] as [number,number,number],
+      emerald:  [16, 185,  129] as [number,number,number],
+      red:      [239, 68,   68] as [number,number,number],
+      amber:    [245,158,   11] as [number,number,number],
+      blue50:   [239,246,  255] as [number,number,number],
+      blue200:  [191,219,  254] as [number,number,number],
+      slate50:  [248,250,  252] as [number,number,number],
+      slate200: [226,232,  240] as [number,number,number],
+    };
+
+    const statusDotColors: Record<string, [number,number,number]> = {
+      pending:    C.amber,
+      confirmed:  C.primary,
+      processing: [124, 58, 237],
+      shipped:    [6, 182, 212],
+      delivered:  C.emerald,
+      cancelled:  C.red,
+    };
+
+    const fill   = (c: [number,number,number]) => pdf.setFillColor(...c);
+    const stroke = (c: [number,number,number]) => pdf.setDrawColor(...c);
+    const color  = (c: [number,number,number]) => pdf.setTextColor(...c);
+
+    // ── Header banner ──────────────────────────────────────────────
+    fill(C.primary); pdf.rect(0, 0, W * 0.55, 40, 'F');
+    fill(C.indigo);  pdf.rect(W * 0.55, 0, W * 0.45, 40, 'F');
+
+    // Logo circle
+    fill(C.white); pdf.circle(MARGIN + 9, 20, 8, 'F');
+    color(C.primary);
+    pdf.setFontSize(13); pdf.setFont('helvetica', 'bold');
+    pdf.text('M', MARGIN + 9, 24, { align: 'center' });
+
+    // Title
+    color(C.white);
+    pdf.setFontSize(17); pdf.setFont('helvetica', 'bold');
+    pdf.text('Meta Automation', MARGIN + 22, 16);
+    pdf.setFontSize(10); pdf.setFont('helvetica', 'normal');
+    pdf.text('Analytics Report', MARGIN + 22, 24);
+
+    // Date info
+    pdf.setFontSize(8);
+    pdf.text(format(new Date(), 'dd MMM yyyy'), W - MARGIN, 14, { align: 'right' });
+    pdf.text(`Period: ${viewMode.charAt(0).toUpperCase() + viewMode.slice(1)}`, W - MARGIN, 22, { align: 'right' });
+    pdf.text(`Generated: ${format(new Date(), 'HH:mm')}`, W - MARGIN, 30, { align: 'right' });
+
+    let y = 50;
+
+    // ── Key stats boxes ────────────────────────────────────────────
+    const BW = (CW - 5) / 2;
+    const BH = 28;
+
+    // Revenue box
+    fill(C.blue50); stroke(C.blue200);
+    pdf.setLineWidth(0.3);
+    pdf.roundedRect(MARGIN, y, BW, BH, 3, 3, 'FD');
+    color(C.muted); pdf.setFontSize(7.5); pdf.setFont('helvetica', 'bold');
+    pdf.text('TOTAL REVENUE', MARGIN + 4, y + 8);
+    color(C.primary); pdf.setFontSize(19); pdf.setFont('helvetica', 'bold');
+    pdf.text(`Tk. ${summary.revenue.toLocaleString()}`, MARGIN + 4, y + 20);
+    const rc = summary.revenueChange;
+    color(rc >= 0 ? C.emerald : C.red);
+    pdf.setFontSize(8); pdf.setFont('helvetica', 'normal');
+    pdf.text(`${rc >= 0 ? '+' : ''}${rc}% vs prev period`, MARGIN + 4, y + 26.5);
+
+    // Orders box
+    const B2X = MARGIN + BW + 5;
+    fill(C.slate50); stroke(C.slate200);
+    pdf.roundedRect(B2X, y, BW, BH, 3, 3, 'FD');
+    color(C.muted); pdf.setFontSize(7.5); pdf.setFont('helvetica', 'bold');
+    pdf.text('TOTAL ORDERS', B2X + 4, y + 8);
+    color(C.dark); pdf.setFontSize(19); pdf.setFont('helvetica', 'bold');
+    pdf.text(summary.total.toLocaleString(), B2X + 4, y + 20);
+    const tc = summary.totalChange;
+    color(tc >= 0 ? C.emerald : C.red);
+    pdf.setFontSize(8); pdf.setFont('helvetica', 'normal');
+    pdf.text(`${tc >= 0 ? '+' : ''}${tc}% vs prev period`, B2X + 4, y + 26.5);
+
+    y += BH + 12;
+
+    // ── Section: Status Breakdown ──────────────────────────────────
+    color(C.dark); pdf.setFontSize(11); pdf.setFont('helvetica', 'bold');
+    pdf.text('Order Status Breakdown', MARGIN, y);
+    fill(C.primary); pdf.rect(MARGIN, y + 2.5, 32, 0.6, 'F');
+    y += 9;
+
+    const SC = [32, 22, 25, 25, 50]; // column widths
+    const SH = ['Status', 'Orders', 'Change', '% Share', 'Revenue (Tk.)'];
+    fill(C.primary);
+    pdf.rect(MARGIN, y, CW, 8, 'F');
+    color(C.white); pdf.setFontSize(8); pdf.setFont('helvetica', 'bold');
+    let cx = MARGIN + 3;
+    SH.forEach((h, i) => { pdf.text(h, cx, y + 5.5); cx += SC[i]; });
+    y += 8;
+
+    Object.entries(STATUS_META).forEach(([key, meta], idx) => {
+      const { count, change } = summary.statuses[key] ?? { count: 0, change: 0 };
+      const pct = summary.total > 0 ? Math.round((count / summary.total) * 100) : 0;
+      const rev = filteredOrders.filter(o => o.status === key).reduce((s, o) => s + (Number(o.total_price) || 0), 0);
+
+      fill(idx % 2 === 0 ? C.slate50 : C.white);
+      pdf.rect(MARGIN, y, CW, 8, 'F');
+      stroke(C.slate200); pdf.setLineWidth(0.2);
+      pdf.line(MARGIN, y + 8, MARGIN + CW, y + 8);
+
+      // Dot
+      fill(statusDotColors[key] ?? C.muted);
+      pdf.circle(MARGIN + 5, y + 4, 2, 'F');
+
+      // Cells
+      color(C.dark); pdf.setFontSize(8); pdf.setFont('helvetica', 'normal');
+      cx = MARGIN + 9;
+      pdf.text(meta.label, cx, y + 5.5); cx = MARGIN + SC[0] + 3;
+      pdf.text(count.toString(), cx, y + 5.5); cx += SC[1];
+      color(change >= 0 ? C.emerald : C.red);
+      pdf.text(`${change >= 0 ? '+' : ''}${change}%`, cx, y + 5.5); cx += SC[2];
+      color(C.dark);
+      pdf.text(`${pct}%`, cx, y + 5.5); cx += SC[3];
+      pdf.text(rev.toLocaleString(), cx, y + 5.5);
+
+      y += 8;
     });
 
-    const imgW = 210;
-    const pageH = 297;
-    const imgH = (canvas.height * imgW) / canvas.width;
-    const pdf = new jsPDF({ orientation: imgH > pageH ? 'p' : 'p', unit: 'mm', format: 'a4' });
+    // ── Section: Period Breakdown table ───────────────────────────
+    if (chartData.length > 0) {
+      y += 12;
+      if (y > 240) { pdf.addPage(); y = 20; }
 
-    let y = 0;
-    while (y < imgH) {
-      if (y > 0) pdf.addPage();
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, -y, imgW, imgH);
-      y += pageH;
+      const periodLabel = viewMode === 'daily' ? 'Daily' : viewMode === 'weekly' ? 'Weekly' : 'Monthly';
+      color(C.dark); pdf.setFontSize(11); pdf.setFont('helvetica', 'bold');
+      pdf.text(`${periodLabel} Breakdown`, MARGIN, y);
+      fill(C.primary); pdf.rect(MARGIN, y + 2.5, 32, 0.6, 'F');
+      y += 9;
+
+      const PC = [36, 28, 28, 28, 42]; // column widths
+      const PH = ['Period', 'Total', 'Delivered', 'Cancelled', 'Revenue (Tk.)'];
+      fill(C.primary);
+      pdf.rect(MARGIN, y, CW, 8, 'F');
+      color(C.white); pdf.setFontSize(8); pdf.setFont('helvetica', 'bold');
+      cx = MARGIN + 3;
+      PH.forEach((h, i) => { pdf.text(h, cx, y + 5.5); cx += PC[i]; });
+      y += 8;
+
+      chartData.slice(-20).forEach((row, idx) => {
+        if (y > 270) { pdf.addPage(); y = 20; }
+        fill(idx % 2 === 0 ? C.slate50 : C.white);
+        pdf.rect(MARGIN, y, CW, 7, 'F');
+        stroke(C.slate200); pdf.setLineWidth(0.2);
+        pdf.line(MARGIN, y + 7, MARGIN + CW, y + 7);
+        color(C.dark); pdf.setFontSize(8); pdf.setFont('helvetica', 'normal');
+        cx = MARGIN + 3;
+        pdf.text(row.label,                   cx, y + 5); cx += PC[0];
+        pdf.text(row.total.toString(),         cx, y + 5); cx += PC[1];
+        pdf.text(row.delivered.toString(),     cx, y + 5); cx += PC[2];
+        pdf.text(row.cancelled.toString(),     cx, y + 5); cx += PC[3];
+        pdf.text(row.revenue.toLocaleString(), cx, y + 5);
+        y += 7;
+      });
+    }
+
+    // ── Footer on every page ───────────────────────────────────────
+    const pageCount = (pdf as any).getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      pdf.setPage(i);
+      const pH = pdf.internal.pageSize.getHeight();
+      fill(C.light); pdf.rect(0, pH - 11, W, 11, 'F');
+      stroke(C.slate200); pdf.setLineWidth(0.3);
+      pdf.line(0, pH - 11, W, pH - 11);
+      color(C.muted); pdf.setFontSize(7); pdf.setFont('helvetica', 'normal');
+      pdf.text('Meta Automation — Confidential Analytics Report', MARGIN, pH - 4);
+      pdf.text(`Page ${i} of ${pageCount}`, W - MARGIN, pH - 4, { align: 'right' });
     }
 
     pdf.save(`analytics-report-${format(new Date(), 'dd-MMM-yyyy')}.pdf`);
@@ -187,7 +362,7 @@ const OrderAnalytics = () => {
         {/* Action buttons */}
         <div className="flex items-center gap-1.5">
           <button
-            onClick={() => pageRef.current && capturePageAsPDF(pageRef.current, setIsDownloading)}
+            onClick={() => generateAnalyticsPDF(summary, viewMode, chartData, filteredOrders, setIsDownloading)}
             disabled={isDownloading}
             className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-muted/50 transition-colors disabled:opacity-60"
           >
