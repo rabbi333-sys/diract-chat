@@ -195,8 +195,7 @@ const Profile = () => {
   const [lastInviteLink, setLastInviteLink] = useState('');
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [showInviteSql, setShowInviteSql] = useState(false);
-  const [dbSetupNeeded, setDbSetupNeeded] = useState(false);
+  const [dbSetupStatus, setDbSetupStatus] = useState<Record<string, 'checking' | 'ok' | 'needed'>>({});
 
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -219,22 +218,28 @@ const Profile = () => {
     if (!pageLoading && isAdmin && user) loadInvites(user.id);
   }, [pageLoading, isAdmin, user?.id]);
 
-  // Auto-detect if the new auth RPCs are missing and show the SQL panel
+  // Auto-detect missing RPCs for ALL Supabase connections
   useEffect(() => {
     if (!isAdmin || pageLoading) return;
-    const check = async () => {
+    const conns = getConnections().filter(c => c.dbType === 'supabase' && c.url && c.anonKey);
+    if (conns.length === 0) return;
+    const initial: Record<string, 'checking' | 'ok' | 'needed'> = {};
+    conns.forEach(c => { initial[c.id] = 'checking'; });
+    setDbSetupStatus(initial);
+    conns.forEach(async (conn) => {
       try {
+        const { createClient } = await import('@supabase/supabase-js');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error } = await (supabase as any).rpc('member_login_by_credentials', {
+        const client = createClient(conn.url, conn.anonKey) as any;
+        const { error } = await client.rpc('member_login_by_credentials', {
           p_email: '__probe__', p_password_hash: '__probe__',
         });
-        if (error?.message?.includes('function') || error?.message?.includes('does not exist')) {
-          setDbSetupNeeded(true);
-          setShowInviteSql(true);
-        }
-      } catch { /* ignore */ }
-    };
-    check();
+        const needed = !!error && (error.message?.includes('does not exist') || error.message?.includes('function'));
+        setDbSetupStatus(prev => ({ ...prev, [conn.id]: needed ? 'needed' : 'ok' }));
+      } catch {
+        setDbSetupStatus(prev => ({ ...prev, [conn.id]: 'needed' }));
+      }
+    });
   }, [isAdmin, pageLoading]);
 
   useEffect(() => {
@@ -375,8 +380,7 @@ const Profile = () => {
       }).select().single();
       if (error) {
         if (error.message.includes('created_by') || error.message.includes('schema cache')) {
-          setShowInviteSql(true);
-          toast.error('Database needs updating — see SQL below');
+          toast.error('Database needs updating — see Database Setup at the bottom of this page');
         } else {
           toast.error('Failed to create invite: ' + error.message);
         }
@@ -561,21 +565,6 @@ const Profile = () => {
                     {pendingCount} pending
                   </span>
                 )}
-                <button
-                  onClick={() => setShowInviteSql(v => !v)}
-                  className={cn(
-                    'relative flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors',
-                    showInviteSql || dbSetupNeeded
-                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/25'
-                      : 'bg-muted text-muted-foreground border-border hover:text-foreground'
-                  )}
-                  title="Toggle DB setup SQL"
-                >
-                  {dbSetupNeeded && !showInviteSql && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                  )}
-                  <Database size={9} /> DB Setup
-                </button>
               </div>
             </div>
 
@@ -699,85 +688,6 @@ const Profile = () => {
                 )}
               </div>
             </div>
-
-            {/* Invite DB setup SQL panel */}
-            {showInviteSql && (
-              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5 space-y-4" data-testid="panel-invite-sql">
-                {/* Header */}
-                <div className="flex items-start gap-2">
-                  <AlertTriangle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                        One-time database setup required
-                      </p>
-                      {dbSetupNeeded && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-400 uppercase tracking-wide">
-                          Auto-detected
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-amber-600/80 mt-0.5">
-                      Your database needs new columns and functions for the member login system.
-                      This only needs to be done once.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Steps */}
-                <div className="space-y-2.5">
-                  {/* Step 1: Copy SQL */}
-                  <div className="flex items-start gap-2.5">
-                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
-                    <div className="flex-1">
-                      <p className="text-[11px] font-semibold text-foreground mb-1.5">Copy the SQL below</p>
-                      <SqlCopyBlock sql={INVITE_FIX_SQL} />
-                    </div>
-                  </div>
-
-                  {/* Step 2: Open SQL Editor */}
-                  <div className="flex items-start gap-2.5">
-                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
-                    <div className="flex-1">
-                      <p className="text-[11px] font-semibold text-foreground mb-1.5">Open your Supabase SQL Editor</p>
-                      {(() => {
-                        const conn = getActiveConnection();
-                        const url = conn?.url || '';
-                        const match = url.match(/https?:\/\/([^.]+)\.supabase\.co/);
-                        const ref = match?.[1];
-                        const editorUrl = ref
-                          ? `https://supabase.com/dashboard/project/${ref}/sql/new`
-                          : 'https://supabase.com/dashboard';
-                        return (
-                          <a
-                            href={editorUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold transition-colors"
-                          >
-                            <Link2 size={11} /> Open SQL Editor ↗
-                          </a>
-                        );
-                      })()}
-                    </div>
-                  </div>
-
-                  {/* Step 3: Paste & Run */}
-                  <div className="flex items-start gap-2.5">
-                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
-                    <div className="flex-1">
-                      <p className="text-[11px] font-semibold text-foreground">Paste the SQL and click <strong>Run</strong></p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">Then refresh this page — setup complete!</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-1 border-t border-amber-500/10">
-                  <p className="text-[10px] text-amber-600/60">Run once per Supabase project</p>
-                  <button onClick={() => { setShowInviteSql(false); setDbSetupNeeded(false); }} className="text-[11px] text-muted-foreground hover:text-foreground underline">Dismiss</button>
-                </div>
-              </div>
-            )}
 
             {/* ── Members List ── */}
             <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
@@ -1067,6 +977,120 @@ const Profile = () => {
           )}
         </div>
 
+        {/* ── Database Setup ── */}
+        {isAdmin && (() => {
+          const supabaseConns = dbConnections.filter(c => c.dbType === 'supabase');
+          if (supabaseConns.length === 0) return null;
+          const neededCount = supabaseConns.filter(c => dbSetupStatus[c.id] === 'needed').length;
+          const checkingCount = supabaseConns.filter(c => dbSetupStatus[c.id] === 'checking').length;
+          const allOk = neededCount === 0 && checkingCount === 0;
+
+          const sqlEditorUrl = (url: string) => {
+            const match = url.match(/https?:\/\/([^.]+)\.supabase\.co/);
+            const ref = match?.[1];
+            return ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : 'https://supabase.com/dashboard';
+          };
+
+          return (
+            <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden" data-testid="card-db-setup">
+              {/* Header */}
+              <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Database size={14} className={allOk ? 'text-green-500' : neededCount > 0 ? 'text-amber-500' : 'text-muted-foreground'} />
+                  <span className="font-semibold text-sm">Database Setup</span>
+                  {allOk ? (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">All configured</span>
+                  ) : checkingCount > 0 && neededCount === 0 ? (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground border border-border/40">Checking…</span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                      {neededCount} need setup
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] text-muted-foreground">One-time per project</span>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Instruction row */}
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Each Supabase database needs the member-auth SQL run once. Copy the SQL below, open the SQL Editor for each database that needs setup, paste and click <strong>Run</strong>.
+                </p>
+
+                {/* SQL copy block — shared for all DBs */}
+                <div>
+                  <p className="text-[11px] font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] font-bold flex items-center justify-center">1</span>
+                    Copy this SQL (works for all databases)
+                  </p>
+                  <SqlCopyBlock sql={INVITE_FIX_SQL} />
+                </div>
+
+                {/* Per-database rows */}
+                <div>
+                  <p className="text-[11px] font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] font-bold flex items-center justify-center">2</span>
+                    Open SQL Editor for each database and run
+                  </p>
+                  <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+                    {supabaseConns.map(conn => {
+                      const status = dbSetupStatus[conn.id];
+                      return (
+                        <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                          {/* Status dot */}
+                          <div className={cn('w-2 h-2 rounded-full flex-shrink-0', {
+                            'bg-muted-foreground/30 animate-pulse': status === 'checking',
+                            'bg-green-500': status === 'ok',
+                            'bg-amber-500': status === 'needed',
+                            'bg-muted-foreground/20': !status,
+                          })} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm leading-none">
+                                {DB_TYPES.find(t => t.value === (conn.dbType || 'supabase'))?.icon ?? '⚡'}
+                              </span>
+                              <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                              {conn.id === activeDbId && (
+                                <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">
+                              {conn.url.replace(/^https?:\/\//, '')}
+                            </p>
+                          </div>
+                          <div className="flex-shrink-0">
+                            {status === 'checking' && (
+                              <span className="text-[10px] text-muted-foreground italic">Checking…</span>
+                            )}
+                            {status === 'ok' && (
+                              <span className="flex items-center gap-1 text-[10px] font-semibold text-green-600 dark:text-green-400">
+                                <Check size={11} /> Setup done
+                              </span>
+                            )}
+                            {(status === 'needed' || status === undefined) && (
+                              <a
+                                href={sqlEditorUrl(conn.url)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-semibold transition-colors"
+                              >
+                                <Link2 size={10} /> Open SQL Editor ↗
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {!allOk && (
+                  <p className="text-[10px] text-muted-foreground">After running the SQL, refresh this page to confirm setup.</p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
       </div>
     </div>
