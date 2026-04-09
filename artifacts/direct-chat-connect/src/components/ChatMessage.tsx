@@ -44,7 +44,7 @@ export const ChatMessage = ({ message, onReply, isFirst = true, isLast = true }:
   const [imgError, setImgError] = useState<Record<string, boolean>>({});
   const [hover, setHover] = useState(false);
 
-  const isRight = message.sender === 'Agent';
+  const isRight = message.sender === 'Agent' || message.sender === 'AI';
   const content = message.message_text?.trim();
   if (!content) return null;
 

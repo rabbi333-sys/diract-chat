@@ -543,7 +543,7 @@ const Conversation = () => {
                 isLast={isLast}
               />
               {uploadingId === msg.id && (
-                <div className={cn('flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5', msg.sender === 'Agent' ? 'justify-end pr-10' : 'justify-start pl-10')}>
+                <div className={cn('flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5', msg.sender === 'Agent' || msg.sender === 'AI' ? 'justify-end pr-10' : 'justify-start pl-10')}>
                   <Loader2 size={9} className="animate-spin" />
                   <span>Sending…</span>
                 </div>
