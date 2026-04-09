@@ -137,12 +137,27 @@ export const HandoffPanel = () => {
         { event: '*', schema: 'public', table: 'handoff_requests' },
         (payload) => {
           queryClient.invalidateQueries({ queryKey: ['supabase-handoffs'] });
-          // Auto-disable AI for newly inserted pending handoffs
           const newRow = payload.new as HandoffRequest | undefined;
           const sid = newRow?.session_id || newRow?.sender_id;
-          if (sid && newRow?.status === 'pending' && !aiDisabledRef.current.has(sid)) {
-            aiDisabledRef.current.add(sid);
-            autoDisableAi(sid);
+
+          if (sid && newRow?.status === 'pending') {
+            // INSERT = brand-new handoff. Always re-disable AI even if the user
+            // manually turned it back on after a previous request from this session.
+            if (payload.eventType === 'INSERT') {
+              aiDisabledRef.current.delete(sid); // reset so disable runs again
+            }
+            if (!aiDisabledRef.current.has(sid)) {
+              aiDisabledRef.current.add(sid);
+              autoDisableAi(sid).then(ok => {
+                if (!ok) aiDisabledRef.current.delete(sid);
+              });
+            }
+          }
+
+          // When a handoff is resolved, clear from Set so a future request
+          // for the same session will trigger a fresh AI-off again.
+          if (newRow?.status === 'resolved' && sid) {
+            aiDisabledRef.current.delete(sid);
           }
         }
       )
