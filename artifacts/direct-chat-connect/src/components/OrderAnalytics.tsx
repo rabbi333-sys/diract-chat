@@ -8,7 +8,7 @@ import {
 import { cn } from '@/lib/utils';
 import { format, subDays, startOfWeek, startOfMonth, isWithinInterval, parseISO } from 'date-fns';
 import {
-  TrendingUp, TrendingDown, Package, Truck, XCircle, CheckCircle,
+  TrendingUp, Package, Truck, XCircle, CheckCircle,
   ArrowUpRight, ArrowDownRight, Clock, PackageCheck, Loader2,
   ShoppingBag, RefreshCw, BarChart2,
 } from 'lucide-react';
@@ -69,12 +69,11 @@ const OrderAnalytics = () => {
 
     const total = filteredOrders.length;
     const revenue = filteredOrders.reduce((s, o) => s + (Number(o.total_price) || 0), 0);
-    const collectAmount = filteredOrders.reduce((s, o) => s + (Number(o.amount_to_collect) || 0), 0);
     const prevTotal = previousOrders.length;
     const prevRevenue = previousOrders.reduce((s, o) => s + (Number(o.total_price) || 0), 0);
 
     return {
-      total, revenue, collectAmount,
+      total, revenue,
       totalChange: calcChange(total, prevTotal),
       revenueChange: calcChange(revenue, prevRevenue),
       statuses: {
@@ -173,26 +172,16 @@ const OrderAnalytics = () => {
         </button>
       </div>
 
-      {/* ── Revenue + Collect hero cards ─────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3">
-        <HeroCard
-          icon={TrendingUp}
-          label="Total Revenue"
-          value={`৳${summary.revenue.toLocaleString()}`}
-          change={summary.revenueChange}
-          gradient="from-primary/10 to-primary/5"
-          iconColor="text-primary"
-          valueColor="text-primary"
-        />
-        <HeroCard
-          icon={TrendingDown}
-          label="To Collect"
-          value={`৳${summary.collectAmount.toLocaleString()}`}
-          gradient="from-stat-blue/10 to-stat-blue/5"
-          iconColor="text-stat-blue"
-          valueColor="text-stat-blue"
-        />
-      </div>
+      {/* ── Revenue hero card ─────────────────────────────────────── */}
+      <HeroCard
+        icon={TrendingUp}
+        label="Total Revenue"
+        value={`৳${summary.revenue.toLocaleString()}`}
+        change={summary.revenueChange}
+        gradient="from-primary/10 to-primary/5"
+        iconColor="text-primary"
+        valueColor="text-primary"
+      />
 
       {/* ── Order summary row ─────────────────────────────────────── */}
       <StatCard

@@ -208,7 +208,7 @@ const OrdersPanel = () => {
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto min-h-0 rounded-xl border border-border bg-card">
+      <div className="flex-1 overflow-auto scrollbar-hide min-h-0 rounded-xl border border-border bg-card">
         {!orders.length ? (
           <div className="flex flex-col items-center justify-center h-full py-20 text-center">
             <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center mb-3">
