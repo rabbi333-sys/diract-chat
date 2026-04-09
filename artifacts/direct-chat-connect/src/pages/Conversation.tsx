@@ -181,7 +181,13 @@ const Conversation = () => {
     }
   };
 
-  const allMessages = [...(messages || []), ...localMessages];
+  // Deduplicate: remove local optimistic messages already present in DB response
+  // (agent messages matched by text — safety net in case DB refetches before revertOptimistic)
+  const dbAgentTexts = new Set(
+    (messages || []).filter(m => m.sender === 'Agent').map(m => m.message_text)
+  );
+  const dedupedLocal = localMessages.filter(m => !dbAgentTexts.has(m.message_text));
+  const allMessages = [...(messages || []), ...dedupedLocal];
 
   useEffect(() => {
     scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -196,6 +202,7 @@ const Conversation = () => {
       message_text: text,
       timestamp: new Date().toISOString(),
       replyTo: replyTo || undefined,
+      _sending: true,
     }]);
   };
 
@@ -203,8 +210,8 @@ const Conversation = () => {
     setLocalMessages(prev => prev.filter(m => m.id !== id));
   };
 
-  const markSending = (id: number, sending: boolean) => {
-    setLocalMessages(prev => prev.map(m => m.id === id ? { ...m, _sending: sending } : m));
+  const markSent = (id: number) => {
+    setLocalMessages(prev => prev.map(m => m.id === id ? { ...m, _sending: false } : m));
   };
 
   // ── Send text ──────────────────────────────────────────────────────────────
@@ -216,16 +223,15 @@ const Conversation = () => {
     }
     const id = nextId();
     const rt = replyingTo;
-    // INSTANT: add to UI immediately
+    // INSTANT: add to UI immediately (shows as "sending")
     addOptimistic(id, text, rt);
     setReplyText('');
     setReplyingTo(null);
     setShowEmoji(false);
     setShowQuickReplies(false);
     inputRef.current?.focus();
-    // Fire-and-forget API call
     (async () => {
-      // Fire DB write immediately (parallel with Meta API — no await)
+      // Fire DB write in parallel (don't await — non-blocking)
       insertMessageToExternalDb(getStoredConnection(), {
         session_id: sessionId || '',
         sender: 'Agent',
@@ -236,6 +242,12 @@ const Conversation = () => {
       try {
         if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
         else if (fbConn) await fbPost(fbConn, recipient, { text });
+        else if (igConn) await fbPost(igConn, recipient, { text });
+        // Mark sent (tick indicator) then refetch DB
+        markSent(id);
+        await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+        // Remove optimistic — DB now has the real message
+        revertOptimistic(id);
       } catch (err: unknown) {
         revertOptimistic(id);
         toast.error(err instanceof Error ? err.message : 'Failed to send');
@@ -276,6 +288,9 @@ const Conversation = () => {
         const attachId = await fbUploadFile(fbConn, file, mediaType);
         await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
       }
+      markSent(id);
+      await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+      revertOptimistic(id);
     } catch (err: unknown) {
       revertOptimistic(id);
       URL.revokeObjectURL(localUrl);
@@ -345,8 +360,10 @@ const Conversation = () => {
           const uploadMime = mimeType.includes('ogg') ? 'audio/ogg' : 'audio/webm';
           const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
           await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
+          markSent(id);
+          await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+          revertOptimistic(id);
         } else if (fbConn) {
-          // FB doesn't support direct blob upload easily — inform user
           toast.error('Facebook does not support voice send. Use WhatsApp instead.');
           revertOptimistic(id);
           URL.revokeObjectURL(localUrl);

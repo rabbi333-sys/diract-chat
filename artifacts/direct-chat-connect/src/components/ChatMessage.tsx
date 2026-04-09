@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { cn } from '@/lib/utils';
-import { Reply, ExternalLink } from 'lucide-react';
+import { Reply, ExternalLink, Clock, CheckCheck } from 'lucide-react';
 
 // ─── URL parsers ───────────────────────────────────────────────────────────────
 const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|avif|svg)(\?.*)?$/i;
@@ -75,12 +75,17 @@ export const ChatMessage = ({ message, onReply, isFirst = true, isLast = true }:
     ? { background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)', boxShadow: '0 2px 12px rgba(109,40,217,0.25)' }
     : {};
 
+  const isSending = isRight && message._sending === true;
+  const isSent = isRight && message._sending === false;
+
   return (
     <div
       className={cn(
         'flex items-end gap-2 px-1 group',
         isRight ? 'justify-end' : 'justify-start',
         isLast ? 'mb-1' : 'mb-[2px]',
+        // Messenger-like slide-in animation for new messages
+        'animate-in fade-in-0 slide-in-from-bottom-1 duration-150',
       )}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -175,11 +180,19 @@ export const ChatMessage = ({ message, onReply, isFirst = true, isLast = true }:
           })}
         </div>
 
-        {/* Timestamp — only on last of group */}
-        {isLast && time && (
-          <span className="text-[10px] text-muted-foreground/40 px-1 font-medium mt-0.5">
-            {time}
-          </span>
+        {/* Timestamp + send status — only on last of group */}
+        {isLast && (
+          <div className={cn('flex items-center gap-1 px-1 mt-0.5', isRight ? 'flex-row-reverse' : 'flex-row')}>
+            {time && (
+              <span className="text-[10px] text-muted-foreground/40 font-medium">{time}</span>
+            )}
+            {isSending && (
+              <Clock size={9} className="text-muted-foreground/40 animate-pulse flex-shrink-0" />
+            )}
+            {isSent && (
+              <CheckCheck size={10} className="text-violet-400/70 flex-shrink-0" />
+            )}
+          </div>
         )}
       </div>
 
