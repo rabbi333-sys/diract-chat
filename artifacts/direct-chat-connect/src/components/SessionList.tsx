@@ -27,6 +27,27 @@ function getGradient(str: string): [string, string] {
   return GRADIENTS[h % GRADIENTS.length] as [string, string];
 }
 
+// ─── 5-minute live-session helper ─────────────────────────────────────────────
+const LIVE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+
+function isLive(session: SessionInfo): boolean {
+  try {
+    return Date.now() - new Date(session.last_message_at).getTime() < LIVE_WINDOW_MS;
+  } catch {
+    return false;
+  }
+}
+
+// Sort: live first (by last_message_at desc), then offline (by last_message_at desc)
+function sortSessions(sessions: SessionInfo[]): SessionInfo[] {
+  return [...sessions].sort((a, b) => {
+    const aLive = isLive(a) ? 1 : 0;
+    const bLive = isLive(b) ? 1 : 0;
+    if (aLive !== bLive) return bLive - aLive; // live first
+    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+  });
+}
+
 // ─── SessionList ───────────────────────────────────────────────────────────────
 
 export const SessionList = () => {
@@ -66,15 +87,18 @@ export const SessionList = () => {
     });
   }, [queryClient]);
 
-  const filtered = sessions?.filter((s) => {
+  const sorted = sessions ? sortSessions(sessions) : [];
+
+  const filtered = sorted.filter((s) => {
     const name = (recipientNames?.[s.recipient] || '').toLowerCase();
     const q = searchQuery.toLowerCase();
     const matchesSearch = name.includes(q) || s.recipient.includes(q);
-    if (activeTab === 'active') return matchesSearch && s.is_active;
+    // Active tab: only sessions with last message within 5 minutes
+    if (activeTab === 'active') return matchesSearch && isLive(s);
     return matchesSearch;
   });
 
-  const activeCount = sessions?.filter(s => s.is_active).length || 0;
+  const activeCount = sessions?.filter(s => isLive(s)).length || 0;
 
   if (isLoading) {
     return (
@@ -308,13 +332,13 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
           <div className="flex items-center gap-1">
             <span className={cn(
               "w-1.5 h-1.5 rounded-full flex-shrink-0",
-              session.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"
+              isLive(session) ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/30"
             )} />
             <span className={cn(
               "text-[11px] font-medium",
-              session.is_active ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/40"
+              isLive(session) ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/40"
             )}>
-              {session.is_active ? 'Active' : 'Inactive'}
+              {isLive(session) ? 'Active' : 'Offline'}
             </span>
           </div>
         </div>
