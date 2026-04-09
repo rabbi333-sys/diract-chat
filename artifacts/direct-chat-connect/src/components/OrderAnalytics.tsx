@@ -26,31 +26,74 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string; ic
 
 const PIE_COLORS = ['hsl(38,92%,50%)', 'hsl(217,91%,60%)', 'hsl(270,70%,60%)', 'hsl(185,85%,45%)', 'hsl(142,71%,45%)', 'hsl(0,84%,60%)'];
 
-function downloadCSV(orders: any[], days: number) {
-  if (!orders.length) return;
-  const headers = ['Order Number', 'Customer', 'Phone', 'Address', 'Status', 'Total Price', 'Date'];
-  const rows = orders.map(o => [
-    o.order_number ?? '',
-    o.customer_name ?? '',
-    o.customer_phone ?? '',
-    o.delivery_address ?? '',
-    o.status ?? '',
-    o.total_price ?? '',
-    o.created_at ? format(parseISO(o.created_at), 'dd MMM yyyy') : '',
-  ]);
-  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `analytics-report-last-${days}d.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+function downloadPDF(orders: any[], summary: any) {
+  const date = format(new Date(), 'dd MMM yyyy');
+  const totalRevenue = orders.reduce((s, o) => s + (Number(o.total_price) || 0), 0);
+  const statusCounts: Record<string, number> = {};
+  orders.forEach(o => { statusCounts[o.status] = (statusCounts[o.status] || 0) + 1; });
+
+  const rows = orders.map(o => `
+    <tr>
+      <td>${o.order_number ?? '-'}</td>
+      <td>${o.customer_name ?? '-'}</td>
+      <td>${o.customer_phone ?? '-'}</td>
+      <td>${o.status ?? '-'}</td>
+      <td>৳${Number(o.total_price || 0).toLocaleString()}</td>
+      <td>${o.created_at ? format(parseISO(o.created_at), 'dd MMM yyyy') : '-'}</td>
+    </tr>`).join('');
+
+  const statusRows = Object.entries(statusCounts).map(([s, c]) =>
+    `<span style="display:inline-block;margin:2px 6px;padding:3px 10px;border-radius:12px;background:#f0f4ff;font-size:12px;font-weight:600">${s}: ${c}</span>`
+  ).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+  <title>Analytics Report — ${date}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a2e;padding:32px;background:#fff}
+    h1{font-size:22px;font-weight:700;color:#1e3a5f;margin-bottom:4px}
+    .sub{font-size:12px;color:#6b7280;margin-bottom:24px}
+    .summary{display:flex;gap:20px;margin-bottom:24px;flex-wrap:wrap}
+    .card{background:#f0f6ff;border-radius:12px;padding:14px 20px;min-width:140px}
+    .card .label{font-size:11px;color:#6b7280;margin-bottom:4px}
+    .card .value{font-size:22px;font-weight:700;color:#2563eb}
+    .section{margin-bottom:20px}
+    .section h2{font-size:13px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #e5e7eb}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th{background:#1e3a5f;color:#fff;padding:8px 10px;text-align:left;font-weight:600}
+    td{padding:7px 10px;border-bottom:1px solid #f3f4f6;color:#374151}
+    tr:nth-child(even) td{background:#f9fafb}
+    .footer{margin-top:24px;font-size:10px;color:#9ca3af;text-align:center}
+    @media print{body{padding:20px}}
+  </style></head><body>
+  <h1>Analytics Report</h1>
+  <div class="sub">Generated on ${date} &nbsp;|&nbsp; Total ${orders.length} orders</div>
+  <div class="summary">
+    <div class="card"><div class="label">Total Revenue</div><div class="value">৳${totalRevenue.toLocaleString()}</div></div>
+    <div class="card"><div class="label">Total Orders</div><div class="value">${orders.length}</div></div>
+  </div>
+  <div class="section">
+    <h2>Order Status</h2>
+    <div style="padding:8px 0">${statusRows || '<span style="color:#9ca3af;font-size:12px">No data</span>'}</div>
+  </div>
+  <div class="section">
+    <h2>Order Details</h2>
+    <table><thead><tr><th>Order #</th><th>Customer</th><th>Phone</th><th>Status</th><th>Total</th><th>Date</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:20px">No orders in this period</td></tr>'}</tbody></table>
+  </div>
+  <div class="footer">Meta Automation — Analytics Report — ${date}</div>
+  <script>window.onload=()=>{window.print()}<\/script>
+  </body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) return;
+  win.document.write(html);
+  win.document.close();
 }
 
 const OrderAnalytics = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('daily');
-  const [days, setDays] = useState(30);
+  const [days] = useState(90);
 
   const { data: orders = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ['orders-analytics'],
@@ -157,7 +200,7 @@ const OrderAnalytics = () => {
 
       {/* ── Controls bar ────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        {/* Single unified filter strip */}
+        {/* View mode filter strip */}
         <div className="flex items-center bg-muted/50 rounded-xl p-1 gap-0.5">
           {(['daily', 'weekly', 'monthly'] as ViewMode[]).map(m => (
             <button key={m} onClick={() => setViewMode(m)}
@@ -169,26 +212,15 @@ const OrderAnalytics = () => {
               {m === 'daily' ? 'Daily' : m === 'weekly' ? 'Weekly' : 'Monthly'}
             </button>
           ))}
-          <span className="w-px h-4 bg-border mx-0.5" />
-          {[7, 30, 90].map(d => (
-            <button key={d} onClick={() => setDays(d)}
-              className={cn(
-                'text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-all',
-                days === d ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {d}d
-            </button>
-          ))}
         </div>
 
         {/* Action buttons */}
         <div className="flex items-center gap-1.5">
-          <button onClick={() => downloadCSV(filteredOrders, days)}
+          <button onClick={() => downloadPDF(filteredOrders, summary)}
             className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-muted/50 transition-colors"
           >
             <Download size={12} />
-            Download
+            Download PDF
           </button>
           <button onClick={() => refetch()} disabled={isFetching}
             className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-muted/50 transition-colors"
