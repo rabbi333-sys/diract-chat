@@ -161,6 +161,89 @@ BEGIN
 END;
 $$;`;
 
+const PG_SETUP_SQL = `-- PostgreSQL: Create team_invites table (auto-created by API server on first invite)
+CREATE TABLE IF NOT EXISTS team_invites (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by  TEXT NOT NULL,
+  email       TEXT NOT NULL DEFAULT '',
+  role        TEXT NOT NULL DEFAULT 'viewer',
+  permissions TEXT[] NOT NULL DEFAULT '{}',
+  token       UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  status      TEXT NOT NULL DEFAULT 'pending',
+  submitted_name          TEXT,
+  submitted_email         TEXT,
+  submitted_password_hash TEXT,
+  submitted_at            TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_invites_token      ON team_invites(token);
+CREATE INDEX IF NOT EXISTS idx_team_invites_created_by ON team_invites(created_by);
+CREATE INDEX IF NOT EXISTS idx_team_invites_status     ON team_invites(status);`;
+
+const MYSQL_SETUP_SQL = `-- MySQL: Create team_invites table (auto-created by API server on first invite)
+CREATE TABLE IF NOT EXISTS team_invites (
+  id                      VARCHAR(36)  NOT NULL DEFAULT (UUID()),
+  created_by              VARCHAR(255) NOT NULL,
+  email                   VARCHAR(255) NOT NULL DEFAULT '',
+  role                    VARCHAR(50)  NOT NULL DEFAULT 'viewer',
+  permissions             JSON         NOT NULL DEFAULT (JSON_ARRAY()),
+  token                   VARCHAR(36)  NOT NULL DEFAULT (UUID()),
+  status                  VARCHAR(20)  NOT NULL DEFAULT 'pending',
+  submitted_name          VARCHAR(255),
+  submitted_email         VARCHAR(255),
+  submitted_password_hash VARCHAR(64),
+  submitted_at            DATETIME,
+  created_at              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_token (token)
+);
+
+CREATE INDEX idx_created_by ON team_invites(created_by);
+CREATE INDEX idx_status     ON team_invites(status);`;
+
+const MONGO_SETUP_JS = `// MongoDB: Collections are auto-created by the API server on first invite.
+// You can optionally create indexes manually for better performance:
+
+db.team_invites.createIndex({ token: 1 }, { unique: true });
+db.team_invites.createIndex({ created_by: 1 });
+db.team_invites.createIndex({ status: 1 });
+db.team_invites.createIndex({ submitted_email: 1 });
+
+// Sample document structure:
+// {
+//   _id: ObjectId(),
+//   created_by: "user-id",
+//   email: "member@example.com",
+//   role: "viewer",
+//   permissions: ["overview", "messages"],
+//   token: "uuid-v4-string",
+//   status: "pending",          // pending | accepted | rejected | revoked
+//   submitted_name: null,
+//   submitted_email: null,
+//   submitted_password_hash: null,
+//   submitted_at: null,
+//   created_at: ISODate()
+// }`;
+
+const REDIS_SETUP_NOTE = `# Redis: No schema setup needed — keys are managed automatically by the API server.
+#
+# Key structure used internally:
+#   invite:{token}         → JSON blob of the invite record
+#   invites:{userId}       → Set of invite IDs for a given admin
+#
+# The API server creates and manages all Redis keys automatically
+# when the first invite is generated. No manual steps required.`;
+
+type DbSetupTab = 'supabase' | 'postgresql' | 'mysql' | 'mongodb' | 'redis';
+const DB_SETUP_TABS: { key: DbSetupTab; label: string; icon: string }[] = [
+  { key: 'supabase',    label: 'Supabase',    icon: '⚡' },
+  { key: 'postgresql',  label: 'PostgreSQL',  icon: '🐘' },
+  { key: 'mysql',       label: 'MySQL',       icon: '🐬' },
+  { key: 'mongodb',     label: 'MongoDB',     icon: '🍃' },
+  { key: 'redis',       label: 'Redis',       icon: '🔴' },
+];
+
 const SqlCopyBlock = ({ sql }: { sql: string }) => {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
@@ -177,6 +260,296 @@ const SqlCopyBlock = ({ sql }: { sql: string }) => {
       >
         <ClipboardCopy size={10} /> {copied ? 'Copied!' : 'Copy'}
       </button>
+    </div>
+  );
+};
+
+/* ── DbSetupCard ──────────────────────────────────────────────────────────── */
+const DbSetupCard = ({
+  dbConnections,
+  dbSetupStatus,
+  activeDbId,
+}: {
+  dbConnections: MainDbConnection[];
+  dbSetupStatus: Record<string, 'checking' | 'ok' | 'needed'>;
+  activeDbId: string | null;
+}) => {
+  const [activeTab, setActiveTab] = useState<DbSetupTab>('supabase');
+
+  const supabaseConns = dbConnections.filter(c => !c.dbType || c.dbType === 'supabase');
+  const neededCount = supabaseConns.filter(c => dbSetupStatus[c.id] === 'needed').length;
+  const checkingCount = supabaseConns.filter(c => dbSetupStatus[c.id] === 'checking').length;
+  const supabaseAllOk = supabaseConns.length === 0 || (neededCount === 0 && checkingCount === 0);
+
+  const presentTypes = new Set(dbConnections.map(c => c.dbType || 'supabase'));
+  const visibleTabs = DB_SETUP_TABS.filter(t => presentTypes.has(t.key));
+  const effectiveTab = visibleTabs.find(t => t.key === activeTab) ? activeTab : (visibleTabs[0]?.key ?? 'supabase');
+
+  const sqlEditorUrl = (url: string) => {
+    const match = url.match(/https?:\/\/([^.]+)\.supabase\.co/);
+    const ref = match?.[1];
+    return ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : 'https://supabase.com/dashboard';
+  };
+
+  const headerBadge = supabaseAllOk && !dbConnections.some(c => c.dbType && c.dbType !== 'supabase' && dbSetupStatus[c.id] === 'needed') ? (
+    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">All configured</span>
+  ) : checkingCount > 0 && neededCount === 0 ? (
+    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground border border-border/40">Checking…</span>
+  ) : neededCount > 0 ? (
+    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">{neededCount} need setup</span>
+  ) : (
+    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">Auto-configured</span>
+  );
+
+  return (
+    <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden" data-testid="card-db-setup">
+      {/* Header */}
+      <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Database size={14} className={neededCount > 0 ? 'text-amber-500' : 'text-green-500'} />
+          <span className="font-semibold text-sm">Database Setup</span>
+          {headerBadge}
+        </div>
+        <span className="text-[10px] text-muted-foreground">One-time per project</span>
+      </div>
+
+      {/* Tabs */}
+      {visibleTabs.length > 1 && (
+        <div className="flex border-b border-border/50 overflow-x-auto bg-muted/20">
+          {visibleTabs.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={cn(
+                'flex items-center gap-1.5 px-4 py-2.5 text-[11px] font-semibold whitespace-nowrap transition-colors border-b-2',
+                effectiveTab === tab.key
+                  ? 'border-primary text-primary bg-background'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30',
+              )}
+            >
+              <span>{tab.icon}</span> {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="p-5 space-y-4">
+        {/* ── Supabase tab ── */}
+        {effectiveTab === 'supabase' && (
+          <>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Each Supabase database needs the member-auth SQL run once. Copy the SQL below, open the SQL Editor for each database that needs setup, paste and click <strong>Run</strong>.
+            </p>
+            <div>
+              <p className="text-[11px] font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
+                <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] font-bold flex items-center justify-center">1</span>
+                Copy this SQL
+              </p>
+              <SqlCopyBlock sql={INVITE_FIX_SQL} />
+            </div>
+            {supabaseConns.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] font-bold flex items-center justify-center">2</span>
+                  Open SQL Editor for each database and run
+                </p>
+                <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+                  {supabaseConns.map(conn => {
+                    const status = dbSetupStatus[conn.id];
+                    return (
+                      <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                        <div className={cn('w-2 h-2 rounded-full flex-shrink-0', {
+                          'bg-muted-foreground/30 animate-pulse': status === 'checking',
+                          'bg-green-500': status === 'ok',
+                          'bg-amber-500': status === 'needed',
+                          'bg-muted-foreground/20': !status,
+                        })} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm leading-none">⚡</span>
+                            <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                            {conn.id === activeDbId && (
+                              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">
+                            {conn.url.replace(/^https?:\/\//, '')}
+                          </p>
+                        </div>
+                        <div className="flex-shrink-0">
+                          {status === 'checking' && <span className="text-[10px] text-muted-foreground italic">Checking…</span>}
+                          {status === 'ok' && (
+                            <span className="flex items-center gap-1 text-[10px] font-semibold text-green-600 dark:text-green-400">
+                              <Check size={11} /> Setup done
+                            </span>
+                          )}
+                          {(status === 'needed' || !status) && (
+                            <a href={sqlEditorUrl(conn.url)} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-semibold transition-colors">
+                              <Link2 size={10} /> Open SQL Editor ↗
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {!supabaseAllOk && (
+                  <p className="text-[10px] text-muted-foreground mt-2">After running the SQL, refresh this page to confirm setup.</p>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── PostgreSQL tab ── */}
+        {effectiveTab === 'postgresql' && (
+          <>
+            <div className="flex items-start gap-2.5 rounded-xl bg-blue-500/8 border border-blue-500/20 p-3">
+              <span className="text-base leading-none mt-0.5">🐘</span>
+              <div>
+                <p className="text-[11px] font-semibold text-blue-700 dark:text-blue-400">Auto-created by the system</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                  When you generate the first invite, the API server automatically creates the <code className="font-mono bg-muted px-1 rounded text-[10px]">team_invites</code> table. The SQL below is for manual reference or if you prefer to set it up in advance.
+                </p>
+              </div>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-foreground mb-1.5">PostgreSQL — Create Table SQL</p>
+              <SqlCopyBlock sql={PG_SETUP_SQL} />
+            </div>
+            <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+              {dbConnections.filter(c => c.dbType === 'postgresql').map(conn => (
+                <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm leading-none">🐘</span>
+                      <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                      {conn.id === activeDbId && (
+                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url.replace(/^postgresql?:\/\//, 'pg://')}</p>
+                  </div>
+                  <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 flex-shrink-0">Auto-configured</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── MySQL tab ── */}
+        {effectiveTab === 'mysql' && (
+          <>
+            <div className="flex items-start gap-2.5 rounded-xl bg-orange-500/8 border border-orange-500/20 p-3">
+              <span className="text-base leading-none mt-0.5">🐬</span>
+              <div>
+                <p className="text-[11px] font-semibold text-orange-700 dark:text-orange-400">Auto-created by the system</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                  The <code className="font-mono bg-muted px-1 rounded text-[10px]">team_invites</code> table is created automatically on first invite. The SQL below is for manual reference or advance setup.
+                </p>
+              </div>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-foreground mb-1.5">MySQL — Create Table SQL</p>
+              <SqlCopyBlock sql={MYSQL_SETUP_SQL} />
+            </div>
+            <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+              {dbConnections.filter(c => c.dbType === 'mysql').map(conn => (
+                <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                  <div className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm leading-none">🐬</span>
+                      <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                      {conn.id === activeDbId && (
+                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url}</p>
+                  </div>
+                  <span className="text-[10px] font-semibold text-orange-600 dark:text-orange-400 flex-shrink-0">Auto-configured</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── MongoDB tab ── */}
+        {effectiveTab === 'mongodb' && (
+          <>
+            <div className="flex items-start gap-2.5 rounded-xl bg-green-500/8 border border-green-500/20 p-3">
+              <span className="text-base leading-none mt-0.5">🍃</span>
+              <div>
+                <p className="text-[11px] font-semibold text-green-700 dark:text-green-400">No schema setup needed (NoSQL)</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                  MongoDB collections are schema-less and created automatically on first insert. The code below shows optional index creation for better performance.
+                </p>
+              </div>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-foreground mb-1.5">MongoDB — Optional Index Setup (mongosh)</p>
+              <SqlCopyBlock sql={MONGO_SETUP_JS} />
+            </div>
+            <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+              {dbConnections.filter(c => c.dbType === 'mongodb').map(conn => (
+                <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                  <div className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm leading-none">🍃</span>
+                      <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                      {conn.id === activeDbId && (
+                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url.replace(/mongodb(\+srv)?:\/\/[^@]+@/, 'mongodb://***@')}</p>
+                  </div>
+                  <span className="text-[10px] font-semibold text-green-600 dark:text-green-400 flex-shrink-0">Auto-configured</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── Redis tab ── */}
+        {effectiveTab === 'redis' && (
+          <>
+            <div className="flex items-start gap-2.5 rounded-xl bg-red-500/8 border border-red-500/20 p-3">
+              <span className="text-base leading-none mt-0.5">🔴</span>
+              <div>
+                <p className="text-[11px] font-semibold text-red-700 dark:text-red-400">No schema setup needed (Key-Value Store)</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                  Redis is a key-value store — there are no tables or schemas. All keys are created automatically by the API server when invites are generated.
+                </p>
+              </div>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-foreground mb-1.5">Redis — Key Structure Reference</p>
+              <SqlCopyBlock sql={REDIS_SETUP_NOTE} />
+            </div>
+            <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+              {dbConnections.filter(c => c.dbType === 'redis').map(conn => (
+                <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                  <div className="w-2 h-2 rounded-full bg-red-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm leading-none">🔴</span>
+                      <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                      {conn.id === activeDbId && (
+                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url.replace(/redis:\/\/[^@]+@/, 'redis://***@')}</p>
+                  </div>
+                  <span className="text-[10px] font-semibold text-red-600 dark:text-red-400 flex-shrink-0">Auto-configured</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 };
@@ -1052,119 +1425,13 @@ const Profile = () => {
         </div>
 
         {/* ── Database Setup ── */}
-        {isAdmin && (() => {
-          const supabaseConns = dbConnections.filter(c => c.dbType === 'supabase');
-          if (supabaseConns.length === 0) return null;
-          const neededCount = supabaseConns.filter(c => dbSetupStatus[c.id] === 'needed').length;
-          const checkingCount = supabaseConns.filter(c => dbSetupStatus[c.id] === 'checking').length;
-          const allOk = neededCount === 0 && checkingCount === 0;
-
-          const sqlEditorUrl = (url: string) => {
-            const match = url.match(/https?:\/\/([^.]+)\.supabase\.co/);
-            const ref = match?.[1];
-            return ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : 'https://supabase.com/dashboard';
-          };
-
-          return (
-            <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden" data-testid="card-db-setup">
-              {/* Header */}
-              <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Database size={14} className={allOk ? 'text-green-500' : neededCount > 0 ? 'text-amber-500' : 'text-muted-foreground'} />
-                  <span className="font-semibold text-sm">Database Setup</span>
-                  {allOk ? (
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">All configured</span>
-                  ) : checkingCount > 0 && neededCount === 0 ? (
-                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground border border-border/40">Checking…</span>
-                  ) : (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
-                      {neededCount} need setup
-                    </span>
-                  )}
-                </div>
-                <span className="text-[10px] text-muted-foreground">One-time per project</span>
-              </div>
-
-              <div className="p-5 space-y-4">
-                {/* Instruction row */}
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Each Supabase database needs the member-auth SQL run once. Copy the SQL below, open the SQL Editor for each database that needs setup, paste and click <strong>Run</strong>.
-                </p>
-
-                {/* SQL copy block — shared for all DBs */}
-                <div>
-                  <p className="text-[11px] font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
-                    <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] font-bold flex items-center justify-center">1</span>
-                    Copy this SQL (works for all databases)
-                  </p>
-                  <SqlCopyBlock sql={INVITE_FIX_SQL} />
-                </div>
-
-                {/* Per-database rows */}
-                <div>
-                  <p className="text-[11px] font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                    <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] font-bold flex items-center justify-center">2</span>
-                    Open SQL Editor for each database and run
-                  </p>
-                  <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
-                    {supabaseConns.map(conn => {
-                      const status = dbSetupStatus[conn.id];
-                      return (
-                        <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
-                          {/* Status dot */}
-                          <div className={cn('w-2 h-2 rounded-full flex-shrink-0', {
-                            'bg-muted-foreground/30 animate-pulse': status === 'checking',
-                            'bg-green-500': status === 'ok',
-                            'bg-amber-500': status === 'needed',
-                            'bg-muted-foreground/20': !status,
-                          })} />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm leading-none">
-                                {DB_TYPES.find(t => t.value === (conn.dbType || 'supabase'))?.icon ?? '⚡'}
-                              </span>
-                              <p className="text-[12px] font-medium truncate">{conn.name}</p>
-                              {conn.id === activeDbId && (
-                                <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
-                              )}
-                            </div>
-                            <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">
-                              {conn.url.replace(/^https?:\/\//, '')}
-                            </p>
-                          </div>
-                          <div className="flex-shrink-0">
-                            {status === 'checking' && (
-                              <span className="text-[10px] text-muted-foreground italic">Checking…</span>
-                            )}
-                            {status === 'ok' && (
-                              <span className="flex items-center gap-1 text-[10px] font-semibold text-green-600 dark:text-green-400">
-                                <Check size={11} /> Setup done
-                              </span>
-                            )}
-                            {(status === 'needed' || status === undefined) && (
-                              <a
-                                href={sqlEditorUrl(conn.url)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-semibold transition-colors"
-                              >
-                                <Link2 size={10} /> Open SQL Editor ↗
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {!allOk && (
-                  <p className="text-[10px] text-muted-foreground">After running the SQL, refresh this page to confirm setup.</p>
-                )}
-              </div>
-            </div>
-          );
-        })()}
+        {isAdmin && dbConnections.length > 0 && (
+          <DbSetupCard
+            dbConnections={dbConnections}
+            dbSetupStatus={dbSetupStatus}
+            activeDbId={activeDbId}
+          />
+        )}
 
       </div>
     </div>
