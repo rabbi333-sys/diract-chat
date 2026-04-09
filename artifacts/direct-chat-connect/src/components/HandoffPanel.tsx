@@ -32,23 +32,19 @@ interface HandoffRequest {
 }
 
 // ─── Auto-disable AI for a session ───────────────────────────────────────────
-// Returns true on success so the caller can decide whether to keep the ID in the Set.
+// Does NOT pass user_id — the ai_control table (from FULL_SETUP_SQL) has no
+// user_id column and uses an "Allow all" RLS policy. Passing user_id causes a
+// silent schema error that prevents the upsert from succeeding.
 async function autoDisableAi(session_id: string): Promise<boolean> {
   if (!session_id) return false;
   try {
-    const { data: { user } } = await supabase.auth.getUser();
     const { error } = await supabase.from('ai_control').upsert(
-      {
-        session_id,
-        ai_enabled: false,
-        ...(user?.id ? { user_id: user.id } : {}),
-        updated_at: new Date().toISOString(),
-      },
+      { session_id, ai_enabled: false, updated_at: new Date().toISOString() },
       { onConflict: 'session_id' }
     );
     return !error;
   } catch {
-    return false; // let caller retry next cycle
+    return false;
   }
 }
 
@@ -121,12 +117,12 @@ export const HandoffPanel = () => {
   // ── Auto-disable AI for all pending handoffs on load / change ──────────────
   useEffect(() => {
     for (const req of requests) {
-      if (req.status === 'pending' && req.session_id && !aiDisabledRef.current.has(req.session_id)) {
-        // Add to Set optimistically to prevent parallel duplicate calls;
-        // remove again if the upsert fails so the next render can retry.
-        aiDisabledRef.current.add(req.session_id);
-        autoDisableAi(req.session_id).then(ok => {
-          if (!ok) aiDisabledRef.current.delete(req.session_id!);
+      // Use session_id; fall back to sender_id (same thing on Meta platforms)
+      const sid = req.session_id || req.sender_id;
+      if (req.status === 'pending' && sid && !aiDisabledRef.current.has(sid)) {
+        aiDisabledRef.current.add(sid);
+        autoDisableAi(sid).then(ok => {
+          if (!ok) aiDisabledRef.current.delete(sid);
         });
       }
     }
@@ -143,13 +139,10 @@ export const HandoffPanel = () => {
           queryClient.invalidateQueries({ queryKey: ['supabase-handoffs'] });
           // Auto-disable AI for newly inserted pending handoffs
           const newRow = payload.new as HandoffRequest | undefined;
-          if (
-            newRow?.session_id &&
-            newRow.status === 'pending' &&
-            !aiDisabledRef.current.has(newRow.session_id)
-          ) {
-            aiDisabledRef.current.add(newRow.session_id);
-            autoDisableAi(newRow.session_id);
+          const sid = newRow?.session_id || newRow?.sender_id;
+          if (sid && newRow?.status === 'pending' && !aiDisabledRef.current.has(sid)) {
+            aiDisabledRef.current.add(sid);
+            autoDisableAi(sid);
           }
         }
       )
@@ -214,16 +207,20 @@ export const HandoffPanel = () => {
   }
 
   // Navigate to the conversation for this handoff.
-  // Use sender_id as the recipient param when available (more reliable than display name).
+  // For Facebook/WhatsApp, sender_id IS the session_id — use it as fallback.
+  // Pass disable_ai=1 so the Conversation page immediately turns AI off.
   function openChat(req: HandoffRequest, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!req.session_id) {
+    // Use session_id; fall back to sender_id (they're the same on Meta platforms)
+    const navSessionId = req.session_id || req.sender_id;
+    if (!navSessionId) {
       toast.error('No session ID on this handoff — cannot open conversation');
       return;
     }
     const recipientParam = req.sender_id || req.recipient;
-    const params = recipientParam ? `?recipient=${encodeURIComponent(recipientParam)}` : '';
-    navigate(`/conversation/${req.session_id}${params}`);
+    const qs = new URLSearchParams({ disable_ai: '1' });
+    if (recipientParam) qs.set('recipient', recipientParam);
+    navigate(`/conversation/${navSessionId}?${qs.toString()}`);
   }
 
   return (
@@ -277,7 +274,8 @@ export const HandoffPanel = () => {
           const priorityCfg = getPriorityConfig(req.priority);
           const isExpanded = expandedId === req.id;
           const customerName = resolveName(req);
-          const hasSession = !!req.session_id;
+          // sender_id serves as session_id on Meta platforms — treat either as valid
+          const hasSession = !!req.session_id || !!req.sender_id;
 
           return (
             <div

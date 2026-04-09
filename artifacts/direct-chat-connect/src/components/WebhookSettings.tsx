@@ -470,13 +470,14 @@ const ENDPOINTS: EndpointDef[] = [
     colorBg: 'bg-primary/10',
     colorBorder: 'border-primary/25',
     fields: [
-      { name: 'sender_id', example: 'Facebook / WhatsApp User ID' },
-      { name: 'recipient', example: 'Customer Name (display)' },
-      { name: 'reason',    example: 'Why human is needed' },
-      { name: 'message',   example: "Customer's last message" },
-      { name: 'priority',  example: 'normal / high / urgent' },
+      { name: 'session_id', example: 'Same as sender_id (Facebook/WhatsApp user ID)' },
+      { name: 'sender_id',  example: 'Facebook / WhatsApp User ID' },
+      { name: 'recipient',  example: 'Customer Name (display)' },
+      { name: 'reason',     example: 'Why human is needed' },
+      { name: 'message',    example: "Customer's last message" },
+      { name: 'priority',   example: 'normal / high / urgent' },
     ],
-    bodyJson: { sender_id: '1234567890', recipient: 'Customer Name', reason: 'Human help needed', message: 'Last message', priority: 'normal' },
+    bodyJson: { session_id: '1234567890', sender_id: '1234567890', recipient: 'Customer Name', reason: 'Human help needed', message: 'Last message', priority: 'normal' },
     createSql: HANDOFF_SQL,
     n8nInsertQuery: {
       pg: `INSERT INTO handoff_requests (session_id, sender_id, recipient, reason, message, priority)

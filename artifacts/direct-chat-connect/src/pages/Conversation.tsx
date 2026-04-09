@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import { useChatHistory, useRecipientNames, useAutoResolveNames, fetchNameFromMeta, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage } from '@/components/ChatMessage';
@@ -138,6 +139,25 @@ const Conversation = () => {
   const canReply = !!activeConn && !!recipient;
 
   const { aiEnabled, toggle: toggleAi, isPending: aiTogglePending } = useAiControl(sessionId);
+
+  // ── When arriving from HandoffPanel with ?disable_ai=1, immediately turn AI off ──
+  const disableAiOnOpen = searchParams.get('disable_ai') === '1';
+  useEffect(() => {
+    if (!disableAiOnOpen || !sessionId) return;
+    // Optimistic: show AI as OFF in the UI right away (no waiting for DB round-trip)
+    queryClient.setQueryData(['ai-control', sessionId], false);
+    // Persist: direct upsert bypasses auth check (ai_control uses "Allow all" RLS)
+    supabase.from('ai_control').upsert(
+      { session_id: sessionId, ai_enabled: false, updated_at: new Date().toISOString() },
+      { onConflict: 'session_id' }
+    ).then(({ error }) => {
+      if (error) {
+        // Revert optimistic if write failed
+        queryClient.invalidateQueries({ queryKey: ['ai-control', sessionId] });
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]); // run once on mount
 
   useAutoResolveNames(
     recipient ? [recipient] : [],
