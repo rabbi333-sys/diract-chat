@@ -99,7 +99,10 @@ export async function getMemberUser(): Promise<{
   };
 }
 
-// ── Sign in (checks team_invites table — no Supabase Auth) ─────────────────
+// ── Sign in (uses SECURITY DEFINER RPC — no direct table access needed) ────
+// The RPC `member_login_by_credentials` validates email + password hash
+// server-side and returns a minimal session payload. This bypasses RLS
+// without requiring the service role key on the client.
 
 export async function signInMember(
   email: string,
@@ -115,31 +118,40 @@ export async function signInMember(
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data, error } = await client
-    .from('team_invites')
-    .select('id, role, permissions, submitted_name, submitted_email')
-    .eq('submitted_email', email.toLowerCase().trim())
-    .eq('submitted_password_hash', hash)
-    .eq('status', 'accepted')
-    .maybeSingle();
+  const { data, error } = await client.rpc('member_login_by_credentials', {
+    p_email: email.toLowerCase().trim(),
+    p_password_hash: hash,
+  });
 
-  if (error || !data) {
-    return {
-      error: {
-        message:
-          'Invalid email or password, or your access has not been approved yet.',
-      },
-    };
+  if (error) {
+    // RPC doesn't exist yet — admin needs to run SQL setup
+    if (error.message?.includes('function') || error.message?.includes('member_login')) {
+      return {
+        error: {
+          message: 'Workspace database needs a one-time update. Ask your admin to run the SQL setup.',
+        },
+      };
+    }
+    return { error: { message: error.message } };
   }
 
-  const row = data as {
+  const rows = data as Array<{
     id: string;
     role: string;
     permissions: string[];
     submitted_name: string | null;
     submitted_email: string;
-  };
+  }> | null;
 
+  if (!rows || rows.length === 0) {
+    return {
+      error: {
+        message: 'Invalid email or password, or your access has not been approved yet.',
+      },
+    };
+  }
+
+  const row = rows[0];
   const session: MemberSession = {
     email: row.submitted_email ?? email,
     role: row.role ?? 'viewer',

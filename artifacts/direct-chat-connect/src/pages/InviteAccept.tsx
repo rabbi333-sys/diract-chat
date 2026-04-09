@@ -52,13 +52,12 @@ const InviteAccept = () => {
   const [params, setParams] = useState<{
     supabaseUrl: string | null;
     supabaseKey: string | null;
-    serviceRoleKey: string | null;
     tableName: string | null;
     memberName: string | null;
     platformConnsJson: string | null;
     n8nSettingsJson: string | null;
   }>({
-    supabaseUrl: null, supabaseKey: null, serviceRoleKey: null,
+    supabaseUrl: null, supabaseKey: null,
     tableName: null, memberName: null, platformConnsJson: null, n8nSettingsJson: null,
   });
 
@@ -71,7 +70,6 @@ const InviteAccept = () => {
     try {
       let supabaseUrl: string | null = null;
       let supabaseKey: string | null = null;
-      let serviceRoleKey: string | null = null;
       let tableName: string | null = null;
       let memberName: string | null = null;
       let platformConnsJson: string | null = null;
@@ -79,17 +77,16 @@ const InviteAccept = () => {
 
       const uParam = searchParams.get('u');
       const kParam = searchParams.get('k');
-      const sParam = searchParams.get('s');
       const tParam = searchParams.get('t');
       const nParam = searchParams.get('n');
       const pParam = searchParams.get('p');
       const qParam = searchParams.get('q');
+      // Note: 's' (service role key) param is intentionally ignored — members use anon key only
 
       if (uParam && kParam) {
         try {
           supabaseUrl = atob(decodeURIComponent(uParam));
           supabaseKey = atob(decodeURIComponent(kParam));
-          if (sParam) serviceRoleKey = atob(decodeURIComponent(sParam));
           if (tParam) tableName = atob(decodeURIComponent(tParam));
           if (nParam) memberName = atob(decodeURIComponent(nParam));
           if (pParam) platformConnsJson = atob(decodeURIComponent(pParam));
@@ -97,7 +94,7 @@ const InviteAccept = () => {
         } catch { /* ignore decode errors */ }
       }
 
-      setParams({ supabaseUrl, supabaseKey, serviceRoleKey, tableName, memberName, platformConnsJson, n8nSettingsJson });
+      setParams({ supabaseUrl, supabaseKey, tableName, memberName, platformConnsJson, n8nSettingsJson });
 
       const client = supabaseUrl && supabaseKey
         ? createClient(supabaseUrl, supabaseKey)
@@ -138,7 +135,6 @@ const InviteAccept = () => {
   const storeCredentials = (
     url: string,
     anonKey: string,
-    serviceKey: string | null,
     tableName: string | null,
     platformJson: string | null,
     n8nJson: string | null,
@@ -152,7 +148,6 @@ const InviteAccept = () => {
         dbType: 'supabase' as const,
         url,
         anonKey,
-        ...(serviceKey ? { serviceRoleKey: serviceKey } : {}),
         createdAt: new Date().toISOString(),
       };
       localStorage.setItem('meta_db_connections', JSON.stringify([...existing, newConn]));
@@ -170,7 +165,7 @@ const InviteAccept = () => {
       db_type: 'supabase',
       supabase_url: url,
       anon_key: anonKey,
-      service_role_key: serviceKey ?? anonKey,
+      service_role_key: anonKey, // members use anon key only — privileged ops use SECURITY DEFINER RPCs
       table_name: tableName ?? existingLegacy?.table_name ?? 'n8n_chat_histories',
       is_active: true,
     }));
@@ -193,7 +188,7 @@ const InviteAccept = () => {
     if (password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     if (password !== confirmPassword) { toast.error('Passwords do not match'); return; }
 
-    const { supabaseUrl, supabaseKey, serviceRoleKey, tableName, platformConnsJson, n8nSettingsJson } = params;
+    const { supabaseUrl, supabaseKey, tableName, platformConnsJson, n8nSettingsJson } = params;
     if (!supabaseUrl || !supabaseKey) {
       toast.error('Missing workspace credentials. Please ask your admin for a new invite link.');
       return;
@@ -235,7 +230,7 @@ const InviteAccept = () => {
       }
 
       // Store DB credentials and mark member setup so /member-login works later
-      storeCredentials(supabaseUrl, supabaseKey, serviceRoleKey, tableName, platformConnsJson, n8nSettingsJson);
+      storeCredentials(supabaseUrl, supabaseKey, tableName, platformConnsJson, n8nSettingsJson);
       setMemberSetup();
 
       setStage('done');

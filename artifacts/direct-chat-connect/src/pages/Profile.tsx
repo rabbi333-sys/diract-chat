@@ -131,6 +131,29 @@ BEGIN
   WHERE id = v_id;
   RETURN 'ok';
 END;
+$$;
+
+-- Step 5: RPC for member login — validates credentials server-side (bypasses RLS)
+CREATE OR REPLACE FUNCTION public.member_login_by_credentials(
+  p_email text,
+  p_password_hash text
+)
+RETURNS TABLE (
+  id uuid,
+  role text,
+  permissions text[],
+  submitted_name text,
+  submitted_email text
+)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  RETURN QUERY
+  SELECT t.id, t.role, t.permissions, t.submitted_name, t.submitted_email
+  FROM public.team_invites t
+  WHERE t.submitted_email = lower(trim(p_email))
+    AND t.submitted_password_hash = p_password_hash
+    AND t.status = 'accepted';
+END;
 $$;`;
 
 const SqlCopyBlock = ({ sql }: { sql: string }) => {
@@ -290,13 +313,8 @@ const Profile = () => {
       const u = btoa(conn.url);
       const k = btoa(conn.anonKey);
       let link = `${base}?u=${encodeURIComponent(u)}&k=${encodeURIComponent(k)}`;
-      // Embed service role key (prefer new system, fall back to old system)
-      const stored = getStoredConnection();
-      const srvKey = conn.serviceRoleKey || stored?.service_role_key || '';
-      if (srvKey) {
-        link += `&s=${encodeURIComponent(btoa(srvKey))}`;
-      }
       // Embed table name from old system (where the user configured it)
+      const stored = getStoredConnection();
       const tbl = stored?.table_name || '';
       if (tbl) {
         link += `&t=${encodeURIComponent(btoa(tbl))}`;
