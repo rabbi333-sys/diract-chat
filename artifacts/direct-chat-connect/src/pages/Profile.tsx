@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useTeamRole } from '@/hooks/useTeamRole';
@@ -623,6 +623,53 @@ const Profile = () => {
     if (!pageLoading && isAdmin && user) loadInvites(user.id);
   }, [pageLoading, isAdmin, user?.id]);
 
+  // ── Polling: auto-refresh invites & notify admin when member submits ────────
+  const knownSubmissions = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!isAdmin || !user || pageLoading) return;
+    // Seed known submissions from initial load so we don't fire on mount
+    const seed = () => {
+      invites.forEach(inv => {
+        if (inv.submitted_email) knownSubmissions.current.add(inv.id);
+      });
+    };
+    seed();
+    const poll = setInterval(async () => {
+      if (!user) return;
+      // Silently reload — don't touch invitesLoading state
+      const conn = getActiveConnection();
+      let fresh: Invite[] = [];
+      try {
+        if (conn && conn.dbType !== 'supabase') {
+          const { proxyListInvites: pli, buildCreds: bc } = await import('@/lib/memberAuthProxy');
+          fresh = (await pli(bc(conn), user.id)) as unknown as Invite[];
+        } else {
+          const { data } = await supabase
+            .from('team_invites')
+            .select('*')
+            .eq('created_by', user.id)
+            .order('created_at', { ascending: false });
+          fresh = (data ?? []) as unknown as Invite[];
+        }
+      } catch { return; }
+
+      // Detect newly submitted invites
+      fresh.forEach(inv => {
+        if (inv.submitted_email && !knownSubmissions.current.has(inv.id)) {
+          knownSubmissions.current.add(inv.id);
+          const memberName = inv.submitted_name || inv.submitted_email;
+          toast.success(`📩 ${memberName} submitted a join request — review below`, {
+            duration: 6000,
+          });
+        }
+      });
+
+      setInvites(fresh);
+    }, 15000); // poll every 15 s
+
+    return () => clearInterval(poll);
+  }, [isAdmin, user?.id, pageLoading]);
+
   // Auto-detect missing RPCs for ALL Supabase connections
   useEffect(() => {
     if (!isAdmin || pageLoading) return;
@@ -1243,8 +1290,8 @@ const Profile = () => {
                               </button>
                             )}
 
-                            {/* ALL pending: Accept ✓ / Reject ✗ */}
-                            {isPending && (
+                            {/* Only when member has submitted credentials: Accept ✓ / Reject ✗ */}
+                            {isPending && hasSubmission && (
                               <div className="flex items-center gap-1">
                                 <button
                                   onClick={() => handleAccept(invite.id)}
