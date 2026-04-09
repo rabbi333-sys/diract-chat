@@ -382,28 +382,7 @@ const OrderAnalytics = () => {
         </div>
       </div>
 
-      {/* ── Revenue hero card ─────────────────────────────────────── */}
-      <HeroCard
-        icon={TrendingUp}
-        label="Total Revenue"
-        value={`৳${summary.revenue.toLocaleString()}`}
-        change={summary.revenueChange}
-        gradient="from-primary/10 to-primary/5"
-        iconColor="text-primary"
-        valueColor="text-primary"
-      />
-
-      {/* ── Order summary row ─────────────────────────────────────── */}
-      <StatCard
-        icon={ShoppingBag}
-        label="Total Orders"
-        value={summary.total}
-        change={summary.totalChange}
-        iconColor="text-foreground"
-        iconBg="bg-muted/60"
-      />
-
-      {/* ── Status breakdown grid (all 6 statuses) ───────────────── */}
+      {/* ── Status breakdown grid (FIRST) ────────────────────────── */}
       <div>
         <SectionLabel icon={BarChart2} label="Order Status Breakdown" />
         <div className="grid grid-cols-3 gap-2">
@@ -425,6 +404,27 @@ const OrderAnalytics = () => {
             );
           })}
         </div>
+      </div>
+
+      {/* ── Revenue + Orders side by side (SECOND) ────────────────── */}
+      <div className="grid grid-cols-2 gap-3">
+        <HeroCard
+          icon={TrendingUp}
+          label="Total Revenue"
+          value={`৳${summary.revenue.toLocaleString()}`}
+          change={summary.revenueChange}
+          gradient="from-primary/10 to-primary/5"
+          iconColor="text-primary"
+          valueColor="text-primary"
+        />
+        <StatCard
+          icon={ShoppingBag}
+          label="Total Orders"
+          value={summary.total}
+          change={summary.totalChange}
+          iconColor="text-foreground"
+          iconBg="bg-muted/60"
+        />
       </div>
 
 
@@ -499,9 +499,11 @@ const OrderAnalytics = () => {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 const SectionLabel = ({ icon: Icon, label }: { icon: any; label: string }) => (
-  <div className="flex items-center gap-2 mb-2.5">
-    <Icon size={13} className="text-muted-foreground" />
-    <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
+  <div className="flex items-center gap-2 mb-3">
+    <div className="p-1.5 rounded-lg bg-primary/10">
+      <Icon size={13} className="text-primary" />
+    </div>
+    <span className="text-[12px] font-bold uppercase tracking-wider text-foreground/70">{label}</span>
   </div>
 );
 
@@ -511,10 +513,10 @@ const HeroCard = ({ icon: Icon, label, value, change, gradient, iconColor, value
 }) => {
   const isPositive = change !== undefined && change >= 0;
   return (
-    <div className={cn('rounded-2xl border border-border bg-gradient-to-br p-4 transition-all hover:shadow-md hover:-translate-y-0.5', gradient)}>
-      <div className="flex items-start justify-between mb-3">
-        <div className="p-2 rounded-xl bg-background/50 backdrop-blur-sm">
-          <Icon size={16} className={iconColor} />
+    <div className={cn('rounded-2xl border border-border/60 bg-gradient-to-br p-4 transition-all hover:shadow-md hover:-translate-y-0.5 flex flex-col justify-between min-h-[110px]', gradient)}>
+      <div className="flex items-start justify-between">
+        <div className="p-2 rounded-xl bg-background/60 backdrop-blur-sm">
+          <Icon size={15} className={iconColor} />
         </div>
         {change !== undefined && (
           <span className={cn('flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full',
@@ -525,8 +527,10 @@ const HeroCard = ({ icon: Icon, label, value, change, gradient, iconColor, value
           </span>
         )}
       </div>
-      <p className={cn('text-2xl font-bold tracking-tight', valueColor)}>{value}</p>
-      <span className="text-[11px] text-muted-foreground font-medium mt-1 block">{label}</span>
+      <div className="mt-2">
+        <p className={cn('text-xl font-bold tracking-tight leading-none', valueColor)}>{value}</p>
+        <span className="text-[11px] text-muted-foreground font-medium mt-1 block">{label}</span>
+      </div>
     </div>
   );
 };
@@ -537,10 +541,10 @@ const StatCard = ({ icon: Icon, label, value, change, iconColor, iconBg, suffix 
 }) => {
   const isPositive = change !== undefined && change >= 0;
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 transition-all hover:shadow-sm hover:border-primary/20">
-      <div className="flex items-start justify-between mb-2.5">
+    <div className="rounded-2xl border border-border/60 bg-card p-4 transition-all hover:shadow-sm hover:border-primary/20 flex flex-col justify-between min-h-[110px]">
+      <div className="flex items-start justify-between">
         <div className={cn('p-2 rounded-xl', iconBg)}>
-          <Icon size={16} className={iconColor} />
+          <Icon size={15} className={iconColor} />
         </div>
         {change !== undefined && (
           <span className={cn('flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full',
@@ -551,11 +555,13 @@ const StatCard = ({ icon: Icon, label, value, change, iconColor, iconBg, suffix 
           </span>
         )}
       </div>
-      <div className="flex items-baseline gap-1.5">
-        <p className="text-2xl font-bold text-foreground">{value.toLocaleString()}</p>
-        {suffix && <span className="text-[11px] font-semibold text-muted-foreground">{suffix}</span>}
+      <div className="mt-2">
+        <div className="flex items-baseline gap-1">
+          <p className="text-xl font-bold text-foreground leading-none">{value.toLocaleString()}</p>
+          {suffix && <span className="text-[11px] font-semibold text-muted-foreground">{suffix}</span>}
+        </div>
+        <span className="text-[11px] text-muted-foreground font-medium mt-1 block">{label}</span>
       </div>
-      <span className="text-[11px] text-muted-foreground font-medium mt-1 block">{label}</span>
     </div>
   );
 };
@@ -566,14 +572,14 @@ const StatusCard = ({ icon: Icon, label, count, change, pct, color, bg, barColor
 }) => {
   const isPositive = change >= 0;
   return (
-    <div className="rounded-xl border border-border bg-card p-3 space-y-2 transition-all hover:shadow-sm">
+    <div className="rounded-xl border border-border/60 bg-card p-3 space-y-2 transition-all hover:shadow-md hover:-translate-y-0.5 hover:border-border">
       <div className="flex items-center justify-between">
         <div className={cn('p-1.5 rounded-lg', bg)}>
           <Icon size={13} className={color} />
         </div>
         {change !== 0 && (
-          <span className={cn('flex items-center gap-0.5 text-[9px] font-bold',
-            isPositive ? 'text-emerald-600' : 'text-red-500'
+          <span className={cn('flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full',
+            isPositive ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-500'
           )}>
             {isPositive ? <ArrowUpRight size={9} /> : <ArrowDownRight size={9} />}
             {Math.abs(change)}%
@@ -581,16 +587,14 @@ const StatusCard = ({ icon: Icon, label, count, change, pct, color, bg, barColor
         )}
       </div>
       <div>
-        <p className={cn('text-xl font-bold leading-none', color)}>{count}</p>
-        <span className="text-[10px] text-muted-foreground font-medium mt-0.5 block">{label}</span>
+        <p className={cn('text-2xl font-bold leading-none', color)}>{count}</p>
+        <span className="text-[10px] text-muted-foreground font-medium mt-1 block">{label}</span>
       </div>
-      {pct > 0 && (
-        <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-700"
-            style={{ width: `${pct}%`, backgroundColor: barColor }}
-          />
-        </div>
-      )}
+      <div className="w-full h-1 rounded-full bg-muted/60 overflow-hidden">
+        <div className="h-full rounded-full transition-all duration-700"
+          style={{ width: pct > 0 ? `${pct}%` : '0%', backgroundColor: barColor, opacity: pct > 0 ? 1 : 0.2 }}
+        />
+      </div>
     </div>
   );
 };
