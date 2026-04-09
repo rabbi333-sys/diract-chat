@@ -281,9 +281,8 @@ const DbSetupCard = ({
   const checkingCount = supabaseConns.filter(c => dbSetupStatus[c.id] === 'checking').length;
   const supabaseAllOk = supabaseConns.length === 0 || (neededCount === 0 && checkingCount === 0);
 
-  const presentTypes = new Set(dbConnections.map(c => c.dbType || 'supabase'));
-  const visibleTabs = DB_SETUP_TABS.filter(t => presentTypes.has(t.key));
-  const effectiveTab = visibleTabs.find(t => t.key === activeTab) ? activeTab : (visibleTabs[0]?.key ?? 'supabase');
+  const visibleTabs = DB_SETUP_TABS;
+  const effectiveTab = activeTab;
 
   const sqlEditorUrl = (url: string) => {
     const match = url.match(/https?:\/\/([^.]+)\.supabase\.co/);
@@ -418,24 +417,31 @@ const DbSetupCard = ({
               <p className="text-[11px] font-semibold text-foreground mb-1.5">PostgreSQL — Create Table SQL</p>
               <SqlCopyBlock sql={PG_SETUP_SQL} />
             </div>
-            <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
-              {dbConnections.filter(c => c.dbType === 'postgresql').map(conn => (
-                <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
-                  <div className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm leading-none">🐘</span>
-                      <p className="text-[12px] font-medium truncate">{conn.name}</p>
-                      {conn.id === activeDbId && (
-                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
-                      )}
+            {(() => {
+              const pgConns = dbConnections.filter(c => c.dbType === 'postgresql');
+              return pgConns.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground italic">No PostgreSQL connections added yet. Add one from Database Connections above.</p>
+              ) : (
+                <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+                  {pgConns.map(conn => (
+                    <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                      <div className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm leading-none">🐘</span>
+                          <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                          {conn.id === activeDbId && (
+                            <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url.replace(/^postgresql?:\/\//, 'pg://')}</p>
+                      </div>
+                      <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 flex-shrink-0">Auto-configured</span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url.replace(/^postgresql?:\/\//, 'pg://')}</p>
-                  </div>
-                  <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 flex-shrink-0">Auto-configured</span>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
           </>
         )}
 
@@ -455,24 +461,31 @@ const DbSetupCard = ({
               <p className="text-[11px] font-semibold text-foreground mb-1.5">MySQL — Create Table SQL</p>
               <SqlCopyBlock sql={MYSQL_SETUP_SQL} />
             </div>
-            <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
-              {dbConnections.filter(c => c.dbType === 'mysql').map(conn => (
-                <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
-                  <div className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm leading-none">🐬</span>
-                      <p className="text-[12px] font-medium truncate">{conn.name}</p>
-                      {conn.id === activeDbId && (
-                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
-                      )}
+            {(() => {
+              const myConns = dbConnections.filter(c => c.dbType === 'mysql');
+              return myConns.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground italic">No MySQL connections added yet. Add one from Database Connections above.</p>
+              ) : (
+                <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+                  {myConns.map(conn => (
+                    <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                      <div className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm leading-none">🐬</span>
+                          <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                          {conn.id === activeDbId && (
+                            <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url}</p>
+                      </div>
+                      <span className="text-[10px] font-semibold text-orange-600 dark:text-orange-400 flex-shrink-0">Auto-configured</span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url}</p>
-                  </div>
-                  <span className="text-[10px] font-semibold text-orange-600 dark:text-orange-400 flex-shrink-0">Auto-configured</span>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
           </>
         )}
 
@@ -492,24 +505,31 @@ const DbSetupCard = ({
               <p className="text-[11px] font-semibold text-foreground mb-1.5">MongoDB — Optional Index Setup (mongosh)</p>
               <SqlCopyBlock sql={MONGO_SETUP_JS} />
             </div>
-            <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
-              {dbConnections.filter(c => c.dbType === 'mongodb').map(conn => (
-                <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
-                  <div className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm leading-none">🍃</span>
-                      <p className="text-[12px] font-medium truncate">{conn.name}</p>
-                      {conn.id === activeDbId && (
-                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
-                      )}
+            {(() => {
+              const mgConns = dbConnections.filter(c => c.dbType === 'mongodb');
+              return mgConns.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground italic">No MongoDB connections added yet. Add one from Database Connections above.</p>
+              ) : (
+                <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+                  {mgConns.map(conn => (
+                    <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                      <div className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm leading-none">🍃</span>
+                          <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                          {conn.id === activeDbId && (
+                            <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url.replace(/mongodb(\+srv)?:\/\/[^@]+@/, 'mongodb://***@')}</p>
+                      </div>
+                      <span className="text-[10px] font-semibold text-green-600 dark:text-green-400 flex-shrink-0">Auto-configured</span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url.replace(/mongodb(\+srv)?:\/\/[^@]+@/, 'mongodb://***@')}</p>
-                  </div>
-                  <span className="text-[10px] font-semibold text-green-600 dark:text-green-400 flex-shrink-0">Auto-configured</span>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
           </>
         )}
 
@@ -529,24 +549,31 @@ const DbSetupCard = ({
               <p className="text-[11px] font-semibold text-foreground mb-1.5">Redis — Key Structure Reference</p>
               <SqlCopyBlock sql={REDIS_SETUP_NOTE} />
             </div>
-            <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
-              {dbConnections.filter(c => c.dbType === 'redis').map(conn => (
-                <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
-                  <div className="w-2 h-2 rounded-full bg-red-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm leading-none">🔴</span>
-                      <p className="text-[12px] font-medium truncate">{conn.name}</p>
-                      {conn.id === activeDbId && (
-                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
-                      )}
+            {(() => {
+              const rdConns = dbConnections.filter(c => c.dbType === 'redis');
+              return rdConns.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground italic">No Redis connections added yet. Add one from Database Connections above.</p>
+              ) : (
+                <div className="rounded-xl border border-border/60 overflow-hidden divide-y divide-border/40">
+                  {rdConns.map(conn => (
+                    <div key={conn.id} className="flex items-center gap-3 px-4 py-3 bg-muted/10">
+                      <div className="w-2 h-2 rounded-full bg-red-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm leading-none">🔴</span>
+                          <p className="text-[12px] font-medium truncate">{conn.name}</p>
+                          {conn.id === activeDbId && (
+                            <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/15">Active</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url.replace(/redis:\/\/[^@]+@/, 'redis://***@')}</p>
+                      </div>
+                      <span className="text-[10px] font-semibold text-red-600 dark:text-red-400 flex-shrink-0">Auto-configured</span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5 pl-[22px]">{conn.url.replace(/redis:\/\/[^@]+@/, 'redis://***@')}</p>
-                  </div>
-                  <span className="text-[10px] font-semibold text-red-600 dark:text-red-400 flex-shrink-0">Auto-configured</span>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
           </>
         )}
       </div>
