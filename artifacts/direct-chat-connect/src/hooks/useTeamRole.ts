@@ -31,20 +31,50 @@ function getDisplayName(user: User): string {
   );
 }
 
-// Build a Supabase client from the stored external db connection
-function getGuestSupabaseClient() {
+// Keys to wipe when a guest's access is revoked
+const REVOKE_KEYS = [
+  'meta_guest_session',
+  'chat_monitor_db_settings',
+  'chat_monitor_platform_connections',
+  'chat_monitor_n8n_settings',
+  'meta_db_connections',
+  'meta_db_active_id',
+];
+
+function wipeGuestAccess() {
+  clearGuestSession();
   try {
-    // Try legacy settings first (most reliable for guest sessions)
-    const raw = localStorage.getItem('chat_monitor_db_settings');
-    if (raw) {
-      const cfg = JSON.parse(raw);
-      if (cfg?.supabase_url && cfg?.service_role_key) {
-        return createClient(cfg.supabase_url, cfg.service_role_key, {
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
+    REVOKE_KEYS.forEach(k => localStorage.removeItem(k));
+  } catch { /* ignore */ }
+}
+
+// Derive the best Supabase URL + anon key to use for token validation.
+// Priority: guest session itself → chat_monitor_db_settings → meta_db_connections
+function getValidationCredentials(): { url: string; key: string } | null {
+  try {
+    // 1. Guest session carries the credentials (set during InviteAccept)
+    const guestRaw = localStorage.getItem('meta_guest_session');
+    if (guestRaw) {
+      const gs = JSON.parse(guestRaw);
+      if (gs?.dbUrl && gs?.dbAnonKey) {
+        return { url: gs.dbUrl, key: gs.dbAnonKey };
       }
     }
-    // Fall back to new multi-connection system
+
+    // 2. Legacy settings (anon key stored as 'anon_key')
+    const legacyRaw = localStorage.getItem('chat_monitor_db_settings');
+    if (legacyRaw) {
+      const cfg = JSON.parse(legacyRaw);
+      if (cfg?.supabase_url && cfg?.anon_key) {
+        return { url: cfg.supabase_url, key: cfg.anon_key };
+      }
+      // Some old saves stored the key directly as service_role_key
+      if (cfg?.supabase_url && cfg?.service_role_key) {
+        return { url: cfg.supabase_url, key: cfg.service_role_key };
+      }
+    }
+
+    // 3. New multi-connection system
     const connsRaw = localStorage.getItem('meta_db_connections');
     const activeId = localStorage.getItem('meta_db_active_id');
     if (connsRaw) {
@@ -53,29 +83,35 @@ function getGuestSupabaseClient() {
       }>;
       const active = conns.find(c => c.id === activeId) ?? conns[0];
       if (active?.url && (active.anonKey || active.serviceRoleKey)) {
-        return createClient(active.url, active.serviceRoleKey ?? active.anonKey!, {
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
+        return { url: active.url, key: active.anonKey ?? active.serviceRoleKey! };
       }
     }
   } catch { /* ignore */ }
   return null;
 }
 
-// Validate a guest token against the team_invites table.
-// Returns 'valid' | 'revoked' | 'unknown'
+// Validate a guest token using the get_invite_by_token RPC (works with anon key).
+// Returns: 'valid' | 'revoked' | 'unknown'
 async function validateGuestToken(token: string): Promise<'valid' | 'revoked' | 'unknown'> {
   try {
-    const client = getGuestSupabaseClient();
-    if (!client) return 'unknown';
-    const { data, error } = await client
-      .from('team_invites')
-      .select('status')
-      .eq('token', token)
-      .maybeSingle();
+    const creds = getValidationCredentials();
+    if (!creds) return 'unknown';
+
+    const client = createClient(creds.url, creds.key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const { data, error } = await client.rpc('get_invite_by_token', { p_token: token });
     if (error) return 'unknown';
-    if (!data) return 'revoked'; // row deleted
-    if (data.status === 'revoked') return 'revoked';
+
+    // RPC returns empty → row was deleted
+    const row = Array.isArray(data) ? (data[0] ?? null) : (data ?? null);
+    if (!row) return 'revoked';
+
+    // Explicit revoke status
+    if (row.status === 'revoked') return 'revoked';
+
+    // Accepted or pending → still valid
     return 'valid';
   } catch {
     return 'unknown';
@@ -92,6 +128,32 @@ export function useTeamRole(): TeamRole {
 
   useEffect(() => {
     let cancelled = false;
+
+    const handleGuestSession = async () => {
+      const guest = getGuestSession();
+      if (!guest) return false; // not a guest
+
+      const validity = await validateGuestToken(guest.token);
+      if (cancelled) return true;
+
+      if (validity === 'revoked') {
+        wipeGuestAccess();
+        setUser(null);
+        setIsGuest(false);
+        setIsAdmin(false);
+        setPermissions([]);
+        setNotAuthorized(true);
+        return true;
+      }
+
+      // 'valid' or 'unknown' → grant access
+      setUser(null);
+      setIsGuest(true);
+      setIsAdmin(guest.role === 'admin');
+      setPermissions(guest.permissions ?? []);
+      setNotAuthorized(false);
+      return true;
+    };
 
     const check = async () => {
       try {
@@ -146,38 +208,8 @@ export function useTeamRole(): TeamRole {
         }
 
         // ── No Supabase session — check for guest invite session ─────────
-        const guest = getGuestSession();
-        if (guest) {
-          // Validate the token against the database to check if it's been revoked
-          const validity = await validateGuestToken(guest.token);
-          if (cancelled) return;
-
-          if (validity === 'revoked') {
-            // Token has been revoked by admin — wipe ALL local state and deny access
-            clearGuestSession();
-            try {
-              localStorage.removeItem('chat_monitor_db_settings');
-              localStorage.removeItem('chat_monitor_platform_connections');
-              localStorage.removeItem('chat_monitor_n8n_settings');
-              localStorage.removeItem('meta_db_connections');
-              localStorage.removeItem('meta_db_active_id');
-            } catch { /* ignore */ }
-            setUser(null);
-            setIsGuest(false);
-            setIsAdmin(false);
-            setPermissions([]);
-            setNotAuthorized(true);
-            return;
-          }
-
-          // Token is valid (or couldn't be validated — give benefit of doubt)
-          setUser(null);
-          setIsGuest(true);
-          setIsAdmin(guest.role === 'admin');
-          setPermissions(guest.permissions ?? []);
-          setNotAuthorized(false);
-          return;
-        }
+        const wasGuest = await handleGuestSession();
+        if (wasGuest || cancelled) return;
 
         // No auth and no guest session
         setUser(null);
@@ -186,29 +218,9 @@ export function useTeamRole(): TeamRole {
         setPermissions([]);
         setNotAuthorized(false);
       } catch {
-        // supabase.auth failed (e.g. placeholder URL on first load) — still check guest session
-        const guest = getGuestSession();
-        if (guest) {
-          // Even in catch, try to validate
-          const validity = await validateGuestToken(guest.token).catch(() => 'unknown' as const);
-          if (cancelled) return;
-          if (validity === 'revoked') {
-            clearGuestSession();
-            try {
-              localStorage.removeItem('chat_monitor_db_settings');
-              localStorage.removeItem('chat_monitor_platform_connections');
-              localStorage.removeItem('chat_monitor_n8n_settings');
-              localStorage.removeItem('meta_db_connections');
-              localStorage.removeItem('meta_db_active_id');
-            } catch { /* ignore */ }
-            setNotAuthorized(true);
-            return;
-          }
-          setUser(null);
-          setIsGuest(true);
-          setIsAdmin(guest.role === 'admin');
-          setPermissions(guest.permissions ?? []);
-          setNotAuthorized(false);
+        // supabase.auth failed (e.g. placeholder URL on first load) — still check guest
+        if (!cancelled) {
+          await handleGuestSession();
         }
       } finally {
         if (!cancelled) setLoading(false);

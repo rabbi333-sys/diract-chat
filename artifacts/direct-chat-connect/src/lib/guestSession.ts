@@ -5,7 +5,11 @@ export interface GuestSession {
   role: string;
   permissions: string[];
   email: string;
-  name?: string; // friendly display name set by admin when generating invite
+  name?: string;
+  /** Supabase URL of the admin's project — used for token re-validation */
+  dbUrl?: string;
+  /** Anon key of the admin's project — used with get_invite_by_token RPC */
+  dbAnonKey?: string;
 }
 
 export function getGuestSession(): GuestSession | null {

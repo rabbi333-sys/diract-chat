@@ -175,6 +175,9 @@ const InviteAccept = () => {
         permissions: row.permissions ?? [],
         email: row.email,
         ...(resolvedName ? { name: resolvedName } : {}),
+        // Store DB credentials so useTeamRole can re-validate token on each load
+        ...(supabaseUrl ? { dbUrl: supabaseUrl } : {}),
+        ...(supabaseKey ? { dbAnonKey: supabaseKey } : {}),
       });
 
       // ── Mark invite accepted ───────────────────────────────────────────
