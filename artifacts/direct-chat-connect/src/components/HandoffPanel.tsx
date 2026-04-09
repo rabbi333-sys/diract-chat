@@ -232,6 +232,10 @@ export const HandoffPanel = () => {
       toast.error('No session ID on this handoff — cannot open conversation');
       return;
     }
+    // Auto-resolve the handoff request when opening the chat
+    if (req.status === 'pending') {
+      resolveMutation.mutate({ id: req.id, status: 'resolved', source: req._source });
+    }
     const recipientParam = req.sender_id || req.recipient;
     const qs = new URLSearchParams({ disable_ai: '1' });
     if (recipientParam) qs.set('recipient', recipientParam);
