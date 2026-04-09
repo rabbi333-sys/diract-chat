@@ -16,6 +16,7 @@ import {
   DB_TYPES, getConnectionDisplayUrl,
 } from '@/lib/db-config';
 import { clearGuestSession } from '@/lib/guestSession';
+import { getStoredConnection } from '@/lib/externalDb';
 
 type Invite = {
   id: string;
@@ -227,7 +228,19 @@ const Profile = () => {
     if (conn?.url && conn?.anonKey) {
       const u = btoa(conn.url);
       const k = btoa(conn.anonKey);
-      return `${base}?u=${encodeURIComponent(u)}&k=${encodeURIComponent(k)}`;
+      let link = `${base}?u=${encodeURIComponent(u)}&k=${encodeURIComponent(k)}`;
+      // Embed service role key (prefer new system, fall back to old system)
+      const stored = getStoredConnection();
+      const srvKey = conn.serviceRoleKey || stored?.service_role_key || '';
+      if (srvKey) {
+        link += `&s=${encodeURIComponent(btoa(srvKey))}`;
+      }
+      // Embed table name from old system (where the user configured it)
+      const tbl = stored?.table_name || '';
+      if (tbl) {
+        link += `&t=${encodeURIComponent(btoa(tbl))}`;
+      }
+      return link;
     }
     return base;
   };

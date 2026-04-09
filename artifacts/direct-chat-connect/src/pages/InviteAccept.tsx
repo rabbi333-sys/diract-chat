@@ -8,6 +8,8 @@ import { Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { setGuestSession } from '@/lib/guestSession';
 import { getConnections, setActiveConnection } from '@/lib/db-config';
 
+const DB_SETTINGS_KEY = 'chat_monitor_db_settings';
+
 const PERMISSION_LABELS: Record<string, string> = {
   overview: 'Overview',
   messages: 'Messages',
@@ -48,11 +50,18 @@ const InviteAccept = () => {
 
       const uParam = searchParams.get('u');
       const kParam = searchParams.get('k');
+      const sParam = searchParams.get('s'); // service role key
+      const tParam = searchParams.get('t'); // table name
+
+      let serviceRoleKey: string | null = null;
+      let tableName: string | null = null;
 
       if (uParam && kParam) {
         try {
           supabaseUrl = atob(decodeURIComponent(uParam));
           supabaseKey = atob(decodeURIComponent(kParam));
+          if (sParam) serviceRoleKey = atob(decodeURIComponent(sParam));
+          if (tParam) tableName = atob(decodeURIComponent(tParam));
         } catch {
           // ignore decode error — will fall back to default client
         }
@@ -100,6 +109,7 @@ const InviteAccept = () => {
             dbType: 'supabase' as const,
             url: supabaseUrl,
             anonKey: supabaseKey,
+            ...(serviceRoleKey ? { serviceRoleKey } : {}),
             createdAt: new Date().toISOString(),
           };
           const updated = [...existing, newConn];
@@ -109,6 +119,23 @@ const InviteAccept = () => {
           const match = existing.find(c => c.url === supabaseUrl)!;
           setActiveConnection(match.id);
         }
+
+        // ── Also write to the legacy chat_monitor_db_settings key so
+        //    data-fetching hooks (useChatHistory → externalDb) pick up creds ──
+        const existingLegacy = (() => {
+          try { return JSON.parse(localStorage.getItem(DB_SETTINGS_KEY) || 'null'); } catch { return null; }
+        })();
+        const legacyPayload = {
+          ...(existingLegacy ?? {}),
+          db_type: 'supabase',
+          supabase_url: supabaseUrl,
+          // Use service role key if provided, otherwise fall back to anon key
+          service_role_key: serviceRoleKey ?? supabaseKey,
+          // Preserve table_name from invite link or keep existing
+          table_name: tableName ?? existingLegacy?.table_name ?? 'n8n_chat_histories',
+          is_active: true,
+        };
+        localStorage.setItem(DB_SETTINGS_KEY, JSON.stringify(legacyPayload));
       }
 
       // ── Store guest session ────────────────────────────────────────────
