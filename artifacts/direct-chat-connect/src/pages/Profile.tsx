@@ -18,6 +18,11 @@ import {
 import { clearGuestSession } from '@/lib/guestSession';
 import { getStoredConnection } from '@/lib/externalDb';
 import { signOutMember, hasMemberSetup } from '@/lib/memberAuth';
+import {
+  buildCreds, encodeNonSupabaseCreds,
+  proxyInit, proxyListInvites, proxyCreateInvite,
+  proxyUpdateInvite, proxyDeleteInvite,
+} from '@/lib/memberAuthProxy';
 
 const PLATFORM_CONNS_KEY = 'chat_monitor_platform_connections';
 const N8N_SETTINGS_KEY = 'chat_monitor_n8n_settings';
@@ -249,6 +254,15 @@ const Profile = () => {
   const loadInvites = async (userId: string) => {
     setInvitesLoading(true);
     try {
+      const conn = getActiveConnection();
+      if (conn && conn.dbType !== 'supabase') {
+        // Non-Supabase: use API server proxy
+        const list = await proxyListInvites(buildCreds(conn), userId);
+        setInvites(list as unknown as Invite[]);
+        return;
+      }
+
+      // Supabase path
       const { data: d1, error: e1 } = await supabase
         .from('team_invites')
         .select('*')
@@ -256,8 +270,6 @@ const Profile = () => {
         .order('created_at', { ascending: false });
 
       if (e1?.message?.includes('created_by')) {
-        // Legacy schema fallback: older DBs use `invited_by` instead of `created_by`.
-        // Use .filter() which accepts arbitrary column names as strings.
         const { data: d2 } = await supabase
           .from('team_invites')
           .select('*')
@@ -333,38 +345,32 @@ const Profile = () => {
   const buildInviteLink = (token: string, memberName?: string) => {
     const base = `${window.location.origin}/invite/${token}`;
     const conn = getActiveConnection();
-    if (conn?.url && conn?.anonKey) {
+    let link = base;
+
+    if (conn?.dbType === 'supabase' && conn.url && conn.anonKey) {
+      // Supabase: embed URL + anon key directly
       const u = btoa(conn.url);
       const k = btoa(conn.anonKey);
-      let link = `${base}?u=${encodeURIComponent(u)}&k=${encodeURIComponent(k)}`;
-      // Embed table name from old system (where the user configured it)
+      link = `${base}?u=${encodeURIComponent(u)}&k=${encodeURIComponent(k)}`;
       const stored = getStoredConnection();
       const tbl = stored?.table_name || '';
-      if (tbl) {
-        link += `&t=${encodeURIComponent(btoa(tbl))}`;
-      }
-      // Embed member name so the invited user's display name is set
-      if (memberName) {
-        link += `&n=${encodeURIComponent(btoa(memberName))}`;
-      }
-      // Embed platform connections (WhatsApp/Facebook/Instagram tokens)
-      // so invited user can send messages without manual setup
-      try {
-        const platformRaw = localStorage.getItem(PLATFORM_CONNS_KEY);
-        if (platformRaw && platformRaw !== '[]') {
-          link += `&p=${encodeURIComponent(btoa(platformRaw))}`;
-        }
-      } catch { /* ignore */ }
-      // Embed n8n settings so the invited user can send via n8n workflows
-      try {
-        const n8nRaw = localStorage.getItem(N8N_SETTINGS_KEY);
-        if (n8nRaw && n8nRaw !== 'null') {
-          link += `&q=${encodeURIComponent(btoa(n8nRaw))}`;
-        }
-      } catch { /* ignore */ }
-      return link;
+      if (tbl) link += `&t=${encodeURIComponent(btoa(tbl))}`;
+    } else if (conn && conn.dbType !== 'supabase') {
+      // Non-Supabase: encode DB credentials as a single param
+      const enc = encodeNonSupabaseCreds(conn);
+      link = `${base}?x=${encodeURIComponent(enc)}`;
     }
-    return base;
+
+    if (memberName) link += `&n=${encodeURIComponent(btoa(memberName))}`;
+    try {
+      const platformRaw = localStorage.getItem(PLATFORM_CONNS_KEY);
+      if (platformRaw && platformRaw !== '[]') link += `&p=${encodeURIComponent(btoa(platformRaw))}`;
+    } catch { /* ignore */ }
+    try {
+      const n8nRaw = localStorage.getItem(N8N_SETTINGS_KEY);
+      if (n8nRaw && n8nRaw !== 'null') link += `&q=${encodeURIComponent(btoa(n8nRaw))}`;
+    } catch { /* ignore */ }
+    return link;
   };
 
   const handleGenerateInvite = async () => {
@@ -372,21 +378,42 @@ const Profile = () => {
     setIsGeneratingInvite(true);
     try {
       const perms = inviteRole === 'admin' ? PERMISSION_OPTIONS.map((p) => p.key) : invitePerms;
-      const { data, error } = await supabase.from('team_invites').insert({
-        created_by: user.id,
-        email: inviteName.trim() || '',
-        role: inviteRole,
-        permissions: perms,
-      }).select().single();
-      if (error) {
-        if (error.message.includes('created_by') || error.message.includes('schema cache')) {
-          toast.error('Database needs updating — see Database Setup at the bottom of this page');
-        } else {
-          toast.error('Failed to create invite: ' + error.message);
+      const conn = getActiveConnection();
+      let token = '';
+
+      if (!conn || conn.dbType === 'supabase') {
+        // Supabase path
+        const { data, error } = await supabase.from('team_invites').insert({
+          created_by: user.id,
+          email: inviteName.trim() || '',
+          role: inviteRole,
+          permissions: perms,
+        }).select().single();
+        if (error) {
+          if (error.message.includes('created_by') || error.message.includes('schema cache')) {
+            toast.error('Database needs updating — see Database Setup at the bottom of this page');
+          } else {
+            toast.error('Failed to create invite: ' + error.message);
+          }
+          return;
         }
-        return;
+        token = data.token;
+      } else {
+        // Non-Supabase path — via API server
+        const creds = buildCreds(conn);
+        try {
+          await proxyInit(creds);
+        } catch { /* table may already exist */ }
+        const created = await proxyCreateInvite(creds, {
+          email: inviteName.trim() || '',
+          role: inviteRole,
+          permissions: perms,
+          created_by: user.id,
+        });
+        token = created.token;
       }
-      const link = buildInviteLink(data.token, inviteName.trim());
+
+      const link = buildInviteLink(token, inviteName.trim());
       setLastInviteLink(link);
       try { await navigator.clipboard.writeText(link); } catch { /* ignore */ }
       toast.success('Invite link generated & copied!');
@@ -394,37 +421,73 @@ const Profile = () => {
       setInvitePerms(['overview', 'messages']);
       setInviteName('');
       loadInvites(user.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create invite');
     } finally { setIsGeneratingInvite(false); }
   };
 
+  const getConnForInvites = () => getActiveConnection();
+
   const handleAccept = async (inviteId: string) => {
     if (!user) return;
-    const { error } = await supabase.from('team_invites').update({ status: 'accepted' }).eq('id', inviteId);
-    if (error) { toast.error('Failed to approve member'); }
-    else { toast.success('Member approved — they can now sign in'); loadInvites(user.id); }
+    const conn = getConnForInvites();
+    try {
+      if (!conn || conn.dbType === 'supabase') {
+        const { error } = await supabase.from('team_invites').update({ status: 'accepted' }).eq('id', inviteId);
+        if (error) throw new Error(error.message);
+      } else {
+        await proxyUpdateInvite(buildCreds(conn), inviteId, { status: 'accepted' });
+      }
+      toast.success('Member approved — they can now sign in');
+      loadInvites(user.id);
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to approve member'); }
   };
 
   const handleReject = async (inviteId: string) => {
     if (!user) return;
-    const { error } = await supabase.from('team_invites').update({ status: 'rejected' }).eq('id', inviteId);
-    if (error) { toast.error('Failed to reject request'); }
-    else { toast.success('Request rejected'); loadInvites(user.id); }
+    const conn = getConnForInvites();
+    try {
+      if (!conn || conn.dbType === 'supabase') {
+        const { error } = await supabase.from('team_invites').update({ status: 'rejected' }).eq('id', inviteId);
+        if (error) throw new Error(error.message);
+      } else {
+        await proxyUpdateInvite(buildCreds(conn), inviteId, { status: 'rejected' });
+      }
+      toast.success('Request rejected');
+      loadInvites(user.id);
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to reject request'); }
   };
 
   const handleRevoke = async (inviteId: string) => {
     if (!user) return;
-    const { error } = await supabase.from('team_invites').update({ status: 'revoked' }).eq('id', inviteId);
+    const conn = getConnForInvites();
     setRevokeConfirmId(null);
-    if (error) { toast.error('Failed to revoke access'); }
-    else { toast.success('Access revoked — member can no longer sign in'); loadInvites(user.id); }
+    try {
+      if (!conn || conn.dbType === 'supabase') {
+        const { error } = await supabase.from('team_invites').update({ status: 'revoked' }).eq('id', inviteId);
+        if (error) throw new Error(error.message);
+      } else {
+        await proxyUpdateInvite(buildCreds(conn), inviteId, { status: 'revoked' });
+      }
+      toast.success('Access revoked — member can no longer sign in');
+      loadInvites(user.id);
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to revoke access'); }
   };
 
   const handleDelete = async (inviteId: string) => {
     if (!user) return;
-    const { error } = await supabase.from('team_invites').delete().eq('id', inviteId);
+    const conn = getConnForInvites();
     setDeleteConfirmId(null);
-    if (error) { toast.error('Failed to delete member'); }
-    else { toast.success('Member removed'); loadInvites(user.id); }
+    try {
+      if (!conn || conn.dbType === 'supabase') {
+        const { error } = await supabase.from('team_invites').delete().eq('id', inviteId);
+        if (error) throw new Error(error.message);
+      } else {
+        await proxyDeleteInvite(buildCreds(conn), inviteId);
+      }
+      toast.success('Member removed');
+      loadInvites(user.id);
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to delete member'); }
   };
 
   const copyLink = async (token: string, memberName?: string) => {

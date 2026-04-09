@@ -10,6 +10,10 @@ import { Loader2, ShieldCheck, ShieldAlert, UserPlus, Clock } from 'lucide-react
 import { toast } from 'sonner';
 import { getConnections, setActiveConnection } from '@/lib/db-config';
 import { hashPassword, setMemberSetup } from '@/lib/memberAuth';
+import {
+  decodeNonSupabaseCreds, proxyGetInviteByToken, proxySubmitInvite,
+  storeMemberProxyCreds, type DbCreds,
+} from '@/lib/memberAuthProxy';
 
 const DB_SETTINGS_KEY = 'chat_monitor_db_settings';
 const PLATFORM_CONNS_KEY = 'chat_monitor_platform_connections';
@@ -41,6 +45,7 @@ const InviteAccept = () => {
   const [stage, setStage] = useState<'loading' | 'register' | 'submitting' | 'done' | 'error'>('loading');
   const [error, setError] = useState('');
   const [invite, setInvite] = useState<Invite | null>(null);
+  const [nonSupabaseCreds, setNonSupabaseCreds] = useState<DbCreds | null>(null);
 
   // Form state
   const [name, setName] = useState('');
@@ -68,29 +73,60 @@ const InviteAccept = () => {
 
   const validateInvite = async (tok: string) => {
     try {
-      let supabaseUrl: string | null = null;
-      let supabaseKey: string | null = null;
-      let tableName: string | null = null;
       let memberName: string | null = null;
       let platformConnsJson: string | null = null;
       let n8nSettingsJson: string | null = null;
 
-      const uParam = searchParams.get('u');
-      const kParam = searchParams.get('k');
-      const tParam = searchParams.get('t');
       const nParam = searchParams.get('n');
       const pParam = searchParams.get('p');
       const qParam = searchParams.get('q');
-      // Note: 's' (service role key) param is intentionally ignored — members use anon key only
+      if (nParam) { try { memberName = atob(decodeURIComponent(nParam)); } catch { /* ignore */ } }
+      if (pParam) { try { platformConnsJson = atob(decodeURIComponent(pParam)); } catch { /* ignore */ } }
+      if (qParam) { try { n8nSettingsJson = atob(decodeURIComponent(qParam)); } catch { /* ignore */ } }
+
+      // ── Non-Supabase: ?x= param ───────────────────────────────────────────
+      const xParam = searchParams.get('x');
+      if (xParam) {
+        const creds = decodeNonSupabaseCreds(decodeURIComponent(xParam));
+        if (!creds) {
+          setError('Invalid invite link credentials. Please ask your admin for a new link.');
+          setStage('error');
+          return;
+        }
+        setNonSupabaseCreds(creds);
+        setParams({ supabaseUrl: null, supabaseKey: null, tableName: null, memberName, platformConnsJson, n8nSettingsJson });
+
+        const invite = await proxyGetInviteByToken(creds, tok);
+        if (!invite) {
+          setError('already_used');
+          setStage('error');
+          return;
+        }
+        if (invite.status === 'revoked' || invite.status === 'rejected') {
+          setError('This invite has been revoked. Please contact your admin for a new link.');
+          setStage('error');
+          return;
+        }
+        setInvite({ id: invite.id, email: invite.email, role: invite.role, permissions: invite.permissions, token: invite.token, status: invite.status });
+        if (memberName) setName(memberName);
+        if (invite.email?.includes('@')) setEmail(invite.email);
+        setStage('register');
+        return;
+      }
+
+      // ── Supabase: ?u= ?k= params ──────────────────────────────────────────
+      let supabaseUrl: string | null = null;
+      let supabaseKey: string | null = null;
+      let tableName: string | null = null;
+      const uParam = searchParams.get('u');
+      const kParam = searchParams.get('k');
+      const tParam = searchParams.get('t');
 
       if (uParam && kParam) {
         try {
           supabaseUrl = atob(decodeURIComponent(uParam));
           supabaseKey = atob(decodeURIComponent(kParam));
           if (tParam) tableName = atob(decodeURIComponent(tParam));
-          if (nParam) memberName = atob(decodeURIComponent(nParam));
-          if (pParam) platformConnsJson = atob(decodeURIComponent(pParam));
-          if (qParam) n8nSettingsJson = atob(decodeURIComponent(qParam));
         } catch { /* ignore decode errors */ }
       }
 
@@ -122,11 +158,10 @@ const InviteAccept = () => {
       }
 
       setInvite(row);
-      // Pre-fill from invite email or memberName param
       if (memberName) setName(memberName);
       if (row.email && row.email.includes('@')) setEmail(row.email);
       setStage('register');
-    } catch {
+    } catch (err) {
       setError('Something went wrong validating the invite. Please try again.');
       setStage('error');
     }
@@ -188,23 +223,43 @@ const InviteAccept = () => {
     if (password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     if (password !== confirmPassword) { toast.error('Passwords do not match'); return; }
 
-    const { supabaseUrl, supabaseKey, tableName, platformConnsJson, n8nSettingsJson } = params;
-    if (!supabaseUrl || !supabaseKey) {
-      toast.error('Missing workspace credentials. Please ask your admin for a new invite link.');
-      return;
-    }
-
     setStage('submitting');
 
     try {
       const passwordHash = await hashPassword(password);
+      const { supabaseUrl, supabaseKey, tableName, platformConnsJson, n8nSettingsJson } = params;
+
+      // ── Non-Supabase path ────────────────────────────────────────────────
+      if (nonSupabaseCreds) {
+        const result = await proxySubmitInvite(
+          nonSupabaseCreds, token,
+          name.trim(), email.toLowerCase().trim(), passwordHash,
+        );
+        if (result === 'not_found') {
+          toast.error('This invite link is no longer valid. Please ask your admin for a new one.');
+          setStage('register');
+          return;
+        }
+        // Store proxy creds so member-login page can use them
+        storeMemberProxyCreds(nonSupabaseCreds);
+        setMemberSetup();
+        if (platformConnsJson) { try { localStorage.setItem(PLATFORM_CONNS_KEY, platformConnsJson); } catch { /* ignore */ } }
+        if (n8nSettingsJson) { try { if (!localStorage.getItem(N8N_SETTINGS_KEY)) localStorage.setItem(N8N_SETTINGS_KEY, n8nSettingsJson); } catch { /* ignore */ } }
+        setStage('done');
+        return;
+      }
+
+      // ── Supabase path ────────────────────────────────────────────────────
+      if (!supabaseUrl || !supabaseKey) {
+        toast.error('Missing workspace credentials. Please ask your admin for a new invite link.');
+        setStage('register');
+        return;
+      }
 
       const client = createClient(supabaseUrl, supabaseKey, {
         auth: { persistSession: false, autoRefreshToken: false },
       });
 
-      // Use SECURITY DEFINER RPC so anonymous users can write submitted_* fields
-      // without needing direct table write access (bypasses RLS safely).
       const { data: result, error: rpcErr } = await client.rpc('submit_invite_request', {
         p_token: token,
         p_name: name.trim(),
@@ -229,10 +284,8 @@ const InviteAccept = () => {
         return;
       }
 
-      // Store DB credentials and mark member setup so /member-login works later
       storeCredentials(supabaseUrl, supabaseKey, tableName, platformConnsJson, n8nSettingsJson);
       setMemberSetup();
-
       setStage('done');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong';

@@ -80,6 +80,11 @@ export async function getMemberSession(): Promise<MemberSession | null> {
   return getMemberSessionSync();
 }
 
+export function setMemberSession(session: MemberSession): void {
+  localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(session));
+  setMemberSetup();
+}
+
 export async function getMemberUser(): Promise<{
   id: string;
   email: string;
@@ -178,6 +183,7 @@ export async function signOutMember(): Promise<void> {
       'chat_monitor_n8n_settings',
       'meta_db_connections',
       'meta_db_active_id',
+      'meta_member_proxy_creds',
     ].forEach(k => localStorage.removeItem(k));
   } catch { /* ignore */ }
 }

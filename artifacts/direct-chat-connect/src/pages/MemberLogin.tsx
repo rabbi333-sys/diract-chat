@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { signInMember } from '@/lib/memberAuth';
+import { signInMember, setMemberSession } from '@/lib/memberAuth';
+import { getStoredMemberProxyCreds, proxyLoginMember } from '@/lib/memberAuthProxy';
 import { LogIn } from 'lucide-react';
 
 const MemberLogin = () => {
@@ -19,6 +20,26 @@ const MemberLogin = () => {
     if (!email || !password) { toast.error('Please enter your email and password'); return; }
     setLoading(true);
     try {
+      // Check if non-Supabase proxy creds are stored from invite acceptance
+      const proxyCreds = getStoredMemberProxyCreds();
+      if (proxyCreds) {
+        const member = await proxyLoginMember(proxyCreds, email.toLowerCase().trim(), password);
+        if (!member) {
+          toast.error('Invalid email or password, or your access has not been approved yet.');
+          return;
+        }
+        setMemberSession({
+          email: (member.submitted_email as string) || email.toLowerCase().trim(),
+          displayName: (member.submitted_name as string) || email.split('@')[0],
+          role: member.role as string,
+          permissions: (member.permissions as string[]) || [],
+          inviteId: member.id as string,
+        });
+        navigate('/');
+        return;
+      }
+
+      // Supabase path
       const { error } = await signInMember(email, password);
       if (error) {
         if (error.message.toLowerCase().includes('invalid')) {
