@@ -4,10 +4,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
 import {
-  AlertTriangle, CheckCircle, Clock, User, X, Bell, Webhook,
-  MessageSquare, ChevronDown, ChevronUp,
+  AlertTriangle, CheckCircle, Clock, User, Bell, Webhook,
+  MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -107,8 +106,6 @@ export const HandoffPanel = () => {
   const { data: supabaseHandoffs = [] } = useSupabaseHandoffs();
   const requests = mergeHandoffs(localHandoffs, supabaseHandoffs);
 
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [notes, setNotes] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'resolved'>('pending');
 
   // Track which session IDs we've already auto-disabled AI for (avoid repeat calls)
@@ -167,7 +164,7 @@ export const HandoffPanel = () => {
 
   const resolveMutation = useMutation({
     mutationFn: async ({ id, status, source }: { id: string; status: string; source?: string }) => {
-      const payload = { status, resolved_at: new Date().toISOString(), notes: notes || null };
+      const payload = { status, resolved_at: new Date().toISOString(), notes: null };
 
       if (source === 'local') {
         const res = await fetch(`/api/local/handoffs/${id}`, {
@@ -182,15 +179,13 @@ export const HandoffPanel = () => {
       const { data: { user } } = await supabase.auth.getUser();
       const { error } = await supabase
         .from('handoff_requests' as any)
-        .update({ status, resolved_at: new Date().toISOString(), resolved_by: user?.id, notes: notes || null })
+        .update({ status, resolved_at: new Date().toISOString(), resolved_by: user?.id, notes: null })
         .eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['local-handoffs'] });
       queryClient.invalidateQueries({ queryKey: ['supabase-handoffs'] });
-      setExpandedId(null);
-      setNotes('');
       toast.success('Request updated!');
     },
   });
@@ -291,7 +286,6 @@ export const HandoffPanel = () => {
 
         {filtered.map((req) => {
           const priorityCfg = getPriorityConfig(req.priority);
-          const isExpanded = expandedId === req.id;
           const customerName = resolveName(req);
           // sender_id serves as session_id on Meta platforms — treat either as valid
           const hasSession = !!req.session_id || !!req.sender_id;
@@ -303,8 +297,7 @@ export const HandoffPanel = () => {
                 "w-full text-left rounded-2xl border transition-all duration-200 overflow-hidden",
                 req.status === 'pending'
                   ? "border-primary/20 bg-gradient-to-r from-primary/[0.03] to-transparent"
-                  : "border-border bg-muted/20",
-                isExpanded && "ring-2 ring-primary/30 shadow-lg shadow-primary/5"
+                  : "border-border bg-muted/20"
               )}
             >
               {/* ── Card header (clickable → open conversation) ──────────── */}
@@ -407,74 +400,6 @@ export const HandoffPanel = () => {
                 </div>
               </div>{/* end card header div[role=button] */}
 
-              {/* ── Expand toggle for notes/resolve (stopPropagation) ──── */}
-              <div
-                className="px-4 pb-1 flex items-center justify-between border-t border-border/20"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground py-2 transition-colors"
-                  onClick={() => { setExpandedId(isExpanded ? null : req.id); setNotes(req.notes || ''); }}
-                >
-                  {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                  {isExpanded ? 'Hide' : 'Notes & Actions'}
-                </button>
-                {req.status !== 'pending' && req.notes && (
-                  <span className="text-[10px] text-muted-foreground/60 truncate max-w-[160px]">
-                    {req.notes}
-                  </span>
-                )}
-              </div>
-
-              {/* ── Expanded notes/resolve section ──────────────────────── */}
-              {isExpanded && (
-                <div className="px-4 pb-4 pt-0 space-y-3 animate-in slide-in-from-top-2 duration-200" onClick={e => e.stopPropagation()}>
-                  <div className="border-t border-border/50 pt-3 ml-[52px]">
-                    {req.session_id && (
-                      <p className="text-xs text-muted-foreground mb-2">
-                        <span className="font-semibold text-foreground/80">Session:</span> {req.session_id}
-                      </p>
-                    )}
-                    {req.agent_data && Object.keys(req.agent_data).length > 0 && (
-                      <pre className="text-[10px] bg-background p-3 rounded-xl border border-border overflow-x-auto mb-3">
-                        {JSON.stringify(req.agent_data, null, 2)}
-                      </pre>
-                    )}
-                    {req.status === 'pending' && (
-                      <>
-                        <Textarea
-                          placeholder="Add notes before resolving..."
-                          value={notes}
-                          onChange={e => setNotes(e.target.value)}
-                          className="text-xs min-h-[60px] rounded-xl border-border/50 focus:border-primary/50 resize-none"
-                        />
-                        <div className="flex gap-2 mt-2">
-                          <Button
-                            size="sm"
-                            className="flex-1 text-xs rounded-xl h-9 shadow-sm shadow-primary/10"
-                            onClick={() => resolveMutation.mutate({ id: req.id, status: 'resolved', source: req._source })}
-                            disabled={resolveMutation.isPending}
-                          >
-                            <CheckCircle size={14} className="mr-1.5" /> Resolve
-                          </Button>
-                          <Button
-                            size="sm" variant="outline" className="text-xs rounded-xl h-9"
-                            onClick={() => resolveMutation.mutate({ id: req.id, status: 'dismissed', source: req._source })}
-                            disabled={resolveMutation.isPending}
-                          >
-                            <X size={14} className="mr-1.5" /> Dismiss
-                          </Button>
-                        </div>
-                      </>
-                    )}
-                    {req.status !== 'pending' && req.notes && (
-                      <p className="text-xs text-muted-foreground">
-                        <span className="font-semibold">Notes:</span> {req.notes}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           );
         })}
