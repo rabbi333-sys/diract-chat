@@ -713,7 +713,8 @@ const Profile = () => {
               ) : (
                 <div className="divide-y divide-border/40">
                   {invites.map((invite) => {
-                    const hasSubmission = invite.status === 'pending' && !!invite.submitted_email;
+                    const hasSubmission = !!invite.submitted_email;
+                    const isPending = invite.status === 'pending';
                     const label = invite.submitted_name || invite.submitted_email || invite.email || `Link invite · ${invite.role}`;
                     const avatarLabel = invite.submitted_name
                       ? getInitials(invite.submitted_name)
@@ -742,13 +743,18 @@ const Profile = () => {
                               </span>
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
-                              <StatusPill status={hasSubmission ? 'pending' : invite.status} />
-                              {hasSubmission && (
+                              <StatusPill status={invite.status} />
+                              {isPending && hasSubmission && (
                                 <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
-                                  Awaiting approval
+                                  Credentials submitted — awaiting approval
                                 </span>
                               )}
-                              {!hasSubmission && invite.status !== 'revoked' && invite.status !== 'rejected' && invite.permissions?.length > 0 && (
+                              {isPending && !hasSubmission && (
+                                <span className="text-[10px] text-muted-foreground/60">
+                                  Waiting for member to fill form
+                                </span>
+                              )}
+                              {!isPending && invite.status !== 'revoked' && invite.status !== 'rejected' && invite.permissions?.length > 0 && (
                                 <span className="text-[10px] text-muted-foreground/50 truncate">
                                   {invite.permissions.slice(0, 3).join(', ')}{invite.permissions.length > 3 ? ` +${invite.permissions.length - 3}` : ''}
                                 </span>
@@ -762,8 +768,8 @@ const Profile = () => {
                               <Clock size={9} /> {timeAgo(invite.created_at)}
                             </span>
 
-                            {/* Pending without submission: copy link + revoke */}
-                            {invite.status === 'pending' && !hasSubmission && (
+                            {/* ALL pending: copy link button */}
+                            {isPending && (
                               <button
                                 onClick={() => copyLink(invite.token, invite.email || undefined)}
                                 className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -774,33 +780,8 @@ const Profile = () => {
                               </button>
                             )}
 
-                            {invite.status === 'pending' && !hasSubmission && (
-                              revokeConfirmId === invite.id ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => handleRevoke(invite.id)}
-                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors"
-                                    data-testid={`button-revoke-confirm-${invite.id}`}
-                                  >Revoke</button>
-                                  <button
-                                    onClick={() => setRevokeConfirmId(null)}
-                                    className="px-2 py-1 rounded-lg text-[10px] font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                  >Cancel</button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => setRevokeConfirmId(invite.id)}
-                                  className="p-1.5 rounded-lg hover:bg-amber-500/10 text-muted-foreground hover:text-amber-600 transition-colors"
-                                  title="Revoke"
-                                  data-testid={`button-revoke-${invite.id}`}
-                                >
-                                  <X size={12} />
-                                </button>
-                              )
-                            )}
-
-                            {/* Pending with submission: Accept ✓ / Reject ✗ */}
-                            {hasSubmission && (
+                            {/* ALL pending: Accept ✓ / Reject ✗ */}
+                            {isPending && (
                               <div className="flex items-center gap-1">
                                 <button
                                   onClick={() => handleAccept(invite.id)}
@@ -821,8 +802,34 @@ const Profile = () => {
                               </div>
                             )}
 
-                            {/* Accepted/revoked/rejected: delete */}
-                            {(invite.status === 'revoked' || invite.status === 'accepted' || invite.status === 'rejected') && (
+                            {/* Accepted: revoke */}
+                            {invite.status === 'accepted' && (
+                              revokeConfirmId === invite.id ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => handleRevoke(invite.id)}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                                    data-testid={`button-revoke-confirm-${invite.id}`}
+                                  >Revoke</button>
+                                  <button
+                                    onClick={() => setRevokeConfirmId(null)}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                  >Cancel</button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setRevokeConfirmId(invite.id)}
+                                  className="p-1.5 rounded-lg hover:bg-amber-500/10 text-muted-foreground hover:text-amber-600 transition-colors"
+                                  title="Revoke access"
+                                  data-testid={`button-revoke-${invite.id}`}
+                                >
+                                  <X size={12} />
+                                </button>
+                              )
+                            )}
+
+                            {/* Revoked/rejected: delete */}
+                            {(invite.status === 'revoked' || invite.status === 'rejected') && (
                               deleteConfirmId === invite.id ? (
                                 <div className="flex items-center gap-1">
                                   <button
@@ -849,16 +856,20 @@ const Profile = () => {
                           </div>
                         </div>
 
-                        {/* Submission detail row for pending+submitted */}
-                        {hasSubmission && (
+                        {/* Submission detail row — shows email/name when member has submitted */}
+                        {hasSubmission && isPending && (
                           <div className="px-5 pb-3 -mt-1 ml-11">
-                            <div className="rounded-lg bg-amber-500/6 border border-amber-500/15 px-3 py-2 text-[11px] text-muted-foreground space-y-0.5">
+                            <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/15 px-3 py-2 text-[11px] text-muted-foreground space-y-0.5">
+                              {invite.submitted_name && (
+                                <p><span className="font-semibold text-foreground">Name:</span> {invite.submitted_name}</p>
+                              )}
                               {invite.submitted_email && (
                                 <p><span className="font-semibold text-foreground">Email:</span> {invite.submitted_email}</p>
                               )}
                               {invite.submitted_at && (
                                 <p><span className="font-semibold text-foreground">Submitted:</span> {timeAgo(invite.submitted_at)}</p>
                               )}
+                              <p className="text-emerald-600 dark:text-emerald-400 font-semibold pt-0.5">✓ Click Accept above to let them sign in</p>
                             </div>
                           </div>
                         )}
