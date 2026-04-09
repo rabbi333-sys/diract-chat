@@ -161,7 +161,7 @@ export const FailedPanel = () => {
       </div>
 
       {/* List */}
-      <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide pr-1 space-y-3">
           {filtered.length === 0 && (
             <div className="text-center py-16 text-muted-foreground">
               <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-4">
