@@ -406,45 +406,63 @@ const Index = () => {
         {/* Orders Page */}
         {activeNav === 'Orders' && canView('Orders') && (
           <main className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex flex-col h-full p-4 md:p-6">
-              {/* Header with tab toggle */}
-              <div className="flex items-center justify-end mb-2.5 flex-shrink-0">
-                <div className="flex items-center bg-muted/60 rounded-xl p-1 border border-border/50 gap-0.5">
+            {/* ── Sticky top bar ── */}
+            <div className="flex-shrink-0 border-b border-border/60 bg-background/95 backdrop-blur-sm sticky top-0 z-20 px-4 md:px-6 py-0">
+              <div className="flex items-center justify-between h-14">
+                {/* Page title */}
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center">
+                    {ordersView === 'list'
+                      ? <List size={16} className="text-primary" />
+                      : <BarChart3 size={16} className="text-primary" />}
+                  </div>
+                  <div>
+                    <h1 className="text-[15px] font-bold text-foreground leading-tight">
+                      {ordersView === 'list' ? 'Orders' : 'Analytics'}
+                    </h1>
+                    <p className="text-[10px] text-muted-foreground leading-tight">
+                      {ordersView === 'list' ? 'Manage all your orders' : 'Performance insights'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Tab toggle — prominent pill */}
+                <div className="flex items-center bg-muted/70 rounded-xl p-1 border border-border/60 gap-0.5 shadow-sm">
                   <button
                     onClick={() => setOrdersView('list')}
                     className={cn(
-                      "flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-all",
+                      "flex items-center gap-2 text-[13px] font-semibold px-4 py-2 rounded-lg transition-all duration-200",
                       ordersView === 'list'
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
+                        ? "bg-primary text-white shadow-md"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
                     )}
                   >
-                    <List size={13} /> Orders
+                    <List size={14} /> Orders
                   </button>
                   <button
                     onClick={() => setOrdersView('analytics')}
                     className={cn(
-                      "flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-all",
+                      "flex items-center gap-2 text-[13px] font-semibold px-4 py-2 rounded-lg transition-all duration-200",
                       ordersView === 'analytics'
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
+                        ? "bg-primary text-white shadow-md"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
                     )}
                   >
-                    <BarChart3 size={13} /> Analytics
+                    <BarChart3 size={14} /> Analytics
                   </button>
                 </div>
               </div>
+            </div>
 
-              {/* List view */}
+            {/* ── Content ── */}
+            <div className="flex-1 overflow-hidden flex flex-col">
               {ordersView === 'list' && (
-                <div className="flex-1 overflow-hidden">
+                <div className="flex-1 overflow-hidden p-4 md:p-6 pt-3">
                   <OrdersPanel />
                 </div>
               )}
-
-              {/* Analytics view */}
               {ordersView === 'analytics' && (
-                <div className="flex-1 overflow-auto scrollbar-hide">
+                <div className="flex-1 overflow-auto scrollbar-hide p-4 md:p-6 pt-3">
                   <OrderAnalytics />
                 </div>
               )}

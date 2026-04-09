@@ -341,17 +341,19 @@ const OrderAnalytics = () => {
   }
 
   return (
-    <div ref={pageRef} className="space-y-5">
+    <div ref={pageRef} className="space-y-4">
 
-      {/* ── Controls bar ────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        {/* View mode filter strip */}
-        <div className="flex items-center bg-muted/50 rounded-xl p-1 gap-0.5">
+      {/* ── Controls bar ─────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3 flex-wrap bg-muted/30 border border-border/50 rounded-2xl px-4 py-2.5">
+        {/* Period toggle */}
+        <div className="flex items-center bg-background/70 rounded-xl p-1 gap-0.5 border border-border/40 shadow-sm">
           {(['daily', 'weekly', 'monthly'] as ViewMode[]).map(m => (
             <button key={m} onClick={() => setViewMode(m)}
               className={cn(
-                'text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-all',
-                viewMode === m ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                'text-[12px] font-semibold px-4 py-1.5 rounded-lg transition-all duration-200',
+                viewMode === m
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
               )}
             >
               {m === 'daily' ? 'Daily' : m === 'weekly' ? 'Weekly' : 'Monthly'}
@@ -360,22 +362,22 @@ const OrderAnalytics = () => {
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          <button onClick={() => refetch()} disabled={isFetching}
+            className="flex items-center gap-1.5 text-[12px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-background/70 border border-border/40 transition-all hover:shadow-sm"
+          >
+            <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} />
+            Refresh
+          </button>
           <button
             onClick={() => generateAnalyticsPDF(summary, viewMode, chartData, filteredOrders, setIsDownloading)}
             disabled={isDownloading}
-            className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-muted/50 transition-colors disabled:opacity-60"
+            className="flex items-center gap-1.5 text-[12px] font-semibold text-white bg-primary hover:bg-primary/90 px-4 py-1.5 rounded-xl transition-all shadow-sm disabled:opacity-60"
           >
             {isDownloading
-              ? <><Loader2 size={12} className="animate-spin" /> Generating…</>
-              : <><Download size={12} /> Download PDF</>
+              ? <><Loader2 size={13} className="animate-spin" /> Generating…</>
+              : <><Download size={13} /> Export PDF</>
             }
-          </button>
-          <button onClick={() => refetch()} disabled={isFetching}
-            className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-muted/50 transition-colors"
-          >
-            <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
-            Refresh
           </button>
         </div>
       </div>
