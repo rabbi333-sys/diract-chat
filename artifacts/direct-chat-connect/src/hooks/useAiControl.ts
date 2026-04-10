@@ -54,7 +54,7 @@ export function useGlobalAiControl() {
     },
     onSuccess: (_, turnOn) => {
       queryClient.invalidateQueries({ queryKey: ['ai-control'] });
-      toast.success(!turnOn ? 'All AI active — Start ✓' : 'All AI stopped — Shutdown ✓');
+      toast.success(turnOn ? '✓ AI stopped' : '✓ AI is now active');
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['ai-control-global'] });
