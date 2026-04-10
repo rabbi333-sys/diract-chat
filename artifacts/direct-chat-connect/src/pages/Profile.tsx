@@ -144,9 +144,9 @@ CREATE POLICY "Admins can manage invites" ON public.team_invites
 
 -- Step 3: RPC for reading a pending invite by token (admin-level, SECURITY DEFINER)
 CREATE OR REPLACE FUNCTION public.get_invite_by_token(p_token uuid)
-RETURNS TABLE (id uuid, email text, role text, permissions text[], status text, created_by uuid, invited_by uuid)
+RETURNS TABLE (id uuid, email text, role text, permissions text[], status text, created_by uuid)
 LANGUAGE sql SECURITY DEFINER AS $$
-  SELECT id, email, role, permissions, status, created_by, invited_by
+  SELECT id, email, role, permissions, status, created_by
   FROM public.team_invites WHERE token = p_token AND status = 'pending';
 $$;
 
