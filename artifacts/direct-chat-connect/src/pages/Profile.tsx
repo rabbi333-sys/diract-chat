@@ -7,8 +7,9 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeft, LogOut, Pencil, Check, X, UserPlus, Copy, Trash2,
-  ChevronDown, ShieldCheck, Eye, Loader2, Link2, Camera, AlertTriangle,
+  ChevronDown, ChevronUp, ShieldCheck, Eye, Loader2, Link2, Camera, AlertTriangle,
   ClipboardCopy, Users, Database, Plus, Zap, ChevronRight, Clock,
+  BookOpen, MessageSquare, ShoppingCart, HandIcon, Bot, KeyRound, Contact,
 } from 'lucide-react';
 import {
   getConnections, getActiveConnection, setActiveConnection,
@@ -287,6 +288,240 @@ const SqlCopyBlock = ({ sql }: { sql: string }) => {
     </div>
   );
 };
+
+/* ── SQL Setup Guide (all 8 tables) ─────────────────────────────────────── */
+
+const SETUP_GUIDES = [
+  {
+    id: 'messages', icon: <MessageSquare size={15} />, title: 'Chat / Messages', color: 'blue',
+    description: 'Stores all chat messages from n8n AI conversations. This is the main table your n8n workflow writes to.',
+    sql: `CREATE TABLE IF NOT EXISTS sessions (
+  id            BIGSERIAL PRIMARY KEY,
+  session_id    TEXT        NOT NULL,
+  message       JSONB       NOT NULL,
+  recipient     TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_recipient  ON sessions(recipient);
+CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at DESC);
+ALTER TABLE sessions REPLICA IDENTITY FULL;`,
+  },
+  {
+    id: 'orders', icon: <ShoppingCart size={15} />, title: 'Orders', color: 'emerald',
+    description: 'Stores customer orders created via AI chat. Supports multiple courier providers.',
+    sql: `CREATE TABLE IF NOT EXISTS orders (
+  id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id          TEXT,
+  recipient_id        TEXT,
+  customer_name       TEXT,
+  customer_phone      TEXT,
+  customer_address    TEXT,
+  product_name        TEXT        NOT NULL,
+  quantity            INT         NOT NULL DEFAULT 1,
+  unit_price          NUMERIC,
+  total_price         NUMERIC,
+  payment_status      TEXT                 DEFAULT 'unpaid',
+  status              TEXT        NOT NULL DEFAULT 'pending',
+  notes               TEXT,
+  order_data          JSONB,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_orders_session_id ON orders(session_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status     ON orders(status);
+ALTER TABLE orders REPLICA IDENTITY FULL;`,
+  },
+  {
+    id: 'handoff', icon: <HandIcon size={15} />, title: 'Handoff Requests', color: 'orange',
+    description: 'When the AI cannot handle a conversation, it creates a handoff request for a human agent.',
+    sql: `CREATE TABLE IF NOT EXISTS handoff_requests (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id  TEXT,
+  recipient   TEXT,
+  reason      TEXT        NOT NULL DEFAULT 'Human requested',
+  message     TEXT,
+  priority    TEXT        NOT NULL DEFAULT 'normal',
+  status      TEXT        NOT NULL DEFAULT 'pending',
+  agent_data  JSONB,
+  resolved_by TEXT,
+  resolved_at TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_handoff_status     ON handoff_requests(status);
+CREATE INDEX IF NOT EXISTS idx_handoff_session_id ON handoff_requests(session_id);
+ALTER TABLE handoff_requests REPLICA IDENTITY FULL;`,
+  },
+  {
+    id: 'ai_control', icon: <Bot size={15} />, title: 'AI Control', color: 'violet',
+    description: 'Controls whether the AI is enabled or disabled per chat session.',
+    sql: `CREATE TABLE IF NOT EXISTS ai_control (
+  session_id  TEXT        PRIMARY KEY,
+  ai_enabled  BOOLEAN     NOT NULL DEFAULT TRUE,
+  user_id     TEXT,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE ai_control REPLICA IDENTITY FULL;`,
+  },
+  {
+    id: 'failed', icon: <AlertTriangle size={15} />, title: 'Failed Automations', color: 'red',
+    description: 'Logs errors from automation workflows so you can investigate and resolve them.',
+    sql: `CREATE TABLE IF NOT EXISTS failed_automations (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id     TEXT,
+  workflow_name  TEXT,
+  error_message  TEXT        NOT NULL,
+  error_details  JSONB,
+  severity       TEXT        DEFAULT 'error',
+  resolved       BOOLEAN     DEFAULT FALSE,
+  resolved_at    TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_failed_resolved   ON failed_automations(resolved);
+CREATE INDEX IF NOT EXISTS idx_failed_created_at ON failed_automations(created_at DESC);
+ALTER TABLE failed_automations REPLICA IDENTITY FULL;`,
+  },
+  {
+    id: 'team', icon: <Users size={15} />, title: 'Team Management', color: 'indigo',
+    description: 'Manage your team members and control their access with roles and permissions.',
+    sql: `CREATE TABLE IF NOT EXISTS app_owner (
+  user_id    TEXT        PRIMARY KEY,
+  claimed_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS team_invites (
+  id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by       TEXT         NOT NULL,
+  email            TEXT         NOT NULL,
+  role             TEXT         NOT NULL DEFAULT 'agent',
+  permissions      TEXT[]       NOT NULL DEFAULT '{}',
+  token            TEXT         NOT NULL DEFAULT gen_random_uuid()::text,
+  status           TEXT         NOT NULL DEFAULT 'pending',
+  accepted_user_id TEXT,
+  created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_team_invites_token ON team_invites(token);`,
+  },
+  {
+    id: 'api_keys', icon: <KeyRound size={15} />, title: 'API Keys', color: 'cyan',
+    description: 'Stores API keys for webhook authentication and external integrations.',
+    sql: `CREATE TABLE IF NOT EXISTS api_keys (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    TEXT        NOT NULL,
+  label      TEXT,
+  api_key    TEXT        NOT NULL DEFAULT concat('sk-', gen_random_uuid()::text),
+  is_active  BOOLEAN     DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(api_key);`,
+  },
+  {
+    id: 'contacts', icon: <Contact size={15} />, title: 'Contacts / Recipients', color: 'pink',
+    description: 'Maps recipient IDs (phone numbers / user IDs) to human-readable names.',
+    sql: `CREATE TABLE IF NOT EXISTS recipient_names (
+  recipient_id TEXT        PRIMARY KEY,
+  name         TEXT        NOT NULL,
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);`,
+  },
+];
+
+const GUIDE_COLORS: Record<string, { badge: string; dot: string; ring: string; icon: string }> = {
+  blue:   { badge: 'bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300',     dot: 'bg-blue-500',    ring: 'ring-blue-200 dark:ring-blue-800',    icon: 'text-blue-500' },
+  emerald:{ badge: 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500', ring: 'ring-emerald-200 dark:ring-emerald-800', icon: 'text-emerald-500' },
+  orange: { badge: 'bg-orange-100 dark:bg-orange-950/50 text-orange-700 dark:text-orange-300', dot: 'bg-orange-500',  ring: 'ring-orange-200 dark:ring-orange-800',  icon: 'text-orange-500' },
+  violet: { badge: 'bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300', dot: 'bg-violet-500',  ring: 'ring-violet-200 dark:ring-violet-800',  icon: 'text-violet-500' },
+  red:    { badge: 'bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300',           dot: 'bg-red-500',     ring: 'ring-red-200 dark:ring-red-800',      icon: 'text-red-500' },
+  indigo: { badge: 'bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300', dot: 'bg-indigo-500',  ring: 'ring-indigo-200 dark:ring-indigo-800',  icon: 'text-indigo-500' },
+  cyan:   { badge: 'bg-cyan-100 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300',       dot: 'bg-cyan-500',    ring: 'ring-cyan-200 dark:ring-cyan-800',    icon: 'text-cyan-500' },
+  pink:   { badge: 'bg-pink-100 dark:bg-pink-950/50 text-pink-700 dark:text-pink-300',       dot: 'bg-pink-500',    ring: 'ring-pink-200 dark:ring-pink-800',    icon: 'text-pink-500' },
+};
+
+function SqlCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={async () => { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+      className={cn('flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all',
+        copied ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400' : 'bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground')}
+    >
+      {copied ? <Check size={11} /> : <Copy size={11} />}
+      {copied ? 'Copied!' : 'Copy SQL'}
+    </button>
+  );
+}
+
+function SqlSetupGuideCard() {
+  const [openId, setOpenId] = useState<string | null>('messages');
+  const [allOpen, setAllOpen] = useState(false);
+
+  return (
+    <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-border/40 bg-gradient-to-r from-slate-50/80 to-zinc-50/40 dark:from-zinc-800/40 dark:to-zinc-900/20 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center">
+            <BookOpen size={13} className="text-white" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-foreground">SQL Setup Guide</h3>
+            <p className="text-[10px] text-muted-foreground">Run these scripts in your Supabase SQL Editor</p>
+          </div>
+        </div>
+        <button onClick={() => { if (allOpen) { setAllOpen(false); setOpenId(null); } else { setAllOpen(true); } }}
+          className="text-[11px] text-blue-500 hover:text-blue-600 font-semibold transition-colors">
+          {allOpen ? 'Collapse all' : 'Expand all'}
+        </button>
+      </div>
+
+      {/* Info banner */}
+      <div className="mx-4 mt-4 mb-1 px-3.5 py-3 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40 flex items-start gap-2.5">
+        <Zap size={13} className="text-blue-500 flex-shrink-0 mt-0.5" />
+        <p className="text-[11px] text-blue-700 dark:text-blue-300 leading-relaxed">
+          <strong>One database, all features.</strong> Connect your Supabase project once and all tabs — Messages, Orders, Handoffs, Team, AI Control — will use the same database automatically.
+        </p>
+      </div>
+
+      {/* Accordion items */}
+      <div className="p-4 space-y-2">
+        {SETUP_GUIDES.map((guide) => {
+          const isOpen = allOpen || openId === guide.id;
+          const colors = GUIDE_COLORS[guide.color];
+          return (
+            <div key={guide.id} className={cn('rounded-xl border overflow-hidden transition-all', isOpen ? `ring-1 ${colors.ring} border-transparent` : 'border-border/40')}>
+              <button
+                className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-muted/30 transition-colors"
+                onClick={() => { if (allOpen) { setAllOpen(false); setOpenId(openId === guide.id ? null : guide.id); } else { setOpenId(openId === guide.id ? null : guide.id); } }}
+              >
+                <div className={cn('w-2 h-2 rounded-full flex-shrink-0', colors.dot)} />
+                <span className={cn('flex-shrink-0', colors.icon)}>{guide.icon}</span>
+                <span className="flex-1 text-sm font-semibold text-foreground">{guide.title}</span>
+                <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full hidden sm:inline-flex', colors.badge)}>1 table</span>
+                {isOpen ? <ChevronUp size={13} className="text-muted-foreground flex-shrink-0" /> : <ChevronDown size={13} className="text-muted-foreground flex-shrink-0" />}
+              </button>
+              {isOpen && (
+                <div className="px-4 pb-4">
+                  <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed">{guide.description}</p>
+                  <div className="relative rounded-xl overflow-hidden border border-border/40">
+                    <div className="flex items-center justify-between px-3 py-2 bg-zinc-900/95 dark:bg-zinc-950 border-b border-white/10">
+                      <span className="text-[10px] text-zinc-400 font-mono font-semibold">SQL</span>
+                      <SqlCopyButton text={guide.sql} />
+                    </div>
+                    <pre className="bg-zinc-900/95 dark:bg-zinc-950 text-zinc-200 text-[10.5px] font-mono leading-relaxed p-4 overflow-x-auto whitespace-pre-wrap break-words">{guide.sql}</pre>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mt-2">
+                    Run in <span className="font-semibold text-muted-foreground">Supabase → SQL Editor → New Query</span>
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /* ── DbSetupCard ──────────────────────────────────────────────────────────── */
 const DbSetupCard = ({
@@ -1563,6 +1798,9 @@ const Profile = () => {
             activeDbId={activeDbId}
           />
         )}
+
+        {/* ── SQL Setup Guide ── */}
+        {isAdmin && <SqlSetupGuideCard />}
 
       </div>
     </div>
