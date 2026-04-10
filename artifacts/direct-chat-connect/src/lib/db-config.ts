@@ -117,7 +117,7 @@ const DB_CHANGE_EVENT = 'meta_db_change';
 
 /** Push the active connection to the API server so n8n can call /api/ai-status
  *  with just session_id. Fires silently in the background. */
-function syncActiveConnectionToServer(): void {
+export function syncActiveConnectionToServer(): void {
   const conn = getActiveConnection();
   if (!conn) return;
   const body: Record<string, string | undefined> = {
