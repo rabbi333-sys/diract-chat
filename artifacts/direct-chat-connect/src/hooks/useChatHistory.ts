@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { format, subDays, subMonths, startOfWeek, endOfWeek } from 'date-fns';
 import {
@@ -9,8 +9,22 @@ import {
   normalizeRow,
   NormalizedMessage,
 } from '@/lib/externalDb';
-import { getActiveConnection } from '@/lib/db-config';
+import { getActiveConnection, onDbChange } from '@/lib/db-config';
 import type { MainDbConnection } from '@/lib/db-config';
+
+// Returns a key string that changes every time the active DB connection changes.
+// Including this in a query key causes React Query to refetch automatically.
+function getConnectionKey(): string {
+  const conn = getActiveConnection();
+  if (!conn) return 'none';
+  return `${conn.id}:${conn.url || conn.host || conn.connectionString || ''}`;
+}
+
+export function useDbConnectionKey(): string {
+  const [key, setKey] = useState(getConnectionKey);
+  useEffect(() => onDbChange(() => setKey(getConnectionKey())), []);
+  return key;
+}
 
 export interface ChatMessage {
   id: string | number;
@@ -200,8 +214,9 @@ async function fetchAllMessages(): Promise<NormalizedMessage[]> {
 
 // ─── useAnalytics ─────────────────────────────────────────────────────────────
 export const useAnalytics = () => {
+  const dbKey = useDbConnectionKey();
   return useQuery({
-    queryKey: ['analytics'],
+    queryKey: ['analytics', dbKey],
     staleTime: 60_000,
     retry: 1,
     queryFn: async (): Promise<AnalyticsData> => {
@@ -256,8 +271,9 @@ export const useAnalytics = () => {
 
 // ─── useChartData ─────────────────────────────────────────────────────────────
 export const useChartData = (timeRange: 'daily' | 'weekly' | 'monthly') => {
+  const dbKey = useDbConnectionKey();
   return useQuery({
-    queryKey: ['chart-data', timeRange],
+    queryKey: ['chart-data', timeRange, dbKey],
     staleTime: 60_000,
     retry: 1,
     queryFn: async (): Promise<ChartData[]> => {
@@ -355,8 +371,9 @@ export async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
 
 // ─── useChatHistory ───────────────────────────────────────────────────────────
 export const useChatHistory = (sessionId?: string) => {
+  const dbKey = useDbConnectionKey();
   return useQuery({
-    queryKey: ['chat-history', sessionId],
+    queryKey: ['chat-history', sessionId, dbKey],
     enabled: !!sessionId,
     retry: 1,
     staleTime: 0,
@@ -369,8 +386,9 @@ export const useChatHistory = (sessionId?: string) => {
 
 // ─── useSessions ──────────────────────────────────────────────────────────────
 export const useSessions = (filterDate?: Date | null) => {
+  const dbKey = useDbConnectionKey();
   return useQuery({
-    queryKey: ['sessions', filterDate ? format(filterDate, 'yyyy-MM-dd') : 'all'],
+    queryKey: ['sessions', filterDate ? format(filterDate, 'yyyy-MM-dd') : 'all', dbKey],
     staleTime: 5_000,
     refetchInterval: 10_000,
     retry: 1,
@@ -468,8 +486,9 @@ export function saveLocalName(id: string, name: string) {
 
 // ─── useRecipientNames ────────────────────────────────────────────────────────
 export const useRecipientNames = () => {
+  const dbKey = useDbConnectionKey();
   return useQuery({
-    queryKey: ['recipient-names'],
+    queryKey: ['recipient-names', dbKey],
     staleTime: 15_000,
     gcTime: 30 * 60_000,
     queryFn: async () => {

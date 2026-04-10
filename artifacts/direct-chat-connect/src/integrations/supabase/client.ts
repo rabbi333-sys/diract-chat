@@ -39,6 +39,11 @@ function createAuthOptions() {
 
 let _client: SupabaseClient<Database> | null = null;
 
+// Auto-reset whenever the user saves/changes/deletes a DB connection
+if (typeof window !== 'undefined') {
+  window.addEventListener('meta_db_change', () => { _client = null; });
+}
+
 function getClient(): SupabaseClient<Database> {
   if (_client) return _client;
   const config = getActiveConfig();
