@@ -9,6 +9,8 @@ import {
   normalizeRow,
   NormalizedMessage,
 } from '@/lib/externalDb';
+import { getActiveConnection } from '@/lib/db-config';
+import type { MainDbConnection } from '@/lib/db-config';
 
 export interface ChatMessage {
   id: string | number;
@@ -101,22 +103,95 @@ function computeChartData(msgs: NormalizedMessage[], timeRange: 'daily' | 'weekl
   });
 }
 
+// ─── API Server helpers (for non-Supabase databases) ─────────────────────────
+
+type SessionsCreds = {
+  dbType: string;
+  host?: string;
+  port?: string;
+  dbUsername?: string;
+  dbPassword?: string;
+  dbName?: string;
+  connectionString?: string;
+  supabaseUrl?: string;
+  tableName?: string;
+};
+
+function buildSessionsCreds(conn: MainDbConnection): SessionsCreds {
+  return {
+    dbType: conn.dbType,
+    host: conn.host,
+    port: conn.port,
+    dbUsername: conn.dbUsername,
+    dbPassword: conn.dbPassword,
+    dbName: conn.dbName,
+    connectionString: conn.connectionString,
+  };
+}
+
+async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json() as Record<string, unknown>;
+  if (!res.ok) {
+    const errMsg = (data.error as string) || `Request failed: ${res.status}`;
+    if (errMsg === 'TABLE_NOT_FOUND') throw new Error('TABLE_NOT_FOUND');
+    throw new Error(errMsg);
+  }
+  return data as T;
+}
+
+// ─── Active connection reader (reads new db-config format first, falls back to legacy) ────
+
+function getActiveConn(): { legacy: ReturnType<typeof getStoredConnection>; main: MainDbConnection | null } {
+  return {
+    legacy: getStoredConnection(),
+    main: getActiveConnection(),
+  };
+}
+
+// ─── Determine if we should use the API server for sessions ───────────────────
+
+function shouldUseApiServer(conn: MainDbConnection | null): boolean {
+  if (!conn) return false;
+  if (conn.dbType === 'supabase') return false; // Supabase handled browser-side
+  return ['postgresql', 'mysql', 'mongodb', 'redis'].includes(conn.dbType);
+}
+
 // ─── Fetch all messages from external DB (used by analytics + chart) ──────────
 async function fetchAllMessages(): Promise<NormalizedMessage[]> {
-  const conn = getStoredConnection();
+  const { legacy, main } = getActiveConn();
 
-  if (conn && conn.db_type === 'supabase' && conn.supabase_url && conn.service_role_key) {
-    return queryExternalSupabase(conn, 'sessions'); // fetches all rows
+  // 1. New connection system — non-Supabase: use API server
+  if (main && shouldUseApiServer(main)) {
+    const creds = buildSessionsCreds(main);
+    const { analytics } = await apiPost<{ analytics: { total_sessions: number; total_messages: number; human_messages: number; ai_messages: number } }>('/api/sessions/analytics', { creds });
+    // analytics endpoint doesn't return raw messages — return empty (used only for chart/analytics, we handle those separately)
+    void analytics;
+    return [];
   }
 
-  // Fallback: edge function
+  // 2. Supabase via new connection (has serviceRoleKey)
+  if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
+    const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+    return queryExternalSupabase(fakeConn, 'sessions');
+  }
+
+  // 3. Legacy stored connection — Supabase
+  if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
+    return queryExternalSupabase(legacy, 'sessions');
+  }
+
+  // 4. Edge function fallback
   try {
     const { data, error } = await supabase.functions.invoke('get-chat-history', {
       method: 'POST',
-      body: { type: 'sessions', connection: conn ? { ...conn, is_active: true } : null },
+      body: { type: 'sessions', connection: legacy ? { ...legacy, is_active: true } : null },
     });
     if (error || !data?.sessions) return [];
-    // Edge function returns sessions not raw messages — can't compute chart data from it
     return [];
   } catch {
     return [];
@@ -130,23 +205,45 @@ export const useAnalytics = () => {
     staleTime: 60_000,
     retry: 1,
     queryFn: async (): Promise<AnalyticsData> => {
-      const conn = getStoredConnection();
+      const { legacy, main } = getActiveConn();
 
-      // Direct Supabase connection — compute from raw rows
-      if (conn && conn.db_type === 'supabase' && conn.supabase_url && conn.service_role_key) {
+      // Non-Supabase via API server
+      if (main && shouldUseApiServer(main)) {
         try {
-          const msgs = await queryExternalSupabase(conn, 'sessions');
+          const creds = buildSessionsCreds(main);
+          const data = await apiPost<AnalyticsData>('/api/sessions/analytics', { creds });
+          return data;
+        } catch {
+          return { total_sessions: 0, total_messages: 0, human_messages: 0, ai_messages: 0 };
+        }
+      }
+
+      // Supabase via new connection
+      if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
+        try {
+          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+          const msgs = await queryExternalSupabase(fakeConn, 'sessions');
           return computeAnalytics(msgs);
         } catch {
           return { total_sessions: 0, total_messages: 0, human_messages: 0, ai_messages: 0 };
         }
       }
 
-      // Edge function fallback for non-Supabase
+      // Legacy Supabase connection
+      if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
+        try {
+          const msgs = await queryExternalSupabase(legacy, 'sessions');
+          return computeAnalytics(msgs);
+        } catch {
+          return { total_sessions: 0, total_messages: 0, human_messages: 0, ai_messages: 0 };
+        }
+      }
+
+      // Edge function fallback
       try {
         const { data, error } = await supabase.functions.invoke('get-chat-history', {
           method: 'POST',
-          body: { type: 'analytics', connection: conn ? { ...conn, is_active: true } : null },
+          body: { type: 'analytics', connection: legacy ? { ...legacy, is_active: true } : null },
         });
         if (error) throw error;
         return data as AnalyticsData;
@@ -164,11 +261,43 @@ export const useChartData = (timeRange: 'daily' | 'weekly' | 'monthly') => {
     staleTime: 60_000,
     retry: 1,
     queryFn: async (): Promise<ChartData[]> => {
-      const conn = getStoredConnection();
+      const { legacy, main } = getActiveConn();
 
-      if (conn && conn.db_type === 'supabase' && conn.supabase_url && conn.service_role_key) {
+      // Non-Supabase via API server — fetch all messages then compute chart
+      if (main && shouldUseApiServer(main)) {
         try {
-          const msgs = await queryExternalSupabase(conn, 'sessions');
+          const creds = buildSessionsCreds(main);
+          const { sessions } = await apiPost<{ sessions: { session_id: string; recipient: string; last_message_at: string; message_count: number }[] }>('/api/sessions/list', { creds });
+          // Build chart from session timestamps
+          const fakeMsgs = sessions.map((s) => ({
+            id: s.session_id,
+            session_id: s.session_id,
+            sender: 'AI' as const,
+            message_text: '',
+            timestamp: s.last_message_at,
+            recipient: s.recipient,
+          }));
+          return computeChartData(fakeMsgs, timeRange);
+        } catch {
+          return computeChartData([], timeRange);
+        }
+      }
+
+      // Supabase via new connection
+      if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
+        try {
+          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+          const msgs = await queryExternalSupabase(fakeConn, 'sessions');
+          return computeChartData(msgs, timeRange);
+        } catch {
+          return computeChartData([], timeRange);
+        }
+      }
+
+      // Legacy Supabase
+      if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
+        try {
+          const msgs = await queryExternalSupabase(legacy, 'sessions');
           return computeChartData(msgs, timeRange);
         } catch {
           return computeChartData([], timeRange);
@@ -179,7 +308,7 @@ export const useChartData = (timeRange: 'daily' | 'weekly' | 'monthly') => {
       try {
         const { data, error } = await supabase.functions.invoke('get-chat-history', {
           method: 'POST',
-          body: { type: 'chart_data', time_range: timeRange, connection: conn ? { ...conn, is_active: true } : null },
+          body: { type: 'chart_data', time_range: timeRange, connection: legacy ? { ...legacy, is_active: true } : null },
         });
         if (error) throw error;
         return data as ChartData[];
@@ -192,14 +321,32 @@ export const useChartData = (timeRange: 'daily' | 'weekly' | 'monthly') => {
 
 // ─── Standalone fetch (reused by useChatHistory + prefetch) ───────────────────
 export async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
-  const conn = getStoredConnection();
-  if (conn && conn.db_type === 'supabase' && conn.supabase_url && conn.service_role_key) {
-    const msgs = await queryExternalSupabase(conn, 'messages', sessionId);
+  const { legacy, main } = getActiveConn();
+
+  // Non-Supabase via API server
+  if (main && shouldUseApiServer(main)) {
+    const creds = buildSessionsCreds(main);
+    const { messages } = await apiPost<{ messages: ChatMessage[] }>('/api/sessions/messages', { creds, sessionId });
+    return messages;
+  }
+
+  // Supabase via new connection
+  if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
+    const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+    const msgs = await queryExternalSupabase(fakeConn, 'messages', sessionId);
     return msgs.filter((m) => m.session_id === sessionId) as ChatMessage[];
   }
+
+  // Legacy Supabase connection
+  if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
+    const msgs = await queryExternalSupabase(legacy, 'messages', sessionId);
+    return msgs.filter((m) => m.session_id === sessionId) as ChatMessage[];
+  }
+
+  // Edge function fallback
   const { data, error } = await supabase.functions.invoke('get-chat-history', {
     method: 'POST',
-    body: { type: 'messages', session_id: sessionId, connection: conn ? { ...conn, is_active: true } : null },
+    body: { type: 'messages', session_id: sessionId, connection: legacy ? { ...legacy, is_active: true } : null },
   });
   if (error) throw new Error(error.message);
   if (data?.error === 'TABLE_NOT_FOUND') throw new Error('TABLE_NOT_FOUND');
@@ -212,10 +359,10 @@ export const useChatHistory = (sessionId?: string) => {
     queryKey: ['chat-history', sessionId],
     enabled: !!sessionId,
     retry: 1,
-    staleTime: 0,            // always treat as stale → re-fetch when window focuses
-    gcTime: 5 * 60_000,      // keep in memory for 5 min
-    refetchInterval: 3_000,  // poll every 3 s for new messages
-    refetchIntervalInBackground: false, // pause when tab is hidden to save bandwidth
+    staleTime: 0,
+    gcTime: 5 * 60_000,
+    refetchInterval: 3_000,
+    refetchIntervalInBackground: false,
     queryFn: () => fetchMessages(sessionId!),
   });
 };
@@ -225,14 +372,33 @@ export const useSessions = (filterDate?: Date | null) => {
   return useQuery({
     queryKey: ['sessions', filterDate ? format(filterDate, 'yyyy-MM-dd') : 'all'],
     staleTime: 5_000,
-    refetchInterval: 10_000,  // auto-refresh every 10 s
+    refetchInterval: 10_000,
     retry: 1,
     queryFn: async () => {
-      const conn = getStoredConnection();
+      const { legacy, main } = getActiveConn();
 
-      if (conn && conn.db_type === 'supabase' && conn.supabase_url && conn.service_role_key) {
+      // Non-Supabase via API server
+      if (main && shouldUseApiServer(main)) {
         try {
-          const msgs = await queryExternalSupabase(conn, 'sessions');
+          const creds = buildSessionsCreds(main);
+          const body: Record<string, unknown> = { creds };
+          if (filterDate) body.filterDate = format(filterDate, 'yyyy-MM-dd');
+          const { sessions } = await apiPost<{ sessions: { session_id: string; recipient: string; last_message_at: string; message_count: number }[] }>('/api/sessions/list', body);
+          const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+          return sessions.map((s) => ({
+            ...s,
+            is_active: s.last_message_at >= fiveMinutesAgo,
+          })) as SessionInfo[];
+        } catch {
+          return [] as SessionInfo[];
+        }
+      }
+
+      // Supabase via new connection (serviceRoleKey)
+      if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
+        try {
+          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+          const msgs = await queryExternalSupabase(fakeConn, 'sessions');
           const filtered = filterDate
             ? msgs.filter((m) => {
                 try { return format(new Date(m.timestamp), 'yyyy-MM-dd') === format(filterDate, 'yyyy-MM-dd'); }
@@ -246,10 +412,28 @@ export const useSessions = (filterDate?: Date | null) => {
         }
       }
 
+      // Legacy Supabase connection
+      if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
+        try {
+          const msgs = await queryExternalSupabase(legacy, 'sessions');
+          const filtered = filterDate
+            ? msgs.filter((m) => {
+                try { return format(new Date(m.timestamp), 'yyyy-MM-dd') === format(filterDate, 'yyyy-MM-dd'); }
+                catch { return true; }
+              })
+            : msgs;
+          return buildSessionsFromMessages(filtered) as SessionInfo[];
+        } catch (e: unknown) {
+          if (e instanceof Error && e.message === 'TABLE_NOT_FOUND') return [] as SessionInfo[];
+          throw e;
+        }
+      }
+
+      // Edge function fallback
       try {
         const body: Record<string, unknown> = {
           type: 'sessions',
-          connection: conn ? { ...conn, is_active: true } : null,
+          connection: legacy ? { ...legacy, is_active: true } : null,
         };
         if (filterDate) body.filter_date = format(filterDate, 'yyyy-MM-dd');
         const { data, error } = await supabase.functions.invoke('get-chat-history', {
@@ -266,7 +450,7 @@ export const useSessions = (filterDate?: Date | null) => {
   });
 };
 
-// ─── localStorage name cache (works even without recipient_names table) ────────
+// ─── localStorage name cache ──────────────────────────────────────────────────
 const LOCAL_NAMES_KEY = 'chat_monitor_recipient_names';
 
 export function getLocalNames(): Record<string, string> {
@@ -289,9 +473,7 @@ export const useRecipientNames = () => {
     staleTime: 15_000,
     gcTime: 30 * 60_000,
     queryFn: async () => {
-      // Always start with localStorage (works without Supabase table)
       const map: Record<string, string> = getLocalNames();
-      // Try to merge with Supabase table (optional — ignore if table missing)
       try {
         const { data } = await supabase
           .from('recipient_names')
@@ -300,16 +482,14 @@ export const useRecipientNames = () => {
           map[item.recipient_id] = item.name;
           saveLocalName(item.recipient_id, item.name);
         });
-      } catch { /* table may not exist — local cache is enough */ }
+      } catch { /* table may not exist */ }
       return map;
     },
   });
 };
 
-// TTL-based cache: maps recipient ID → timestamp of last attempt
-// Reduced to 5 min so failed attempts retry quickly on the same session
 const _autoResolveAttemptedAt = new Map<string, number>();
-const RETRY_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const RETRY_TTL_MS = 5 * 60 * 1000;
 
 interface PlatformConnLike {
   platform: string;
@@ -317,12 +497,6 @@ interface PlatformConnLike {
   access_token: string;
 }
 
-/**
- * Silently fetches real names from Meta Graph API for any recipients
- * whose IDs appear numeric (from Facebook/Instagram) and aren't already in `knownNames`.
- * On success, upserts to `recipient_names` in the local Supabase project.
- * Failed IDs are retried after RETRY_TTL_MS so stale/expired tokens can be recovered.
- */
 export const useAutoResolveNames = (
   recipients: string[],
   knownNames: Record<string, string> | undefined,
@@ -351,32 +525,24 @@ export const useAutoResolveNames = (
     });
     if (unresolved.length === 0) return;
 
-    // Stamp all as attempted immediately so concurrent renders don't duplicate
     unresolved.forEach(r => _autoResolveAttemptedAt.set(r, now));
 
     Promise.all(
       unresolved.map(async (recipientId): Promise<boolean> => {
         for (const token of tokens) {
-          // ── Method 1: conversations endpoint (reliable with Page tokens) ──
-          // This is the same approach used in n8n:
-          // GET /me/conversations?user_id={id}&fields=participants{name,email,id}
           try {
             const convRes = await fetch(
               `https://graph.facebook.com/v19.0/me/conversations?user_id=${recipientId}&fields=participants%7Bname%2Cemail%2Cid%7D&access_token=${token}`
             );
             const convData = await convRes.json();
-            // Name is at data[0].participants.data[0].name (first participant who is the user)
             const participants: Array<{ id: string; name: string }> =
               convData?.data?.[0]?.participants?.data ?? [];
-            // The page itself is also a participant — pick the one whose id matches the sender
             const senderParticipant =
               participants.find((p) => p.id === recipientId) ||
               participants.find((p) => p.id !== recipientId);
             const resolvedName = senderParticipant?.name;
             if (resolvedName && !convData.error) {
-              // Save to localStorage immediately (no Supabase table required)
               saveLocalName(recipientId, resolvedName);
-              // Also try Supabase (optional — ignore if table missing)
               try {
                 await supabase.from('recipient_names').upsert(
                   { recipient_id: recipientId, name: resolvedName, updated_at: new Date().toISOString() },
@@ -385,11 +551,8 @@ export const useAutoResolveNames = (
               } catch { /* ignore */ }
               return true;
             }
-          } catch {
-            // fall through to method 2
-          }
+          } catch { /* fall through */ }
 
-          // ── Method 2: direct profile (fallback for WhatsApp/Instagram) ──
           try {
             const res = await fetch(
               `https://graph.facebook.com/v19.0/${recipientId}?fields=name&access_token=${token}`
@@ -405,9 +568,7 @@ export const useAutoResolveNames = (
               } catch { /* ignore */ }
               return true;
             }
-          } catch {
-            // try next token
-          }
+          } catch { /* try next token */ }
         }
         return false;
       })
@@ -425,15 +586,13 @@ export const useUpdateRecipientName = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ recipientId, name }: { recipientId: string; name: string }) => {
-      // Always save to localStorage first
       saveLocalName(recipientId, name);
-      // Also try Supabase (optional)
       try {
         await supabase.from('recipient_names').upsert(
           { recipient_id: recipientId, name, updated_at: new Date().toISOString() },
           { onConflict: 'recipient_id' }
         );
-      } catch { /* ignore if table doesn't exist */ }
+      } catch { /* ignore */ }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recipient-names'] });
@@ -441,13 +600,12 @@ export const useUpdateRecipientName = () => {
   });
 };
 
-// ─── fetchNameFromMeta (standalone — used by manual refresh button) ───────────
+// ─── fetchNameFromMeta ────────────────────────────────────────────────────────
 export async function fetchNameFromMeta(
   recipientId: string,
   tokens: string[]
 ): Promise<string | null> {
   for (const token of tokens) {
-    // Method 1: conversations endpoint (Facebook Page tokens)
     try {
       const res = await fetch(
         `https://graph.facebook.com/v19.0/me/conversations?user_id=${recipientId}&fields=participants%7Bname%2Cemail%2Cid%7D&access_token=${token}`
@@ -464,7 +622,6 @@ export async function fetchNameFromMeta(
       }
     } catch { /* fall through */ }
 
-    // Method 2: direct profile
     try {
       const res = await fetch(
         `https://graph.facebook.com/v19.0/${recipientId}?fields=name&access_token=${token}`

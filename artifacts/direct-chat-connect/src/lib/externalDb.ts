@@ -3,12 +3,13 @@
  * Direct browser-side connection to the user's external Supabase project.
  * No edge function needed — uses @supabase/supabase-js with the stored credentials.
  *
- * For PostgreSQL / MySQL / MongoDB / Redis we still call the edge function
- * (those can't be reached from a browser).
+ * For PostgreSQL / MySQL / MongoDB / Redis we call the API server
+ * (those can't be reached from a browser directly).
  */
 
 import { createClient } from '@supabase/supabase-js';
 import { supabase as localSupabase } from '@/integrations/supabase/client';
+import { getActiveConnection } from '@/lib/db-config';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -292,13 +293,7 @@ const _insertFormatCache = new Map<string, 'n8n' | 'normalized'>();
 
 /**
  * Silently writes an agent reply to the user's connected external database.
- * Only Supabase is supported via browser-side direct connection.
- *
- * Caches the working insert format after first success so subsequent inserts
- * go directly to the right format without any fallback delay.
- *
- * Format 1 (n8n native):  { session_id, message: { type: 'agent', output: text } }
- * Format 2 (normalized):  { session_id, sender: 'agent', message_text: text, ... }
+ * Supabase: direct browser connection. PostgreSQL/MySQL/MongoDB/Redis: via API server.
  *
  * All errors are caught and suppressed — this must never block the send flow.
  */
@@ -306,6 +301,28 @@ export async function insertMessageToExternalDb(
   conn: StoredConnection | null,
   message: AgentMessage
 ): Promise<void> {
+  // Check if we have a non-Supabase active connection — use API server
+  const activeConn = getActiveConnection();
+  if (activeConn && activeConn.dbType !== 'supabase') {
+    try {
+      const creds = {
+        dbType: activeConn.dbType,
+        host: activeConn.host,
+        port: activeConn.port,
+        dbUsername: activeConn.dbUsername,
+        dbPassword: activeConn.dbPassword,
+        dbName: activeConn.dbName,
+        connectionString: activeConn.connectionString,
+      };
+      await fetch('/api/sessions/insert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creds, message: { session_id: message.session_id, message_text: message.message_text, recipient: message.recipient, timestamp: message.timestamp } }),
+      });
+    } catch { /* silent */ }
+    return;
+  }
+
   if (!conn || conn.db_type !== 'supabase') return;
   try {
     const url = conn.supabase_url?.trim();
@@ -379,16 +396,26 @@ export async function validateConnection(conn: StoredConnection): Promise<Valida
     }
   }
 
-  // ── PostgreSQL / MySQL / MongoDB / Redis: try via edge function ───────────
+  // ── PostgreSQL / MySQL / MongoDB / Redis: try via API server ─────────────
   try {
-    const { data, error } = await localSupabase.functions.invoke('get-chat-history', {
+    const creds = {
+      dbType: conn.db_type,
+      host: conn.host,
+      port: conn.port,
+      dbUsername: conn.username,
+      dbPassword: conn.password,
+      dbName: conn.database,
+      connectionString: conn.connection_string,
+    };
+    const res = await fetch('/api/sessions/validate', {
       method: 'POST',
-      body: { type: 'sessions', connection: { ...conn, is_active: true } },
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ creds }),
     });
-    if (error) return 'fail';
-    if (data?.error === 'TABLE_NOT_FOUND') return 'table-missing';
-    if (data?.error) return 'fail';
-    return 'ok';
+    const data = await res.json() as { status?: string; error?: string };
+    if (data.status === 'ok') return 'ok';
+    if (data.status === 'table-missing') return 'table-missing';
+    return 'fail';
   } catch {
     return 'fail';
   }
