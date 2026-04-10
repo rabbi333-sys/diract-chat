@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { ClipboardCopy, ChevronDown, Terminal, CheckCircle2 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { ClipboardCopy, ChevronDown, Terminal, CheckCircle2, Loader2, Database, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { MainDbType, DB_TYPES } from '@/lib/db-config';
+import { MainDbType, DB_TYPES, getActiveConnection, onDbChange } from '@/lib/db-config';
 import { AI_CONTROL_SQL } from '@/hooks/useAiControl';
+import { supabase } from '@/integrations/supabase/client';
 
 /* ── Reusable copy-block ───────────────────────────────────────── */
 const CopyBlock = ({ code, lang = 'sql' }: { code: string; lang?: string }) => {
@@ -148,11 +149,36 @@ interface AiControlGuideProps {
 /* ══════════════════════════════════════════════════════════════════
    Main Component
 ═══════════════════════════════════════════════════════════════════ */
+type TableStatus = 'no-db' | 'checking' | 'ready' | 'no-table';
+
 export function AiControlGuide({ defaultDbType = 'supabase', edgeFnUrl = '', accentColor = 'primary' }: AiControlGuideProps) {
   const [activeDb, setActiveDb] = useState<MainDbType>(defaultDbType);
   const [showSetupSql, setShowSetupSql] = useState(false);
   const [showCurl, setShowCurl] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [tableStatus, setTableStatus] = useState<TableStatus>('checking');
+
+  const checkTable = useCallback(async () => {
+    const conn = getActiveConnection();
+    if (!conn) { setTableStatus('no-db'); return; }
+    setTableStatus('checking');
+    try {
+      const { error } = await supabase.from('ai_control').select('session_id').limit(1);
+      if (error && (error.code === '42P01' || (error.message ?? '').includes('does not exist'))) {
+        setTableStatus('no-table');
+      } else {
+        setTableStatus('ready');
+      }
+    } catch {
+      setTableStatus('no-table');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeDb !== 'supabase') return;
+    checkTable();
+    return onDbChange(checkTable);
+  }, [activeDb, checkTable]);
 
   const copyField = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -233,7 +259,7 @@ export function AiControlGuide({ defaultDbType = 'supabase', edgeFnUrl = '', acc
         </div>
       </div>
 
-      {/* ── Step 2: (Supabase only) API Endpoint — no Edge Function needed ── */}
+      {/* ── Step 2: (Supabase only) API Endpoint — gated on DB + table ── */}
       {activeDb === 'supabase' && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -242,9 +268,51 @@ export function AiControlGuide({ defaultDbType = 'supabase', edgeFnUrl = '', acc
           </div>
           <div className="ml-7 space-y-2">
             <p className="text-[11px] text-muted-foreground">
-              No Supabase CLI or Edge Function needed. Use the endpoint below — it's built into this app and always available.
+              No Supabase CLI or Edge Function needed — this endpoint is built into the app.
             </p>
-            {edgeFnUrl && (
+
+            {/* No database connected */}
+            {tableStatus === 'no-db' && (
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/25 border border-amber-200/60 dark:border-amber-800/40">
+                <Database size={13} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">Connect a database first</p>
+                  <p className="text-[10.5px] text-amber-600/80 dark:text-amber-500/70 mt-0.5">
+                    Go to <strong>Settings → Database</strong> and add your Supabase connection. The endpoint URL will appear here automatically.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Checking */}
+            {tableStatus === 'checking' && (
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-muted/40 border border-border/40">
+                <Loader2 size={12} className="text-muted-foreground animate-spin" />
+                <span className="text-[11px] text-muted-foreground">Checking table status…</span>
+              </div>
+            )}
+
+            {/* Table missing */}
+            {tableStatus === 'no-table' && (
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/25 border border-amber-200/60 dark:border-amber-800/40">
+                <AlertTriangle size={13} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">Create the <code className="font-mono text-[10px]">ai_control</code> table first</p>
+                  <p className="text-[10.5px] text-amber-600/80 dark:text-amber-500/70 mt-0.5">
+                    Run the SQL from <strong>Step 1</strong> in your Supabase SQL Editor, then the endpoint URL will unlock automatically.
+                  </p>
+                  <button
+                    onClick={checkTable}
+                    className="mt-2 text-[10px] font-semibold text-amber-700 dark:text-amber-400 underline underline-offset-2 hover:opacity-70 transition-opacity"
+                  >
+                    Check again
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Ready — show URL */}
+            {tableStatus === 'ready' && edgeFnUrl && (
               <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/40">
                 <code className="flex-1 text-[10px] font-mono text-emerald-700 dark:text-emerald-400 break-all" data-testid="text-ai-edge-fn-url">{edgeFnUrl}</code>
                 <button
@@ -327,7 +395,7 @@ export function AiControlGuide({ defaultDbType = 'supabase', edgeFnUrl = '', acc
         </button>
         {showCurl && (
           <CopyBlock
-            code={getCurl(activeDb, urlDisplay)}
+            code={getCurl(activeDb, edgeFnUrl)}
             lang={activeDb === 'supabase' ? 'bash' : activeDb === 'mongodb' ? 'bash' : activeDb === 'redis' ? 'bash' : 'bash'}
           />
         )}
