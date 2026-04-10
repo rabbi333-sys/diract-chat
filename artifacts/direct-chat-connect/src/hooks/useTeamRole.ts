@@ -89,6 +89,20 @@ export function useTeamRole(): TeamRole {
 
             if (cancelled) return;
 
+            // If the table doesn't exist yet (fresh DB, no SQL setup run),
+            // treat this authenticated user as the de-facto admin.
+            const isTableMissing = (e: typeof ownerError) =>
+              e?.code === '42P01' ||
+              e?.message?.toLowerCase().includes('does not exist') ||
+              e?.message?.toLowerCase().includes('relation');
+
+            if (ownerError && isTableMissing(ownerError)) {
+              setIsAdmin(true);
+              setPermissions([]);
+              setNotAuthorized(false);
+              return;
+            }
+
             if (!ownerError && ownerRow) {
               setIsAdmin(true);
               setPermissions([]);
@@ -111,21 +125,47 @@ export function useTeamRole(): TeamRole {
               setNotAuthorized(false);
             } else {
               // Neither app_owner nor team_invites has this user.
-              // Attempt to claim ownership in case this is the first user arriving
-              // via an email-verification link (session restored via auth state change,
-              // not through the Login form's Sign In button).
+              // Attempt to claim ownership — this user may be the first to arrive
+              // (e.g. email-verification flow, or RPC not yet created).
+
+              // 1. Try the RPC (normal path)
+              let claimed = false;
               try {
-                const { data: claimed } = await supabase.rpc('claim_owner_if_unclaimed');
+                const { data } = await supabase.rpc('claim_owner_if_unclaimed');
                 if (cancelled) return;
-                if (claimed === true) {
-                  setIsAdmin(true);
-                  setPermissions([]);
-                  setNotAuthorized(false);
-                  return;
+                claimed = data === true;
+              } catch {
+                // RPC not available — try direct insert below
+              }
+
+              if (claimed) {
+                setIsAdmin(true);
+                setPermissions([]);
+                setNotAuthorized(false);
+                return;
+              }
+
+              // 2. RPC unavailable — fallback: insert directly if no owner exists yet.
+              try {
+                const { count } = await supabase
+                  .from('app_owner')
+                  .select('user_id', { count: 'exact', head: true });
+                if (cancelled) return;
+                if (typeof count === 'number' && count === 0) {
+                  const { error: insertErr } = await supabase
+                    .from('app_owner')
+                    .insert({ user_id: authUser.id });
+                  if (!insertErr) {
+                    setIsAdmin(true);
+                    setPermissions([]);
+                    setNotAuthorized(false);
+                    return;
+                  }
                 }
               } catch {
-                // RPC unavailable or failed — fall through to notAuthorized
+                // ignore — fall through to notAuthorized
               }
+
               if (cancelled) return;
               setIsAdmin(false);
               setPermissions([]);

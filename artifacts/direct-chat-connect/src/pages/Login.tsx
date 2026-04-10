@@ -88,6 +88,23 @@ const Login = () => {
       // ── Proceed with signup ───────────────────────────────────────────────
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) {
+        // If the account already exists in Supabase auth (from a previous attempt
+        // where ownership claiming failed), just sign them in instead.
+        const alreadyExists =
+          error.message?.toLowerCase().includes('user already registered') ||
+          error.message?.toLowerCase().includes('already registered') ||
+          (error as any)?.code === 'user_already_exists';
+        if (alreadyExists) {
+          toast.info("Account already exists — signing you in...");
+          const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+          if (signInErr) {
+            toast.error("Could not sign in: " + signInErr.message);
+            return;
+          }
+          try { await tryClaimOwnership(); } catch { /* non-fatal */ }
+          navigate("/");
+          return;
+        }
         toast.error("Error signing up: " + error.message);
         return;
       }
