@@ -104,6 +104,7 @@ const TeamMembers = () => {
   const [inviteName, setInviteName] = useState('');
   const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
   const [lastInviteLink, setLastInviteLink] = useState('');
+  const [formOpen, setFormOpen] = useState(false);
 
   useEffect(() => {
     if (!pageLoading && isAdmin) loadInvites(user?.id || 'admin');
@@ -367,14 +368,10 @@ const TeamMembers = () => {
       </div>
 
       {/* Content */}
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+      <div className="max-w-2xl mx-auto px-4 py-5 space-y-3">
 
-        {/* Section title + counts */}
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
-            <Users size={13} className="text-muted-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">Team Members</h2>
-          </div>
+        {/* Top bar: counts + invite button */}
+        <div className="flex items-center justify-between px-0.5">
           <div className="flex items-center gap-2">
             {activeCount > 0 && (
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
@@ -386,135 +383,148 @@ const TeamMembers = () => {
                 {pendingCount} pending
               </span>
             )}
+            {activeCount === 0 && pendingCount === 0 && (
+              <span className="text-xs text-muted-foreground">No members yet</span>
+            )}
           </div>
+          <button
+            onClick={() => setFormOpen((v) => !v)}
+            className={cn(
+              'flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold transition-all',
+              formOpen
+                ? 'bg-muted text-muted-foreground'
+                : 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
+            )}
+          >
+            <UserPlus size={12} />
+            {formOpen ? 'Cancel' : 'Invite member'}
+          </button>
         </div>
 
-        {/* Invite Form Card */}
-        <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-border/50 flex items-center gap-2.5">
-            <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center">
-              <UserPlus size={12} className="text-primary" />
-            </div>
-            <p className="text-sm font-semibold">Invite a Member</p>
-          </div>
+        {/* Invite Form — collapsible */}
+        {formOpen && (
+          <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="p-5 space-y-4">
 
-          <div className="p-5 space-y-4">
-            {/* Member Name */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Member Name <span className="normal-case text-muted-foreground/40">(optional)</span></label>
-              <input
-                type="text"
-                value={inviteName}
-                onChange={(e) => setInviteName(e.target.value)}
-                placeholder="e.g. Rahim, Support Team..."
-                className="w-full h-9 rounded-xl border border-border/60 bg-muted/30 px-3 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-colors"
-              />
-            </div>
-
-            {/* Role selector */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Role</label>
-              <div className="relative">
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value)}
-                  className="w-full appearance-none h-9 rounded-xl border border-border/60 bg-muted/30 px-3 pr-8 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-colors"
-                >
-                  <option value="viewer">Viewer</option>
-                  <option value="admin">Admin</option>
-                  <option value="sub-admin">Sub-Admin (Own DB)</option>
-                </select>
-                <ChevronDown size={12} className="absolute right-2.5 top-2.5 text-muted-foreground pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Permissions */}
-            {inviteRole === 'viewer' && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Page Access</label>
-                  <span className="text-[10px] text-muted-foreground/50">Settings is admin-only</span>
+              {/* Name + Role side by side */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Name <span className="text-muted-foreground/40">(optional)</span></label>
+                  <input
+                    type="text"
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    placeholder="e.g. Rahim..."
+                    className="w-full h-9 rounded-xl border border-border/60 bg-muted/30 px-3 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-colors"
+                  />
                 </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {PERMISSION_OPTIONS.map((opt) => {
-                    const active = invitePerms.includes(opt.key);
-                    return (
-                      <button
-                        key={opt.key}
-                        type="button"
-                        onClick={() => togglePerm(opt.key)}
-                        className={cn(
-                          'flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl border text-xs font-medium transition-all',
-                          active
-                            ? 'bg-primary/10 border-primary/30 text-primary'
-                            : 'bg-muted/20 border-border/50 text-muted-foreground hover:border-border hover:text-foreground hover:bg-muted/40'
-                        )}
-                      >
-                        {active && <Check size={9} className="flex-shrink-0" />}
-                        {opt.label}
-                      </button>
-                    );
-                  })}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Role</label>
+                  <div className="relative">
+                    <select
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value)}
+                      className="w-full appearance-none h-9 rounded-xl border border-border/60 bg-muted/30 px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-colors"
+                    >
+                      <option value="viewer">Viewer</option>
+                      <option value="admin">Admin</option>
+                      <option value="sub-admin">Sub-Admin (Own DB)</option>
+                    </select>
+                    <ChevronDown size={12} className="absolute right-2.5 top-3 text-muted-foreground pointer-events-none" />
+                  </div>
                 </div>
               </div>
-            )}
 
-            {inviteRole === 'admin' && (
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/15">
-                <ShieldCheck size={13} className="text-primary flex-shrink-0" />
-                <p className="text-[11px] text-muted-foreground">Admin members have full access to all sections.</p>
-              </div>
-            )}
-
-            {inviteRole === 'sub-admin' && (
-              <div className="space-y-2 px-3 py-2.5 rounded-xl bg-violet-500/5 border border-violet-500/20">
-                <div className="flex items-center gap-2">
-                  <Database size={13} className="text-violet-600 dark:text-violet-400 flex-shrink-0" />
-                  <p className="text-[11px] font-semibold text-violet-700 dark:text-violet-400">Sub-Admin — Own Database</p>
+              {/* Permissions */}
+              {inviteRole === 'viewer' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-muted-foreground">Page access</label>
+                    <span className="text-[10px] text-muted-foreground/40">· Settings is admin-only</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {PERMISSION_OPTIONS.map((opt) => {
+                      const active = invitePerms.includes(opt.key);
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => togglePerm(opt.key)}
+                          className={cn(
+                            'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-all text-left',
+                            active
+                              ? 'bg-primary/10 border-primary/30 text-primary'
+                              : 'bg-muted/20 border-border/50 text-muted-foreground hover:border-border hover:text-foreground hover:bg-muted/40'
+                          )}
+                        >
+                          <span className={cn(
+                            'w-3.5 h-3.5 rounded flex items-center justify-center flex-shrink-0 border transition-colors',
+                            active ? 'bg-primary border-primary' : 'border-border/60'
+                          )}>
+                            {active && <Check size={8} className="text-primary-foreground" />}
+                          </span>
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  This member will connect their <strong>own database</strong> after accepting the invite. They'll have full access to their own data — completely separate from yours.
-                </p>
-              </div>
-            )}
-
-            <button
-              onClick={handleGenerateInvite}
-              disabled={isGeneratingInvite}
-              className="w-full h-10 rounded-xl bg-primary text-primary-foreground text-sm font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 active:scale-[0.98] transition-all disabled:opacity-50 shadow-sm"
-            >
-              {isGeneratingInvite ? (
-                <><Loader2 size={14} className="animate-spin" /> Generating…</>
-              ) : (
-                <><Link2 size={14} /> Generate Invite Link</>
               )}
-            </button>
 
-            {lastInviteLink && (
-              <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3.5 space-y-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">Invite link ready — share this!</p>
+              {inviteRole === 'admin' && (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/15">
+                  <ShieldCheck size={13} className="text-primary flex-shrink-0" />
+                  <p className="text-[11px] text-muted-foreground">Admin members have full access to all sections.</p>
                 </div>
-                <div className="flex items-center gap-2 bg-background/80 rounded-lg border border-border/50 px-3 py-2">
-                  <p className="text-[10px] text-muted-foreground font-mono flex-1 truncate">{lastInviteLink}</p>
-                  <button
-                    onClick={async () => {
-                      try { await navigator.clipboard.writeText(lastInviteLink); toast.success('Copied!'); }
-                      catch { toast.error('Could not copy'); }
-                    }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-primary-foreground text-[10px] font-semibold hover:bg-primary/90 transition-colors flex-shrink-0"
-                  >
-                    <Copy size={9} /> Copy
-                  </button>
+              )}
+
+              {inviteRole === 'sub-admin' && (
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-violet-500/5 border border-violet-500/20">
+                  <Database size={13} className="text-violet-600 dark:text-violet-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[11px] font-semibold text-violet-700 dark:text-violet-400 mb-0.5">Sub-Admin — Own Database</p>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      This member will connect their <strong>own database</strong> after accepting. Completely separate from yours.
+                    </p>
+                  </div>
                 </div>
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400/70">
-                  ✓ Share this link with your team member. They'll submit their details for your approval.
-                </p>
-              </div>
-            )}
+              )}
+
+              <button
+                onClick={handleGenerateInvite}
+                disabled={isGeneratingInvite}
+                className="w-full h-9 rounded-xl bg-primary text-primary-foreground text-sm font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 active:scale-[0.98] transition-all disabled:opacity-50 shadow-sm"
+              >
+                {isGeneratingInvite ? (
+                  <><Loader2 size={14} className="animate-spin" /> Generating…</>
+                ) : (
+                  <><Link2 size={14} /> Generate Invite Link</>
+                )}
+              </button>
+
+              {lastInviteLink && (
+                <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3 space-y-2">
+                  <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                    Link ready — share with your team member
+                  </p>
+                  <div className="flex items-center gap-2 bg-background/80 rounded-lg border border-border/50 px-3 py-2">
+                    <p className="text-[10px] text-muted-foreground font-mono flex-1 truncate">{lastInviteLink}</p>
+                    <button
+                      onClick={async () => {
+                        try { await navigator.clipboard.writeText(lastInviteLink); toast.success('Copied!'); }
+                        catch { toast.error('Could not copy'); }
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-primary-foreground text-[10px] font-semibold hover:bg-primary/90 transition-colors flex-shrink-0"
+                    >
+                      <Copy size={9} /> Copy
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Members List */}
         <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
