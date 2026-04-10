@@ -15,18 +15,13 @@ import {
 
 import { toast } from "sonner";
 import {
-  Key,
   CheckCircle2,
   Plus,
   Trash2,
   ArrowRight,
   Loader2,
-  ChevronDown,
-  ChevronUp,
   Zap,
   Link2,
-  Eye,
-  EyeOff,
   Server,
   Wifi,
   Copy,
@@ -39,8 +34,6 @@ const emptyForm = {
   dbType: "supabase" as MainDbType,
   url: "",
   anonKey: "",
-  serviceRoleKey: "",
-  pgDbPassword: "",
   host: "",
   port: "",
   dbUsername: "",
@@ -61,10 +54,6 @@ const ConnectDB = () => {
   const [showForm, setShowForm] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [setupStatus, setSetupStatus] = useState<"idle" | "running" | "done" | "partial" | "failed">("idle");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showServiceKey, setShowServiceKey] = useState(false);
-  const [showPgPassword, setShowPgPassword] = useState(false);
   const [testOk, setTestOk] = useState<boolean | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -120,59 +109,15 @@ const ConnectDB = () => {
         dbType: 'supabase',
         url: form.url.trim(),
         anonKey: form.anonKey.trim(),
-        serviceRoleKey: form.serviceRoleKey.trim() || undefined,
       };
-
-      const didAutoSetup = form.pgDbPassword.trim().length > 0;
-      let setupOutcome: "done" | "partial" | "failed" | null = null;
-
-      if (didAutoSetup) {
-        setSetupStatus("running");
-        try {
-          const res = await fetch('/api/setup-tables', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ supabaseUrl: form.url.trim(), dbPassword: form.pgDbPassword.trim() }),
-          });
-          if (!res.ok) {
-            const text = await res.text().catch(() => `HTTP ${res.status}`);
-            throw new Error(text || `Server error: ${res.status}`);
-          }
-          const data = await res.json() as { success?: boolean; tablesCreated?: string[]; errors?: { label: string; error: string }[] };
-          if (data.success) {
-            setSetupStatus("done");
-            setupOutcome = "done";
-            toast.success(`Database ready! ${data.tablesCreated?.length ?? 0} tables created.`);
-          } else if (data.tablesCreated && data.tablesCreated.length > 0) {
-            setSetupStatus("partial");
-            setupOutcome = "partial";
-            const failedLabels = (data.errors ?? []).map(e => e.label).join(", ");
-            toast.warning(`Most tables created, but some steps failed: ${failedLabels}. Review the SQL guide below.`);
-          } else {
-            setSetupStatus("failed");
-            setupOutcome = "failed";
-            const errMsg = (data.errors ?? [])[0]?.error ?? "Unknown error";
-            toast.error(`Auto-setup failed: ${errMsg}. Use the SQL guide below to set up tables manually.`);
-          }
-        } catch (err: unknown) {
-          setSetupStatus("failed");
-          setupOutcome = "failed";
-          const msg = err instanceof Error ? err.message : String(err);
-          toast.error(`Could not run auto-setup: ${msg}. Use the SQL guide below.`);
-        }
-      }
 
       const saved = saveConnection(conn);
       setActiveConnection(saved.id);
-      if (!didAutoSetup) {
-        toast.success("Connected! Loading dashboard...");
-      }
-      const redirectDelay = setupOutcome === "partial" || setupOutcome === "failed" ? 4000 : 700;
-      setTimeout(() => { window.location.href = "/"; }, redirectDelay);
+      toast.success("Connected! Loading dashboard...");
+      setTimeout(() => { window.location.href = "/"; }, 700);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
       setSaving(false);
-      setSetupStatus("idle");
     }
   };
 
@@ -201,18 +146,6 @@ const ConnectDB = () => {
       <div className="fixed top-0 left-1/4 w-96 h-96 bg-blue-400/10 rounded-full blur-3xl pointer-events-none" />
       <div className="fixed bottom-0 right-1/4 w-80 h-80 bg-indigo-400/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Auto-setup progress overlay */}
-      {setupStatus === "running" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-white/90 dark:bg-zinc-900/90 shadow-2xl border border-border/50 max-w-xs text-center">
-            <Loader2 size={36} className="animate-spin text-blue-500" />
-            <div>
-              <p className="text-base font-bold text-foreground">Setting up your database…</p>
-              <p className="text-xs text-muted-foreground mt-1">Creating tables and functions. This takes a few seconds.</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="relative w-full max-w-[440px]">
 
@@ -376,51 +309,6 @@ const ConnectDB = () => {
                     <label className={labelCls}>Anon / Public Key <span className="text-red-400">*</span></label>
                     <input value={form.anonKey} onChange={e => setField("anonKey", e.target.value)} placeholder="eyJhbGciOiJIUzI1NiIs..." type="password" className={cn(inputCls, "font-mono placeholder:font-sans")} data-testid="input-anon-key" />
                   </div>
-                  <div>
-                    <button onClick={() => setShowServiceKey(v => !v)} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors" data-testid="button-toggle-service-key">
-                      <Key size={11} />
-                      <span>Service Role Key</span>
-                      <span className="text-muted-foreground/50">(optional — for webhooks)</span>
-                      {showServiceKey ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                    </button>
-                    {showServiceKey && (
-                      <input value={form.serviceRoleKey} onChange={e => setField("serviceRoleKey", e.target.value)} placeholder="eyJhbGciOiJIUzI1NiIs..." type="password" className={cn(inputCls, "mt-2 font-mono placeholder:font-sans")} data-testid="input-service-role-key" />
-                    )}
-                  </div>
-
-                  {/* Auto-setup: DB Password */}
-                  <div className="rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30 p-3.5">
-                    <button onClick={() => setShowPgPassword(v => !v)} className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors w-full text-left" data-testid="button-toggle-pg-password">
-                      <Zap size={11} className="flex-shrink-0" />
-                      <span>Auto-Setup Database</span>
-                      <span className="text-emerald-600/60 dark:text-emerald-500/60 font-normal">(recommended for new clients)</span>
-                      {showPgPassword ? <ChevronUp size={11} className="ml-auto" /> : <ChevronDown size={11} className="ml-auto" />}
-                    </button>
-                    {showPgPassword && (
-                      <div className="mt-3 space-y-2">
-                        <p className="text-[10.5px] text-emerald-700/80 dark:text-emerald-400/80 leading-relaxed">
-                          Enter your <strong>Database Password</strong> (not the anon key) to automatically create all required tables.
-                          Find it in <span className="font-semibold">Supabase → Project Settings → Database → Database password</span>.
-                        </p>
-                        <div className="relative">
-                          <input
-                            value={form.pgDbPassword}
-                            onChange={e => setField("pgDbPassword", e.target.value)}
-                            placeholder="••••••••••••••••"
-                            type={showPassword ? 'text' : 'password'}
-                            className={cn(inputCls, "pr-10 font-mono placeholder:font-sans border-emerald-300/50 dark:border-emerald-700/40 focus:ring-emerald-400/30 focus:border-emerald-500/50")}
-                            data-testid="input-pg-db-password"
-                          />
-                          <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">{showPassword ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-                        </div>
-                        {form.pgDbPassword.trim() && (
-                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                            <CheckCircle2 size={10} /> Tables will be created automatically when you save
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
 
@@ -450,10 +338,7 @@ const ConnectDB = () => {
                   data-testid="button-save-connection"
                 >
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                  {saving
-                    ? (setupStatus === "running" ? "Setting up tables…" : "Connecting...")
-                    : (form.dbType === 'supabase' && form.pgDbPassword.trim() ? "Auto-Setup & Connect" : "Save & Connect")
-                  }
+                  {saving ? "Connecting..." : "Save & Connect"}
                 </button>
               </div>
             </div>
