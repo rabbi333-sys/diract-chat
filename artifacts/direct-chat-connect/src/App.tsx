@@ -9,7 +9,6 @@ import Conversation from "./pages/Conversation";
 import OrderDetail from "./pages/OrderDetail";
 import Profile from "./pages/Profile";
 import InviteAccept from "./pages/InviteAccept";
-import ConnectDB from "./pages/ConnectDB";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 import PermissionRoute from "./components/PermissionRoute";
@@ -25,9 +24,6 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          {/* Public: database connection setup — no auth or DB required */}
-          <Route path="/connect" element={<ConnectDB />} />
-
           {/* Public: invite acceptance */}
           <Route path="/invite/:token" element={<InviteAccept />} />
 

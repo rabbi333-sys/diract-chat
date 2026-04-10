@@ -6,6 +6,7 @@ import { hasActiveConnection } from "@/lib/db-config";
 import { isGuestSessionActive } from "@/lib/guestSession";
 import { hasMemberSetup, getMemberSession } from "@/lib/memberAuth";
 import Login from "@/pages/Login";
+import ConnectDB from "@/pages/ConnectDB";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -90,9 +91,9 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return <>{children}</>;
   }
 
-  // No DB connection → setup page
+  // No DB connection → show ConnectDB inline (no separate route needed)
   if (!dbConnected) {
-    return <Navigate to="/connect" replace />;
+    return <ConnectDB />;
   }
 
   // Admin login
