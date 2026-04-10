@@ -489,7 +489,10 @@ const ConnectDB = () => {
         conn = { ...base, connectionString: form.connectionString.trim() };
       }
 
-      if (form.dbType === 'supabase' && form.pgDbPassword.trim()) {
+      const didAutoSetup = form.dbType === 'supabase' && form.pgDbPassword.trim().length > 0;
+      let setupOutcome: "done" | "partial" | "failed" | null = null;
+
+      if (didAutoSetup) {
         setSetupStatus("running");
         try {
           const res = await fetch('/api/setup-tables', {
@@ -497,30 +500,41 @@ const ConnectDB = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ supabaseUrl: form.url.trim(), dbPassword: form.pgDbPassword.trim() }),
           });
+          if (!res.ok) {
+            const text = await res.text().catch(() => `HTTP ${res.status}`);
+            throw new Error(text || `Server error: ${res.status}`);
+          }
           const data = await res.json() as { success?: boolean; tablesCreated?: string[]; errors?: { label: string; error: string }[] };
           if (data.success) {
             setSetupStatus("done");
+            setupOutcome = "done";
             toast.success(`Database ready! ${data.tablesCreated?.length ?? 0} tables created.`);
           } else if (data.tablesCreated && data.tablesCreated.length > 0) {
             setSetupStatus("partial");
-            toast.warning("Most tables created. Some steps had issues — check the setup guide below.");
+            setupOutcome = "partial";
+            const failedLabels = (data.errors ?? []).map(e => e.label).join(", ");
+            toast.warning(`Most tables created, but some steps failed: ${failedLabels}. Review the SQL guide below.`);
           } else {
             setSetupStatus("failed");
-            toast.error("Auto-setup failed. Please use the SQL guide below to set up tables manually.");
+            setupOutcome = "failed";
+            const errMsg = (data.errors ?? [])[0]?.error ?? "Unknown error";
+            toast.error(`Auto-setup failed: ${errMsg}. Use the SQL guide below to set up tables manually.`);
           }
-        } catch {
+        } catch (err: unknown) {
           setSetupStatus("failed");
-          toast.error("Could not run auto-setup. Please use the SQL guide below.");
+          setupOutcome = "failed";
+          const msg = err instanceof Error ? err.message : String(err);
+          toast.error(`Could not run auto-setup: ${msg}. Use the SQL guide below.`);
         }
       }
 
       const saved = saveConnection(conn);
       setActiveConnection(saved.id);
-      const didAutoSetup = form.dbType === 'supabase' && form.pgDbPassword.trim().length > 0;
       if (!didAutoSetup) {
         toast.success("Connected! Loading dashboard...");
       }
-      setTimeout(() => { window.location.href = "/"; }, didAutoSetup ? 1400 : 700);
+      const redirectDelay = setupOutcome === "partial" || setupOutcome === "failed" ? 4000 : 700;
+      setTimeout(() => { window.location.href = "/"; }, redirectDelay);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
       setSaving(false);
