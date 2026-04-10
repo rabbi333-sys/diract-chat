@@ -44,10 +44,73 @@ export function getConnections(): MainDbConnection[] {
   catch { return []; }
 }
 
+// ── Legacy settings bridge ────────────────────────────────────────────────────
+// Reads the older 'chat_monitor_db_settings' format (SupabaseSettings component)
+// and returns it as a MainDbConnection so every part of the app sees the same
+// connection even before the user visits the Database settings tab.
+const LEGACY_SETTINGS_KEY = 'chat_monitor_db_settings';
+
+function getLegacyConnection(): MainDbConnection | null {
+  try {
+    const raw = localStorage.getItem(LEGACY_SETTINGS_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw) as {
+      db_type?: string;
+      supabase_url?: string;
+      service_role_key?: string;
+      host?: string; port?: string; username?: string; password?: string; database?: string;
+      connection_string?: string;
+    };
+    const dbType = normalizeDbType(s.db_type);
+    if (dbType === 'supabase' && s.supabase_url && s.service_role_key) {
+      return {
+        id: '__legacy__',
+        name: 'Primary Database',
+        dbType: 'supabase',
+        url: s.supabase_url.replace(/\/$/, ''),
+        anonKey: s.service_role_key,
+        serviceRoleKey: s.service_role_key,
+        createdAt: '',
+      };
+    }
+    if ((dbType === 'postgresql' || dbType === 'mysql') && s.host) {
+      return {
+        id: '__legacy__',
+        name: 'Primary Database',
+        dbType,
+        url: '',
+        anonKey: '',
+        host: s.host,
+        port: s.port ?? '',
+        dbUsername: s.username ?? '',
+        dbPassword: s.password ?? '',
+        dbName: s.database ?? '',
+        createdAt: '',
+      };
+    }
+    if ((dbType === 'mongodb' || dbType === 'redis') && s.connection_string) {
+      return {
+        id: '__legacy__',
+        name: 'Primary Database',
+        dbType,
+        url: '',
+        anonKey: '',
+        connectionString: s.connection_string,
+        createdAt: '',
+      };
+    }
+  } catch {}
+  return null;
+}
+
 export function getActiveConnection(): MainDbConnection | null {
   const connections = getConnections();
   const activeId = localStorage.getItem(ACTIVE_ID_KEY);
-  return connections.find(c => c.id === activeId) || connections[0] || null;
+  // Prefer the explicitly saved meta_db_connections entry
+  const metaConn = connections.find(c => c.id === activeId) || connections[0] || null;
+  if (metaConn) return metaConn;
+  // Fall back to legacy chat_monitor_db_settings (SupabaseSettings component)
+  return getLegacyConnection();
 }
 
 const DB_CHANGE_EVENT = 'meta_db_change';

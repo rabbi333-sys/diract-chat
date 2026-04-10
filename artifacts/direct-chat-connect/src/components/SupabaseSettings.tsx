@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { validateConnection } from '@/lib/externalDb';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,12 @@ import {
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
+import {
+  saveConnection,
+  setActiveConnection,
+  deleteConnection,
+  getConnections,
+} from '@/lib/db-config';
 
 type DbType = 'supabase' | 'postgresql' | 'mysql' | 'mongodb' | 'redis';
 
@@ -34,6 +40,7 @@ interface StoredConnection {
 }
 
 const STORAGE_KEY = 'chat_monitor_db_settings';
+const SYNC_ID_KEY  = 'meta_supabase_sync_id'; // ID of the meta_db_connections entry we manage
 
 const emptyConn = (dbType: DbType = 'supabase'): StoredConnection => ({
   db_type: dbType,
@@ -54,6 +61,73 @@ const loadFromStorage = (): StoredConnection | null => {
 
 const saveToStorage = (s: StoredConnection) => localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
 const clearStorage = () => localStorage.removeItem(STORAGE_KEY);
+
+// ── Sync helpers: keep meta_db_connections in step with SupabaseSettings ──────
+function getSyncId(): string | null {
+  try { return localStorage.getItem(SYNC_ID_KEY); } catch { return null; }
+}
+function setSyncId(id: string) {
+  try { localStorage.setItem(SYNC_ID_KEY, id); } catch {}
+}
+function clearSyncId() {
+  try { localStorage.removeItem(SYNC_ID_KEY); } catch {}
+}
+
+function syncToMeta(form: StoredConnection): void {
+  try {
+    const existingId = getSyncId() ?? undefined;
+    // Verify the saved ID still exists in meta_db_connections
+    const validId = existingId && getConnections().some(c => c.id === existingId)
+      ? existingId
+      : undefined;
+
+    if (form.db_type === 'supabase' && form.supabase_url.trim() && form.service_role_key.trim()) {
+      const saved = saveConnection({
+        ...(validId ? { id: validId } : {}),
+        name: 'Primary Database',
+        dbType: 'supabase',
+        url: form.supabase_url.trim().replace(/\/$/, ''),
+        anonKey: form.service_role_key.trim(),
+        serviceRoleKey: form.service_role_key.trim(),
+      });
+      setSyncId(saved.id);
+      setActiveConnection(saved.id);
+    } else if ((form.db_type === 'postgresql' || form.db_type === 'mysql') && form.host.trim()) {
+      const saved = saveConnection({
+        ...(validId ? { id: validId } : {}),
+        name: 'Primary Database',
+        dbType: form.db_type,
+        url: '',
+        anonKey: '',
+        host: form.host.trim(),
+        port: form.port.trim(),
+        dbUsername: form.username.trim(),
+        dbPassword: form.password.trim(),
+        dbName: form.database.trim(),
+      });
+      setSyncId(saved.id);
+      setActiveConnection(saved.id);
+    } else if ((form.db_type === 'mongodb' || form.db_type === 'redis') && form.connection_string.trim()) {
+      const saved = saveConnection({
+        ...(validId ? { id: validId } : {}),
+        name: 'Primary Database',
+        dbType: form.db_type,
+        url: '',
+        anonKey: '',
+        connectionString: form.connection_string.trim(),
+      });
+      setSyncId(saved.id);
+      setActiveConnection(saved.id);
+    }
+  } catch { /* ignore sync errors */ }
+}
+
+function clearFromMeta(): void {
+  try {
+    const id = getSyncId();
+    if (id) { deleteConnection(id); clearSyncId(); }
+  } catch { /* ignore */ }
+}
 
 const DB_TYPES: { value: DbType; icon: string; label: string; defaultPort: string }[] = [
   { value: 'supabase',    icon: '⚡', label: 'Supabase',    defaultPort: '' },
@@ -97,11 +171,20 @@ export const SupabaseSettings = () => {
     return await validateConnection(conn) as ValidationState;
   };
 
+  // On mount: sync any already-saved connection to meta_db_connections so
+  // Webhook & AI Control sections see it immediately (handles connections
+  // saved before this sync was introduced).
+  useEffect(() => {
+    const existing = loadFromStorage();
+    if (existing) syncToMeta(existing);
+  }, []);
+
   const handleSave = async () => {
     setSaving(true);
     setValidation('idle');
     try {
       saveToStorage(form);
+      syncToMeta(form);    // ← bridge to unified connection store
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['chat-history'] });
       toast.success('Settings saved! Checking connection...');
@@ -126,6 +209,7 @@ export const SupabaseSettings = () => {
 
   const handleDelete = () => {
     clearStorage();
+    clearFromMeta();    // ← also remove from unified connection store
     setForm(emptyConn());
     setValidation('idle');
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
