@@ -55,9 +55,10 @@ export function useGlobalAiControl() {
     onSuccess: (_, turnOn) => {
       queryClient.invalidateQueries({ queryKey: ['ai-control'] });
       toast.success(turnOn ? '✓ AI stopped' : '✓ AI is now active');
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['ai-control-global'] });
+      // Delay refetch so optimistic update isn't overwritten by replication lag
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['ai-control-global'] });
+      }, 2000);
     },
   });
 
@@ -142,9 +143,9 @@ export function useAiControl(session_id: string | undefined) {
     },
     onSuccess: (ai_enabled) => {
       toast.success(ai_enabled ? 'AI enabled' : 'AI disabled');
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: qk });
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: qk });
+      }, 2000);
     },
   });
 
