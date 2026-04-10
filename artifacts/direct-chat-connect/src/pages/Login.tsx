@@ -151,7 +151,11 @@ const Login = () => {
         <Card>
           <CardHeader className="text-center relative pb-2">
             <button
-              onClick={() => navigate('/connect')}
+              onClick={() => {
+                // Clear the active connection so ProtectedRoute shows ConnectDB
+                localStorage.removeItem('meta_db_active_id');
+                window.location.href = '/';
+              }}
               className="absolute left-0 top-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium text-muted-foreground bg-muted/60 hover:bg-muted hover:text-foreground transition-all border border-border/40"
               data-testid="button-back"
             >
