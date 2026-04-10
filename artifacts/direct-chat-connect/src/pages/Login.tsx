@@ -64,9 +64,20 @@ const Login = () => {
         .select('user_id', { count: 'exact', head: true });
 
       if (ownerCheckError) {
-        // Fail-closed: if we cannot confirm the workspace is unclaimed, block signup.
-        toast.error("Unable to verify workspace status. Please try again.");
-        return;
+        // If the table doesn't exist yet (fresh database), treat as unclaimed — allow signup.
+        // PostgreSQL code 42P01 = undefined_table (relation does not exist).
+        const isTableMissing =
+          ownerCheckError.code === '42P01' ||
+          ownerCheckError.message?.toLowerCase().includes('does not exist') ||
+          ownerCheckError.message?.toLowerCase().includes('relation') ||
+          (ownerCheckError as any)?.details?.toLowerCase?.().includes('does not exist');
+
+        if (!isTableMissing) {
+          // Unknown error — fail closed to prevent duplicate admins.
+          toast.error("Unable to verify workspace status. Please try again.");
+          return;
+        }
+        // Table missing = fresh setup → fall through and let signup + RPC create everything.
       }
 
       if (typeof count === 'number' && count > 0) {
