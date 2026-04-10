@@ -239,6 +239,12 @@ DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.orders; EXCEPTI
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS sku text;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_status text DEFAULT 'unpaid';
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS unit_price numeric;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS amount_to_collect numeric;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS reason_for_cancel text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS session_id text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS source text DEFAULT 'webhook';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS order_data jsonb DEFAULT '{}';
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();`,
 
   postgresql: `-- Requires PostgreSQL 13+ (gen_random_uuid is built-in since PG13)
@@ -267,6 +273,10 @@ CREATE TABLE IF NOT EXISTS orders (
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS sku VARCHAR(255);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'unpaid';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS unit_price NUMERIC;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS amount_to_collect NUMERIC;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS reason_for_cancel TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS session_id VARCHAR(255);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();`,
 
   mysql: `-- Requires MySQL 8.0.13+ for DEFAULT (UUID()); use app-generated UUIDs on older versions
@@ -295,6 +305,10 @@ CREATE TABLE IF NOT EXISTS orders (
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS sku VARCHAR(255);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'unpaid';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS unit_price DECIMAL(10,2);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS amount_to_collect DECIMAL(10,2);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS reason_for_cancel TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS session_id VARCHAR(255);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;`,
 
   mongodb: `// MongoDB creates collections automatically on first insert.
@@ -306,6 +320,24 @@ db.createCollection("orders");`,
 # HSET order:BI-0016 merchant_order_id "BI-0016" customer_name "Zakariea" customer_phone "01758481876" customer_address "Dhaka" product_name "Cotton Saree" sku "CSR-001" quantity "1" unit_price "3491" total_price "3491" amount_to_collect "3491" payment_status "unpaid" status "pending"
 # Or JSON: SET order:{id} '{"merchant_order_id":"BI-0016","status":"pending"}' EX 2592000`,
 };
+
+/* ── Quick Migration SQL — add missing columns to existing tables ── */
+const ORDERS_MIGRATION_SQL = `-- Run this in Supabase → SQL Editor if you already have an orders table
+-- It adds any columns that may be missing (safe to run multiple times)
+
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS amount_to_collect numeric;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS sku text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS unit_price numeric;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_status text DEFAULT 'unpaid';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS reason_for_cancel text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS session_id text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS source text DEFAULT 'webhook';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS order_data jsonb DEFAULT '{}';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+-- Reload the schema cache so Supabase REST API sees the new columns
+SELECT pg_notify('pgrst', 'reload schema');`;
 
 /* ── Full setup SQL — all 5 database types ──────────────────────── */
 
@@ -1111,6 +1143,58 @@ const SmartWebhookSection = ({ activeConn, onGoToDatabase }: { activeConn: MainD
   );
 };
 
+// ── Quick-fix panel: add missing columns to existing orders table ──────────────
+const MigrationFixPanel = () => {
+  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(ORDERS_MIGRATION_SQL);
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+    toast.success('Migration SQL copied!');
+  };
+
+  return (
+    <div className="px-5 pb-4">
+      <div className="rounded-xl border border-amber-400/40 bg-amber-50/60 dark:bg-amber-950/20 overflow-hidden">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="w-full flex items-center gap-2.5 px-4 py-3 text-left hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition-colors"
+        >
+          <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+              Got a "column not found" error in n8n?
+            </p>
+            <p className="text-[10px] text-amber-600/80 dark:text-amber-500/70">
+              Run this migration SQL to add missing columns to your existing orders table
+            </p>
+          </div>
+          {open ? <ChevronDown size={13} className="text-amber-500 flex-shrink-0" /> : <ChevronRight size={13} className="text-amber-500 flex-shrink-0" />}
+        </button>
+        {open && (
+          <div className="border-t border-amber-400/30 p-4 space-y-3">
+            <p className="text-[10.5px] text-amber-700/80 dark:text-amber-400/70 leading-relaxed">
+              Open <strong>Supabase Dashboard → SQL Editor</strong>, paste this, and click <strong>Run</strong>. Safe to run on an existing table — uses <code className="font-mono text-[9px] bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">ADD COLUMN IF NOT EXISTS</code>.
+            </p>
+            <div className="relative rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+              <pre className="text-[9.5px] font-mono text-zinc-300 p-3 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                {ORDERS_MIGRATION_SQL}
+              </pre>
+              <button
+                onClick={handleCopy}
+                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
+              >
+                {copied ? <><Check size={9} /> Copied!</> : <><ClipboardCopy size={9} /> Copy</>}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // DB setup section — all 5 database types
 const DB_TYPES: MainDbType[] = ['supabase', 'postgresql', 'mysql', 'mongodb', 'redis'];
 
@@ -1197,6 +1281,11 @@ const DbSetupSection = ({ activeConn }: { activeConn: MainDbConnection | null })
               <p className="text-[11px] text-muted-foreground leading-relaxed">{meta.hint}</p>
             </div>
           </div>
+
+          {/* ⚡ Quick fix: add missing columns (Supabase only) */}
+          {selectedDb === 'supabase' && (
+            <MigrationFixPanel />
+          )}
 
           {/* SQL / commands block */}
           <div className="px-5 pb-5">
