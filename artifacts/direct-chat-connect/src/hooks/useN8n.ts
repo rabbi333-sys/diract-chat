@@ -270,7 +270,10 @@ function buildPutBody(wf: N8nWorkflow): Record<string, unknown> {
   return body;
 }
 
-/** Save the system prompt directly to Supabase n8n_bot_settings table. */
+/** Save the system prompt directly to Supabase n8n_bot_settings table.
+ *  Uses a per-call Supabase client built from the supplied credentials rather
+ *  than the shared app client, so the n8n settings can point to a different
+ *  Supabase project than the main dashboard connection. */
 export const useSavePromptDirect = () => {
   return useMutation({
     mutationFn: async ({
@@ -308,12 +311,20 @@ export const useSavePromptDirect = () => {
       toast.success('Prompt saved! Your n8n bot will use it from next conversation.');
     },
     onError: (error: Error) => {
-      toast.error(`Save failed: ${error.message}`);
+      // Show table-setup guidance verbatim; prefix generic errors with "Save failed:"
+      if (error.message.includes('Step 1')) {
+        toast.error(error.message);
+      } else {
+        toast.error(`Save failed: ${error.message}`);
+      }
     },
   });
 };
 
-/** Load the saved system prompt from Supabase n8n_bot_settings table. */
+/** Load the saved system prompt from Supabase n8n_bot_settings table.
+ *  Uses a per-call Supabase client (not the shared app client) so it can
+ *  read from the Supabase project specified in the n8n settings form,
+ *  which may differ from the main dashboard connection. */
 export const useLoadPromptDirect = (supabaseUrl: string, supabaseAnonKey: string) => {
   return useQuery({
     queryKey: ['n8n-prompt-direct', supabaseUrl, supabaseAnonKey],
