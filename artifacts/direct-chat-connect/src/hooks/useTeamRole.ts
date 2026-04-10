@@ -110,6 +110,23 @@ export function useTeamRole(): TeamRole {
               setPermissions(invite.permissions ?? []);
               setNotAuthorized(false);
             } else {
+              // Neither app_owner nor team_invites has this user.
+              // Attempt to claim ownership in case this is the first user arriving
+              // via an email-verification link (session restored via auth state change,
+              // not through the Login form's Sign In button).
+              try {
+                const { data: claimed } = await supabase.rpc('claim_owner_if_unclaimed');
+                if (cancelled) return;
+                if (claimed === true) {
+                  setIsAdmin(true);
+                  setPermissions([]);
+                  setNotAuthorized(false);
+                  return;
+                }
+              } catch {
+                // RPC unavailable or failed — fall through to notAuthorized
+              }
+              if (cancelled) return;
               setIsAdmin(false);
               setPermissions([]);
               setNotAuthorized(true);
