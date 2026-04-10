@@ -284,8 +284,9 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
   const [g1, g2] = getGradient(session.recipient);
 
   const relativeTime = (() => {
+    if (!session.last_message_at || session.last_message_at === '2000-01-01T00:00:00.000Z') return '—';
     try { return formatDistanceToNow(parseISO(session.last_message_at), { addSuffix: true }); }
-    catch { return ''; }
+    catch { return '—'; }
   })();
 
   const handleSave = (e: React.MouseEvent) => {

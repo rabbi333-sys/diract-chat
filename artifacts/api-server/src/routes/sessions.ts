@@ -48,11 +48,24 @@ function normalizeRow(raw: Record<string, any>): NormalizedMessage | null {
   const id = (raw.id ?? raw._id ?? "") as string | number;
   const session_id = String(raw.session_id ?? raw.sessionId ?? raw.conversation_id ?? "unknown");
   const recipient = (raw.recipient ?? raw.to ?? raw.phone ?? undefined) as string | undefined;
-  const timestamp = String(
+  // Build timestamp: handle ISO strings, numeric Unix timestamps, and embedded message timestamps
+  const rawTs =
     raw.created_at ?? raw.timestamp ?? raw.createdAt ??
     raw.updated_at ?? raw.updatedAt ?? raw.date ?? raw.time ??
-    '2000-01-01T00:00:00.000Z'
-  );
+    (raw.message && typeof raw.message === 'object'
+      ? (raw.message as Record<string, any>).created_at ??
+        (raw.message as Record<string, any>).timestamp ??
+        (raw.message as Record<string, any>).additional_kwargs?.created_at
+      : undefined);
+  let timestamp: string;
+  if (rawTs == null) {
+    timestamp = '2000-01-01T00:00:00.000Z';
+  } else if (typeof rawTs === 'number') {
+    const ms = rawTs > 1e10 ? rawTs : rawTs * 1000;
+    timestamp = new Date(ms).toISOString();
+  } else {
+    timestamp = String(rawTs);
+  }
 
   // n8n / LangChain format: { message: { type, data: { content } } }
   if (raw.message && typeof raw.message === "object") {
@@ -96,19 +109,31 @@ function normalizeRow(raw: Record<string, any>): NormalizedMessage | null {
 }
 
 function buildSessions(msgs: NormalizedMessage[]): SessionInfo[] {
-  const map = new Map<string, { recipient: string; count: number; last_ts: string }>();
+  const map = new Map<string, { recipient: string; count: number; last_ts: string; last_id: string | number }>();
   for (const m of msgs) {
     const ex = map.get(m.session_id);
     if (!ex) {
-      map.set(m.session_id, { recipient: m.recipient ?? m.session_id, count: 1, last_ts: m.timestamp });
+      map.set(m.session_id, { recipient: m.recipient ?? m.session_id, count: 1, last_ts: m.timestamp, last_id: m.id });
     } else {
       ex.count++;
-      if (m.timestamp > ex.last_ts) { ex.last_ts = m.timestamp; ex.recipient = m.recipient ?? ex.recipient; }
+      if (m.timestamp > ex.last_ts) { ex.last_ts = m.timestamp; ex.last_id = m.id; ex.recipient = m.recipient ?? ex.recipient; }
     }
   }
-  return Array.from(map.entries())
-    .map(([session_id, info]) => ({ session_id, recipient: info.recipient, last_message_at: info.last_ts, message_count: info.count }))
-    .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
+  const FALLBACK_TS = '2000-01-01T00:00:00.000Z';
+  const sessions = Array.from(map.entries()).map(([session_id, info]) => ({
+    session_id, recipient: info.recipient, last_message_at: info.last_ts, last_id: info.last_id, message_count: info.count,
+  }));
+  const allFallback = sessions.every(s => s.last_message_at === FALLBACK_TS);
+  if (allFallback) {
+    sessions.sort((a, b) => {
+      const ia = typeof a.last_id === 'number' ? a.last_id : parseInt(String(a.last_id)) || 0;
+      const ib = typeof b.last_id === 'number' ? b.last_id : parseInt(String(b.last_id)) || 0;
+      return ib - ia;
+    });
+  } else {
+    sessions.sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
+  }
+  return sessions.map(({ last_id: _lid, ...s }) => s);
 }
 
 // ─── Connection helpers ────────────────────────────────────────────────────────

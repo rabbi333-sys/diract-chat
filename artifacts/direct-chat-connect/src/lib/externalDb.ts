@@ -69,16 +69,26 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
   const recipient = (raw.recipient ?? raw.to ?? raw.phone ?? undefined) as
     | string
     | undefined;
-  const timestamp = String(
-    raw.created_at ??
-    raw.timestamp ??
-    raw.createdAt ??
-    raw.updated_at ??
-    raw.updatedAt ??
-    raw.date ??
-    raw.time ??
-    '2000-01-01T00:00:00.000Z'
-  );
+  // Build timestamp: handle ISO strings, numeric Unix timestamps, and embedded message timestamps
+  const rawTs =
+    raw.created_at ?? raw.timestamp ?? raw.createdAt ??
+    raw.updated_at ?? raw.updatedAt ?? raw.date ?? raw.time ??
+    // Check inside message JSONB (some n8n formats embed the time there)
+    (raw.message && typeof raw.message === 'object'
+      ? (raw.message as Record<string, any>).created_at ??
+        (raw.message as Record<string, any>).timestamp ??
+        (raw.message as Record<string, any>).additional_kwargs?.created_at
+      : undefined);
+  let timestamp: string;
+  if (rawTs == null) {
+    timestamp = '2000-01-01T00:00:00.000Z';
+  } else if (typeof rawTs === 'number') {
+    // Unix timestamp — could be seconds (10 digits) or milliseconds (13 digits)
+    const ms = rawTs > 1e10 ? rawTs : rawTs * 1000;
+    timestamp = new Date(ms).toISOString();
+  } else {
+    timestamp = String(rawTs);
+  }
 
   // n8n / LangChain native: { message: { type, data: { content } } }
   // Also handles older formats: { message: { type, content|output } }
@@ -155,15 +165,27 @@ export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInf
     }
   });
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  return Array.from(map.entries())
-    .map(([session_id, info]) => ({
-      session_id,
-      recipient: info.recipient,
-      last_message_at: info.last_ts,
-      message_count: info.count,
-      is_active: info.last_ts >= fiveMinutesAgo,
-    }))
-    .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
+  const FALLBACK_TS = '2000-01-01T00:00:00.000Z';
+  const sessions = Array.from(map.entries()).map(([session_id, info]) => ({
+    session_id,
+    recipient: info.recipient,
+    last_message_at: info.last_ts,
+    last_id: info.last_id,
+    message_count: info.count,
+    is_active: info.last_ts >= fiveMinutesAgo,
+  }));
+  // If no real timestamps exist, sort by the highest row-id (more recent inserts first)
+  const allFallback = sessions.every(s => s.last_message_at === FALLBACK_TS);
+  if (allFallback) {
+    sessions.sort((a, b) => {
+      const ia = typeof a.last_id === 'number' ? a.last_id : parseInt(String(a.last_id)) || 0;
+      const ib = typeof b.last_id === 'number' ? b.last_id : parseInt(String(b.last_id)) || 0;
+      return ib - ia;
+    });
+  } else {
+    sessions.sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
+  }
+  return sessions.map(({ last_id: _lid, ...s }) => s);
 }
 
 // ─── Client cache — prevent multiple GoTrueClient instances ──────────────────
