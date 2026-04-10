@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSessions, useRecipientNames, useUpdateRecipientName, useAutoResolveNames, fetchMessages, SessionInfo } from '@/hooks/useChatHistory';
@@ -59,6 +59,32 @@ export const SessionList = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'active'>('all');
 
+  // ── Frozen order: sort only on first load or manual refresh ──────────────
+  // Prevents conversations from jumping around during background auto-polls.
+  const [frozenIds, setFrozenIds] = useState<string[]>([]);
+  const isManualRefetch = useRef(false);
+
+  // Seed frozen order when data first arrives
+  useEffect(() => {
+    if (!sessions || sessions.length === 0) return;
+    if (frozenIds.length === 0) {
+      setFrozenIds(sortSessions(sessions).map(s => s.session_id));
+    }
+  }, [sessions]);
+
+  // After a manual refresh completes, update the frozen order
+  useEffect(() => {
+    if (!isFetching && isManualRefetch.current && sessions) {
+      isManualRefetch.current = false;
+      setFrozenIds(sortSessions(sessions).map(s => s.session_id));
+    }
+  }, [isFetching, sessions]);
+
+  const handleManualRefresh = useCallback(() => {
+    isManualRefetch.current = true;
+    refetch();
+  }, [refetch]);
+
   useAutoResolveNames(
     sessions?.map(s => s.recipient) ?? [],
     recipientNames,
@@ -87,7 +113,22 @@ export const SessionList = () => {
     });
   }, [queryClient]);
 
-  const sorted = sessions ? sortSessions(sessions) : [];
+  // Apply frozen order: existing sessions in frozen order, new sessions prepended
+  const sorted = useMemo(() => {
+    if (!sessions) return [];
+    if (frozenIds.length === 0) return sortSessions(sessions);
+    const sessionMap = new Map(sessions.map(s => [s.session_id, s]));
+    const ordered: SessionInfo[] = [];
+    // First: sessions in frozen order
+    for (const id of frozenIds) {
+      const s = sessionMap.get(id);
+      if (s) ordered.push(s);
+    }
+    // Then: any new sessions not yet in the frozen list (prepend at top)
+    const frozenSet = new Set(frozenIds);
+    const newSessions = sortSessions(sessions.filter(s => !frozenSet.has(s.session_id)));
+    return [...newSessions, ...ordered];
+  }, [sessions, frozenIds]);
 
   const filtered = sorted.filter((s) => {
     const name = (recipientNames?.[s.recipient] || '').toLowerCase();
@@ -169,7 +210,7 @@ export const SessionList = () => {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => refetch()}
+          onClick={handleManualRefresh}
           disabled={isFetching}
           className="h-9 w-9 rounded-xl hover:bg-muted/60 flex-shrink-0"
           title="Refresh"
