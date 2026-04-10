@@ -711,7 +711,7 @@ const DB_LABELS: Record<MainDbType, { icon: string; label: string; color: string
   redis:      { icon: '🔴', label: 'Redis',      color: 'text-red-500' },
 };
 
-const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | null }) => {
+const SmartWebhookSection = ({ activeConn, onGoToDatabase }: { activeConn: MainDbConnection | null; onGoToDatabase?: () => void }) => {
   const rawDbType = activeConn?.dbType;
   const unknownDbType = !!activeConn && !isValidDbType(rawDbType);
   const dbType = normalizeDbType(rawDbType);
@@ -778,11 +778,24 @@ const SmartWebhookSection = ({ activeConn }: { activeConn: MainDbConnection | nu
 
         {/* No connection warning */}
         {noConn && (
-          <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-500/8 border border-amber-500/25">
-            <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />
-            <p className="text-[11px] text-muted-foreground">
-              Connect a database first (Settings → Database) to see your webhook endpoints.
-            </p>
+          <div className="flex flex-col gap-3 p-4 rounded-xl bg-amber-500/8 border border-amber-500/25">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-[11px] font-semibold text-foreground">No database connected</p>
+                <p className="text-[10.5px] text-muted-foreground leading-relaxed">
+                  Connect your Supabase database in <strong>Settings → Database</strong> to see your webhook endpoints. Enter your Project URL and Anon Key, then click <strong>Save & Connect</strong>.
+                </p>
+              </div>
+            </div>
+            {onGoToDatabase && (
+              <button
+                onClick={onGoToDatabase}
+                className="self-start flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"
+              >
+                Go to Database Settings →
+              </button>
+            )}
           </div>
         )}
 
@@ -1397,7 +1410,7 @@ function genApiKey(): string {
 }
 
 // Main export
-const WebhookSettings = () => {
+const WebhookSettings = ({ onGoToDatabase }: { onGoToDatabase?: () => void } = {}) => {
   const queryClient = useQueryClient();
   const [showKey, setShowKey] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -1499,7 +1512,7 @@ const WebhookSettings = () => {
     <div className="space-y-4">
 
       {/* ① Primary: DB-aware endpoints — no domain needed */}
-      <SmartWebhookSection activeConn={activeConn} />
+      <SmartWebhookSection activeConn={activeConn} onGoToDatabase={onGoToDatabase} />
 
       {/* ② DB Tables setup (Supabase: all-in-one SQL) */}
       <DbSetupSection activeConn={activeConn} />

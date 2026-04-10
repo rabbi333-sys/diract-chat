@@ -666,7 +666,7 @@ const Index = () => {
                 {settingsSection === 'webhook' && (
                   <div className="space-y-4">
                     <h2 className="text-lg font-bold text-foreground">{t('webhookHeader')}</h2>
-                    <WebhookSettings />
+                    <WebhookSettings onGoToDatabase={() => setSettingsSection('database')} />
                   </div>
                 )}
 
