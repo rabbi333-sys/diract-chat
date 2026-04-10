@@ -7,6 +7,19 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
+async function claimOwnershipIfFirst(): Promise<void> {
+  try {
+    const { data, error } = await supabase.rpc('claim_owner_if_unclaimed');
+    if (error) {
+      console.warn('claim_owner_if_unclaimed error:', error.message);
+    } else if (data === false) {
+      console.info('Workspace already has an owner — no claim made.');
+    }
+  } catch (e) {
+    console.warn('claim_owner_if_unclaimed threw:', e);
+  }
+}
+
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,10 +30,11 @@ const Login = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         toast.error("Error signing in: " + error.message);
-      } else {
+      } else if (data.session) {
+        await claimOwnershipIfFirst();
         navigate("/");
       }
     } catch (error) {
@@ -36,16 +50,28 @@ const Login = () => {
     if (password.length < 6) { toast.error("Password must be at least 6 characters"); return; }
     setIsLoading(true);
     try {
+      const { count, error: ownerCheckError } = await supabase
+        .from('app_owner')
+        .select('user_id', { count: 'exact', head: true });
+
+      if (ownerCheckError) {
+        console.warn('app_owner check failed:', ownerCheckError.message);
+      }
+
+      if (typeof count === 'number' && count > 0) {
+        toast.error("This workspace already has an owner. Please use an invite link to join.");
+        return;
+      }
+
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) {
         toast.error("Error signing up: " + error.message);
       } else if (data.session) {
-        // Email confirmation disabled — user is immediately logged in
-        toast.success("Account created! Welcome!");
+        await claimOwnershipIfFirst();
+        toast.success("Account created! You are now the Admin with full access.");
         navigate("/");
       } else {
-        // Email confirmation still enabled in Supabase settings
-        toast.info("Account created! Please check your email to verify, then sign in.");
+        toast.info("Account created! Please check your email to verify, then sign in — you will be set as Admin automatically.");
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
