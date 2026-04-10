@@ -280,17 +280,27 @@ export const useUpdateN8nPrompt = () => {
         p.systemMessage = newPrompt;
       }
 
-      // n8n's PUT /workflows/{id} rejects extra fields from the GET response
-      // (id, active, createdAt, updatedAt, meta, etc.) — send only allowed fields.
+      // n8n PUT /workflows/{id} only accepts a specific set of fields.
+      // Sending anything else (id, active, createdAt, updatedAt, meta, etc.)
+      // causes "must NOT have additional properties". Be minimal — only include
+      // fields that actually have meaningful values.
       const putBody: Record<string, unknown> = {
         name: updated.name,
         nodes: updated.nodes,
         connections: updated.connections,
-        settings: updated.settings ?? {},
-        staticData: updated.staticData ?? null,
-        pinData: updated.pinData ?? {},
       };
-      if (updated.versionId) putBody.versionId = updated.versionId;
+      if (updated.settings && Object.keys(updated.settings).length > 0) {
+        putBody.settings = updated.settings;
+      }
+      if (updated.staticData !== undefined && updated.staticData !== null) {
+        putBody.staticData = updated.staticData;
+      }
+      if (updated.pinData && Object.keys(updated.pinData as object).length > 0) {
+        putBody.pinData = updated.pinData;
+      }
+      if (updated.versionId) {
+        putBody.versionId = updated.versionId;
+      }
       if (updated.tags && updated.tags.length > 0) {
         putBody.tags = updated.tags.map((t) => ({ id: t.id }));
       }
