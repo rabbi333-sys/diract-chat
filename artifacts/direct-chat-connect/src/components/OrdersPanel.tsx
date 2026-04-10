@@ -278,22 +278,21 @@ const OrdersPanel = () => {
             </div>
           </div>
         ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border/60 bg-muted/30 sticky top-0">
-                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3">Order</th>
-                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3">Customer</th>
-                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3 hidden md:table-cell">Phone</th>
-                <th className="text-right text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3">Total</th>
-                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3">Status</th>
-                <th className="text-left text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider px-4 py-3 hidden sm:table-cell">Date</th>
-                <th className="w-10 px-3 py-3" />
+          <table className="w-full border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-muted/60 backdrop-blur border-b border-border/60">
+                <th className="text-left text-[11px] font-semibold text-muted-foreground px-5 py-3.5 w-[150px]">Order</th>
+                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5">Customer</th>
+                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5 hidden md:table-cell">Phone</th>
+                <th className="text-right text-[11px] font-semibold text-muted-foreground px-4 py-3.5">Total</th>
+                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5">Status</th>
+                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5 hidden sm:table-cell">Date</th>
+                <th className="w-12 px-4 py-3.5" />
               </tr>
             </thead>
-            <tbody>
-              {filtered.map((order, idx) => {
+            <tbody className="divide-y divide-border/40">
+              {filtered.map((order) => {
                 const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.pending;
-                const StatusIcon = cfg.icon;
                 const total = Number(order.total_price) || Number(order.amount_to_collect) || 0;
                 const orderId = order.merchant_order_id || order.id.slice(0, 8).toUpperCase();
                 const initStr = initials(order.customer_name);
@@ -303,86 +302,76 @@ const OrdersPanel = () => {
                   <tr
                     key={order.id}
                     onClick={() => setSelectedOrderId(order.id)}
-                    className={cn(
-                      "cursor-pointer group transition-colors hover:bg-primary/4",
-                      idx % 2 === 0 ? 'bg-transparent' : 'bg-muted/10',
-                      idx !== filtered.length - 1 && 'border-b border-border/30'
-                    )}
+                    className="cursor-pointer group transition-colors hover:bg-muted/30"
                   >
                     {/* Order ID */}
-                    <td className="px-4 py-3.5 whitespace-nowrap">
+                    <td className="px-5 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[12px] font-bold text-foreground">
+                        <span className="font-mono text-[13px] font-bold text-foreground">
                           {orderId}
                         </span>
                         {order._source === 'local' && (
-                          <span className="text-[8px] font-bold text-amber-600 bg-amber-400/15 px-1.5 py-0.5 rounded-full border border-amber-400/30">
+                          <span className="text-[8px] font-bold text-amber-600 bg-amber-400/15 px-1.5 py-0.5 rounded-full border border-amber-400/30 leading-none">
                             LIVE
                           </span>
                         )}
                       </div>
                       {order.product_name && (
-                        <p className="text-[10px] text-muted-foreground/60 mt-0.5 truncate max-w-[120px]">
+                        <p className="text-[11px] text-muted-foreground mt-0.5 truncate max-w-[130px]">
                           {order.product_name}
                         </p>
                       )}
                     </td>
 
                     {/* Customer */}
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-4">
                       <div className="flex items-center gap-2.5">
                         <div className={cn(
-                          'w-7 h-7 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0',
+                          'w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0',
                           avatarBg
                         )}>
                           {initStr}
                         </div>
-                        <span className="text-[12px] text-foreground font-medium truncate max-w-[100px]">
+                        <span className="text-[13px] text-foreground font-medium truncate max-w-[110px]">
                           {order.customer_name || '—'}
                         </span>
                       </div>
                     </td>
 
                     {/* Phone */}
-                    <td className="px-4 py-3.5 whitespace-nowrap hidden md:table-cell">
-                      <span className="text-[12px] text-muted-foreground font-mono">
+                    <td className="px-4 py-4 whitespace-nowrap hidden md:table-cell">
+                      <span className="text-[12px] text-muted-foreground tabular-nums">
                         {order.customer_phone || '—'}
                       </span>
                     </td>
 
                     {/* Total */}
-                    <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                      <span className="text-[13px] font-bold text-foreground">
+                    <td className="px-4 py-4 whitespace-nowrap text-right">
+                      <span className="text-[13px] font-bold text-foreground tabular-nums">
                         ৳{total.toLocaleString()}
                       </span>
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 py-3.5 whitespace-nowrap">
+                    <td className="px-4 py-4 whitespace-nowrap">
                       <span className={cn(
-                        "inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border",
+                        "inline-flex items-center gap-1.5 text-[11.5px] font-medium px-2.5 py-1 rounded-full",
                         cfg.bg, cfg.text,
-                        order.status === 'pending'    && 'border-amber-200 dark:border-amber-800/50',
-                        order.status === 'confirmed'  && 'border-blue-200 dark:border-blue-800/50',
-                        order.status === 'processing' && 'border-violet-200 dark:border-violet-800/50',
-                        order.status === 'shipped'    && 'border-cyan-200 dark:border-cyan-800/50',
-                        order.status === 'delivered'  && 'border-emerald-200 dark:border-emerald-800/50',
-                        order.status === 'cancelled'  && 'border-red-200 dark:border-red-800/50',
                       )}>
-                        <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot)} />
+                        <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', cfg.dot)} />
                         {cfg.label}
                       </span>
                     </td>
 
                     {/* Date */}
-                    <td className="px-4 py-3.5 whitespace-nowrap hidden sm:table-cell">
-                      <span className="text-[11px] text-muted-foreground">
+                    <td className="px-4 py-4 whitespace-nowrap hidden sm:table-cell">
+                      <span className="text-[12px] text-muted-foreground">
                         {smartDate(order.created_at)}
                       </span>
                     </td>
 
                     {/* Delete */}
-                    <td className="px-3 py-3.5 text-right">
+                    <td className="px-4 py-4 text-right">
                       <button
                         onClick={e => {
                           e.stopPropagation();
