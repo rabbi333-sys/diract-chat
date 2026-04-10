@@ -48,6 +48,7 @@ const emptyForm = {
   url: "",
   anonKey: "",
   serviceRoleKey: "",
+  pgDbPassword: "",
   host: "",
   port: "",
   dbUsername: "",
@@ -402,17 +403,22 @@ function SetupGuideSection() {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+const EMAIL_NOTICE_KEY = "meta_email_notice_dismissed";
+
 const ConnectDB = () => {
   const [connections, setConnections] = useState<MainDbConnection[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [setupStatus, setSetupStatus] = useState<"idle" | "running" | "done" | "partial" | "failed">("idle");
   const [showPassword, setShowPassword] = useState(false);
   const [showServiceKey, setShowServiceKey] = useState(false);
+  const [showPgPassword, setShowPgPassword] = useState(false);
   const [testOk, setTestOk] = useState<boolean | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [noticeDismissed, setNoticeDismissed] = useState(() => localStorage.getItem(EMAIL_NOTICE_KEY) === "1");
 
   const reload = () => {
     const conns = getConnections();
@@ -482,13 +488,43 @@ const ConnectDB = () => {
       } else {
         conn = { ...base, connectionString: form.connectionString.trim() };
       }
+
+      if (form.dbType === 'supabase' && form.pgDbPassword.trim()) {
+        setSetupStatus("running");
+        try {
+          const res = await fetch('/api/setup-tables', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ supabaseUrl: form.url.trim(), dbPassword: form.pgDbPassword.trim() }),
+          });
+          const data = await res.json() as { success?: boolean; tablesCreated?: string[]; errors?: { label: string; error: string }[] };
+          if (data.success) {
+            setSetupStatus("done");
+            toast.success(`Database ready! ${data.tablesCreated?.length ?? 0} tables created.`);
+          } else if (data.tablesCreated && data.tablesCreated.length > 0) {
+            setSetupStatus("partial");
+            toast.warning("Most tables created. Some steps had issues — check the setup guide below.");
+          } else {
+            setSetupStatus("failed");
+            toast.error("Auto-setup failed. Please use the SQL guide below to set up tables manually.");
+          }
+        } catch {
+          setSetupStatus("failed");
+          toast.error("Could not run auto-setup. Please use the SQL guide below.");
+        }
+      }
+
       const saved = saveConnection(conn);
       setActiveConnection(saved.id);
-      toast.success("Connected! Loading dashboard...");
-      setTimeout(() => { window.location.href = "/"; }, 700);
+      const didAutoSetup = form.dbType === 'supabase' && form.pgDbPassword.trim().length > 0;
+      if (!didAutoSetup) {
+        toast.success("Connected! Loading dashboard...");
+      }
+      setTimeout(() => { window.location.href = "/"; }, didAutoSetup ? 1400 : 700);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
       setSaving(false);
+      setSetupStatus("idle");
     }
   };
 
@@ -517,7 +553,55 @@ const ConnectDB = () => {
       <div className="fixed top-0 left-1/4 w-96 h-96 bg-blue-400/10 rounded-full blur-3xl pointer-events-none" />
       <div className="fixed bottom-0 right-1/4 w-80 h-80 bg-indigo-400/10 rounded-full blur-3xl pointer-events-none" />
 
+      {/* Auto-setup progress overlay */}
+      {setupStatus === "running" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-white/90 dark:bg-zinc-900/90 shadow-2xl border border-border/50 max-w-xs text-center">
+            <Loader2 size={36} className="animate-spin text-blue-500" />
+            <div>
+              <p className="text-base font-bold text-foreground">Setting up your database…</p>
+              <p className="text-xs text-muted-foreground mt-1">Creating tables and functions. This takes a few seconds.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="relative w-full max-w-[440px]">
+
+        {/* Email verification notice */}
+        {!noticeDismissed && (
+          <div className="mb-5 rounded-2xl border border-amber-200/70 dark:border-amber-800/40 bg-amber-50/90 dark:bg-amber-950/30 backdrop-blur-xl shadow-lg shadow-amber-500/5 overflow-hidden">
+            <div className="px-5 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-lg bg-amber-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Zap size={13} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-amber-800 dark:text-amber-300">Disable Email Confirmation for Instant Access</p>
+                    <p className="text-[10.5px] text-amber-700/80 dark:text-amber-400/80 mt-1 leading-relaxed">
+                      By default, Supabase requires email confirmation before login. Disable it so your first admin can sign up immediately:
+                    </p>
+                    <ol className="mt-2 space-y-0.5 text-[10.5px] text-amber-800 dark:text-amber-300 font-medium list-decimal list-inside leading-relaxed">
+                      <li>Go to your Supabase Dashboard</li>
+                      <li>Open <strong>Authentication → Providers → Email</strong></li>
+                      <li>Turn off <strong>"Confirm email"</strong></li>
+                      <li>Click <strong>Save</strong></li>
+                    </ol>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setNoticeDismissed(true); localStorage.setItem(EMAIL_NOTICE_KEY, "1"); }}
+                  className="flex-shrink-0 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors p-1 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                  title="Dismiss"
+                  data-testid="button-dismiss-notice"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Logo header */}
         <div className="text-center mb-8">
@@ -678,6 +762,40 @@ const ConnectDB = () => {
                       <input value={form.serviceRoleKey} onChange={e => setField("serviceRoleKey", e.target.value)} placeholder="eyJhbGciOiJIUzI1NiIs..." type="password" className={cn(inputCls, "mt-2 font-mono placeholder:font-sans")} data-testid="input-service-role-key" />
                     )}
                   </div>
+
+                  {/* Auto-setup: DB Password */}
+                  <div className="rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30 p-3.5">
+                    <button onClick={() => setShowPgPassword(v => !v)} className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors w-full text-left" data-testid="button-toggle-pg-password">
+                      <Zap size={11} className="flex-shrink-0" />
+                      <span>Auto-Setup Database</span>
+                      <span className="text-emerald-600/60 dark:text-emerald-500/60 font-normal">(recommended for new clients)</span>
+                      {showPgPassword ? <ChevronUp size={11} className="ml-auto" /> : <ChevronDown size={11} className="ml-auto" />}
+                    </button>
+                    {showPgPassword && (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-[10.5px] text-emerald-700/80 dark:text-emerald-400/80 leading-relaxed">
+                          Enter your <strong>Database Password</strong> (not the anon key) to automatically create all required tables.
+                          Find it in <span className="font-semibold">Supabase → Project Settings → Database → Database password</span>.
+                        </p>
+                        <div className="relative">
+                          <input
+                            value={form.pgDbPassword}
+                            onChange={e => setField("pgDbPassword", e.target.value)}
+                            placeholder="••••••••••••••••"
+                            type={showPassword ? 'text' : 'password'}
+                            className={cn(inputCls, "pr-10 font-mono placeholder:font-sans border-emerald-300/50 dark:border-emerald-700/40 focus:ring-emerald-400/30 focus:border-emerald-500/50")}
+                            data-testid="input-pg-db-password"
+                          />
+                          <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">{showPassword ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+                        </div>
+                        {form.pgDbPassword.trim() && (
+                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                            <CheckCircle2 size={10} /> Tables will be created automatically when you save
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -762,7 +880,10 @@ const ConnectDB = () => {
                   data-testid="button-save-connection"
                 >
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                  {saving ? "Connecting..." : "Save & Connect"}
+                  {saving
+                    ? (setupStatus === "running" ? "Setting up tables…" : "Connecting...")
+                    : (form.dbType === 'supabase' && form.pgDbPassword.trim() ? "Auto-Setup & Connect" : "Save & Connect")
+                  }
                 </button>
               </div>
             </div>
