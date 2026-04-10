@@ -82,14 +82,15 @@ const Index = () => {
     setAiEdgeFnUrl(`${window.location.origin}/api/ai-status`);
   }, [settingsSection]);
 
-  const navItems = roleLoading
+  const navItems = (roleLoading
     ? allNavItems
     : allNavItems.filter((item) => {
         if (item.label === 'Settings') return isAdmin;
         if (isAdmin) return true;
         const key = NAV_PERM_KEY[item.label];
         return key ? permissions.includes(key) : false;
-      });
+      })
+  ).filter((item) => !!item.icon && !!item.label);
 
   useEffect(() => {
     if (!roleLoading) {

@@ -10,7 +10,15 @@ import {
   ChevronDown, ChevronUp, ShieldCheck, Eye, Loader2, Link2, Camera, AlertTriangle,
   ClipboardCopy, Users, Database, Plus, Zap, ChevronRight, Clock,
   BookOpen, MessageSquare, ShoppingCart, HandIcon, Bot, KeyRound, Contact,
+  MoreHorizontal, UserCheck, UserX, ShieldOff,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   getConnections, getActiveConnection, setActiveConnection,
   deleteConnection, MAX_CONNECTIONS, MainDbConnection,
@@ -1729,12 +1737,13 @@ const Profile = () => {
                             </div>
                           </div>
 
-                          {/* Actions */}
-                          <div className="flex items-center gap-1 flex-shrink-0">
+                          {/* Right side: status info + menu */}
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            {/* Last-seen / created time info */}
                             {invite.status === 'accepted' ? (() => {
                               const seen = lastSeenDisplay(invite.last_login_at);
                               return (
-                                <span className={`text-[10px] hidden sm:flex items-center gap-1 mr-1 ${seen.isOnline ? 'text-emerald-500 font-semibold' : invite.last_login_at ? 'text-muted-foreground/50' : 'text-muted-foreground/30'}`}>
+                                <span className={`text-[10px] hidden sm:flex items-center gap-1 ${seen.isOnline ? 'text-emerald-500 font-semibold' : invite.last_login_at ? 'text-muted-foreground/50' : 'text-muted-foreground/30'}`}>
                                   {seen.isOnline
                                     ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
                                     : <Clock size={9} />
@@ -1743,96 +1752,89 @@ const Profile = () => {
                                 </span>
                               );
                             })() : (
-                              <span className="text-[10px] text-muted-foreground/40 hidden sm:flex items-center gap-0.5 mr-1">
+                              <span className="text-[10px] text-muted-foreground/40 hidden sm:flex items-center gap-0.5">
                                 <Clock size={9} /> {timeAgo(invite.created_at)}
                               </span>
                             )}
 
-                            {/* ALL pending: copy link button */}
-                            {isPending && (
-                              <button
-                                onClick={() => copyLink(invite.token, invite.email || undefined)}
-                                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                title="Copy invite link"
-                                data-testid={`button-copy-link-${invite.id}`}
-                              >
-                                <Copy size={12} />
-                              </button>
-                            )}
+                            {/* ⋯ Actions menu */}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                  title="Actions"
+                                  data-testid={`button-menu-${invite.id}`}
+                                >
+                                  <MoreHorizontal size={14} />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44 text-sm">
+                                {/* Pending: copy invite link */}
+                                {isPending && (
+                                  <DropdownMenuItem
+                                    onClick={() => copyLink(invite.token, invite.email || undefined)}
+                                    data-testid={`menu-copy-link-${invite.id}`}
+                                    className="gap-2 cursor-pointer"
+                                  >
+                                    <Copy size={13} className="text-muted-foreground" />
+                                    Copy invite link
+                                  </DropdownMenuItem>
+                                )}
 
-                            {/* Only when member has submitted credentials: Accept ✓ / Reject ✗ */}
-                            {isPending && hasSubmission && (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => handleAccept(invite.id)}
-                                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white transition-colors border border-emerald-500/20"
-                                  title="Approve member"
-                                  data-testid={`button-accept-${invite.id}`}
-                                >
-                                  <Check size={11} /> Accept
-                                </button>
-                                <button
-                                  onClick={() => handleReject(invite.id)}
-                                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white transition-colors border border-red-500/20"
-                                  title="Reject request"
-                                  data-testid={`button-reject-${invite.id}`}
-                                >
-                                  <X size={11} /> Reject
-                                </button>
-                              </div>
-                            )}
+                                {/* Pending + submitted: Accept */}
+                                {isPending && hasSubmission && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleAccept(invite.id)}
+                                      data-testid={`menu-accept-${invite.id}`}
+                                      className="gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 focus:text-emerald-600 dark:focus:text-emerald-400"
+                                    >
+                                      <UserCheck size={13} />
+                                      Accept member
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => handleReject(invite.id)}
+                                      data-testid={`menu-reject-${invite.id}`}
+                                      className="gap-2 cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
+                                    >
+                                      <UserX size={13} />
+                                      Reject request
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
 
-                            {/* Accepted: revoke */}
-                            {invite.status === 'accepted' && (
-                              revokeConfirmId === invite.id ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => handleRevoke(invite.id)}
-                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors"
-                                    data-testid={`button-revoke-confirm-${invite.id}`}
-                                  >Revoke</button>
-                                  <button
-                                    onClick={() => setRevokeConfirmId(null)}
-                                    className="px-2 py-1 rounded-lg text-[10px] font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                  >Cancel</button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => setRevokeConfirmId(invite.id)}
-                                  className="p-1.5 rounded-lg hover:bg-amber-500/10 text-muted-foreground hover:text-amber-600 transition-colors"
-                                  title="Revoke access"
-                                  data-testid={`button-revoke-${invite.id}`}
-                                >
-                                  <X size={12} />
-                                </button>
-                              )
-                            )}
+                                {/* Accepted: revoke */}
+                                {invite.status === 'accepted' && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleRevoke(invite.id)}
+                                      data-testid={`menu-revoke-${invite.id}`}
+                                      className="gap-2 cursor-pointer text-amber-600 dark:text-amber-400 focus:text-amber-600 dark:focus:text-amber-400"
+                                    >
+                                      <ShieldOff size={13} />
+                                      Revoke access
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
 
-                            {/* Revoked/rejected: delete */}
-                            {(invite.status === 'revoked' || invite.status === 'rejected') && (
-                              deleteConfirmId === invite.id ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => handleDelete(invite.id)}
-                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
-                                    data-testid={`button-delete-confirm-${invite.id}`}
-                                  >Delete</button>
-                                  <button
-                                    onClick={() => setDeleteConfirmId(null)}
-                                    className="px-2 py-1 rounded-lg text-[10px] font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                  >Cancel</button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => setDeleteConfirmId(invite.id)}
-                                  className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                                  title="Remove"
-                                  data-testid={`button-delete-${invite.id}`}
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              )
-                            )}
+                                {/* Revoked / rejected: delete */}
+                                {(invite.status === 'revoked' || invite.status === 'rejected') && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleDelete(invite.id)}
+                                      data-testid={`menu-delete-${invite.id}`}
+                                      className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+                                    >
+                                      <Trash2 size={13} />
+                                      Remove member
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
 

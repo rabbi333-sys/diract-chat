@@ -1,5 +1,6 @@
 {
   "dbType": "supabase",
   "supabase_url": "https://ebpaglmdoiszrlkqmftn.supabase.co",
-  "anon_key": "sb_publishable_choii-zYTXlOeUFfaDswIg_w0hUW8kl"
+  "anon_key": "sb_publishable_choii-zYTXlOeUFfaDswIg_w0hUW8kl",
+  "service_role_key": "sb_publishable_choii-zYTXlOeUFfaDswIg_w0hUW8kl"
 }
