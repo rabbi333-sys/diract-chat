@@ -192,15 +192,17 @@ RETURNS TABLE (
   submitted_email text
 )
 LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_email text := lower(trim(p_email));
 BEGIN
-  UPDATE public.team_invites SET last_login_at = NOW()
-  WHERE submitted_email = lower(trim(p_email))
-    AND submitted_password_hash = p_password_hash
-    AND status = 'accepted';
+  UPDATE public.team_invites ti SET last_login_at = NOW()
+  WHERE ti.submitted_email = v_email
+    AND ti.submitted_password_hash = p_password_hash
+    AND ti.status = 'accepted';
   RETURN QUERY
   SELECT t.id, t.role, t.permissions, t.submitted_name, t.submitted_email
   FROM public.team_invites t
-  WHERE t.submitted_email = lower(trim(p_email))
+  WHERE t.submitted_email = v_email
     AND t.submitted_password_hash = p_password_hash
     AND t.status = 'accepted';
 END;
