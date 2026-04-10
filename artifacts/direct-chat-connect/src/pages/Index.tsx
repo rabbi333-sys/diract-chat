@@ -5,6 +5,7 @@ import { AiControlGuide } from '@/components/AiControlGuide';
 import { getActiveConnection } from '@/lib/db-config';
 import { clearGuestSession } from '@/lib/guestSession';
 import { signOutMember, hasMemberSetup } from '@/lib/memberAuth';
+import { clearAdminSession } from '@/lib/adminAuth';
 import { toast } from 'sonner';
 import { SessionList } from '@/components/SessionList';
 import { AnalyticsCard } from '@/components/AnalyticsCard';
@@ -182,6 +183,7 @@ const Index = () => {
                 await signOutMember();
                 window.location.href = '/member-login';
               } else {
+                clearAdminSession();
                 clearGuestSession();
                 supabase.auth.signOut();
                 navigate('/');

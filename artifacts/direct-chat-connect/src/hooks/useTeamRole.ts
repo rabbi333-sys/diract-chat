@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
 import { getGuestSession, clearGuestSession } from '@/lib/guestSession';
 import { hasMemberSetup, getMemberUser, getMemberClient } from '@/lib/memberAuth';
+import { isAdminLoggedIn, getAdminSession } from '@/lib/adminAuth';
 
 export interface TeamRole {
   user: User | null;
@@ -47,6 +48,21 @@ export function useTeamRole(): TeamRole {
 
     const check = async () => {
       try {
+        // ── 0. Hard-coded admin session ──────────────────────────────────────
+        if (isAdminLoggedIn()) {
+          const adminSession = getAdminSession();
+          if (!cancelled) {
+            setUser(null);
+            setIsGuest(false);
+            setIsAdmin(true);
+            setRole('admin');
+            setPermissions([]);
+            setNotAuthorized(false);
+            setDisplayName(adminSession?.email?.split('@')[0] || 'Admin');
+          }
+          return;
+        }
+
         // ── 1. External Supabase member session (email/password auth) ────────
         if (hasMemberSetup()) {
           const memberUser = await getMemberUser();

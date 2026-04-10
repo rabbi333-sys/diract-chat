@@ -19,6 +19,7 @@ import {
 import { clearGuestSession } from '@/lib/guestSession';
 import { getStoredConnection } from '@/lib/externalDb';
 import { signOutMember, hasMemberSetup } from '@/lib/memberAuth';
+import { clearAdminSession } from '@/lib/adminAuth';
 import {
   buildCreds, encodeNonSupabaseCreds,
   proxyInit, proxyListInvites, proxyCreateInvite,
@@ -1039,6 +1040,7 @@ const Profile = () => {
       await signOutMember();
       window.location.href = '/member-login';
     } else {
+      clearAdminSession();
       clearGuestSession();
       await supabase.auth.signOut();
       navigate('/');

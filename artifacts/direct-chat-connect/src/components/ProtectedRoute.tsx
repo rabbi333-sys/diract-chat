@@ -1,29 +1,23 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { User } from "@supabase/supabase-js";
 import { Navigate } from "react-router-dom";
-import { hasActiveConnection } from "@/lib/db-config";
 import { isGuestSessionActive } from "@/lib/guestSession";
 import { hasMemberSetup, getMemberSession } from "@/lib/memberAuth";
+import { isAdminLoggedIn } from "@/lib/adminAuth";
 import Login from "@/pages/Login";
-import ConnectDB from "@/pages/ConnectDB";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
 }
 
 const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
-  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [memberAuthed, setMemberAuthed] = useState(false);
-  const dbConnected = hasActiveConnection();
   const memberSetup = hasMemberSetup();
 
   useEffect(() => {
     let cancelled = false;
 
     const init = async () => {
-      // 1. Check external Supabase member session (email/password auth)
       if (memberSetup) {
         try {
           const session = await getMemberSession();
@@ -33,37 +27,15 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
             return;
           }
         } catch { /* ignore */ }
-        // Member setup exists but no session → will redirect to /member-login
         if (!cancelled) setLoading(false);
         return;
       }
-
-      if (!dbConnected) {
-        if (!cancelled) setLoading(false);
-        return;
-      }
-
-      // 2. Check main Supabase admin session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!cancelled) {
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
+      if (!cancelled) setLoading(false);
     };
 
     init();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (!memberSetup) setUser(session?.user ?? null);
-      }
-    );
-
-    return () => {
-      cancelled = true;
-      subscription.unsubscribe();
-    };
-  }, [dbConnected, memberSetup]);
+    return () => { cancelled = true; };
+  }, [memberSetup]);
 
   if (loading) {
     return (
@@ -76,32 +48,20 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     );
   }
 
-  // Member email/password session is active
-  if (memberAuthed) {
-    return <>{children}</>;
-  }
+  // Member (invited user) session active
+  if (memberAuthed) return <>{children}</>;
 
-  // Member setup exists but session expired/missing → member login
-  if (memberSetup && !memberAuthed) {
-    return <Navigate to="/member-login" replace />;
-  }
+  // Member setup exists but session expired → member login
+  if (memberSetup && !memberAuthed) return <Navigate to="/member-login" replace />;
 
-  // Old-style guest session (backward compatibility for existing invited users)
-  if (!user && isGuestSessionActive()) {
-    return <>{children}</>;
-  }
+  // Old-style guest session (backward compat for existing invited users)
+  if (isGuestSessionActive()) return <>{children}</>;
 
-  // No DB connection → show ConnectDB inline (no separate route needed)
-  if (!dbConnected) {
-    return <ConnectDB />;
-  }
+  // Hard-coded admin session
+  if (isAdminLoggedIn()) return <>{children}</>;
 
-  // Admin login
-  if (!user) {
-    return <Login />;
-  }
-
-  return <>{children}</>;
+  // No session → show login
+  return <Login />;
 };
 
 export default ProtectedRoute;
