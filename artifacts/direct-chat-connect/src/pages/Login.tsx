@@ -137,17 +137,16 @@ const Login = () => {
           </div>
         )}
 
-        <button
-          onClick={() => window.history.back()}
-          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors self-start px-1"
-          data-testid="button-back"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-          Back
-        </button>
-
         <Card>
-          <CardHeader className="text-center">
+          <CardHeader className="text-center relative pb-2">
+            <button
+              onClick={() => navigate('/connect')}
+              className="absolute left-0 top-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium text-muted-foreground bg-muted/60 hover:bg-muted hover:text-foreground transition-all border border-border/40"
+              data-testid="button-back"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+              Back
+            </button>
             <CardTitle className="text-2xl font-bold">
               Meta <span className="text-primary">Automation</span>
             </CardTitle>
