@@ -27,7 +27,7 @@ import {
   BarChart3, MessageSquare, Settings, Menu, X, HandMetal,
   AlertOctagon, ShoppingBag, Bell, BellOff, Volume2, VolumeX,
   Bot, ChevronRight, ArrowLeft, Globe, Webhook, Database, ShieldAlert,
-  Power, Play, Loader2, List, Link2,
+  Power, Play, Loader2, List, Link2, Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -47,16 +47,18 @@ const allNavItems = [
   { icon: AlertOctagon, label: 'Failed', badgeKey: 'failed' as const },
   { icon: ShoppingBag, label: 'Orders', badgeKey: 'orders' as const },
   { icon: Bot, label: 'n8n Prompt' },
+  { icon: Users, label: 'Team Members' },
   { icon: Settings, label: 'Settings' },
 ];
 
-const NAV_LABEL_KEYS: Record<string, 'overview'|'messages'|'handoff'|'failed'|'orders'|'n8nPrompt'|'settings'> = {
+const NAV_LABEL_KEYS: Record<string, 'overview'|'messages'|'handoff'|'failed'|'orders'|'n8nPrompt'|'teamMembers'|'settings'> = {
   'Overview': 'overview',
   'Messages': 'messages',
   'Handoff': 'handoff',
   'Failed': 'failed',
   'Orders': 'orders',
   'n8n Prompt': 'n8nPrompt',
+  'Team Members': 'teamMembers',
   'Settings': 'settings',
 };
 
@@ -102,6 +104,11 @@ const Index = () => {
   }, [roleLoading, isAdmin, permissions.join(',')]);
 
   const handleNavClick = (label: string, badgeKey?: 'handoff' | 'failed' | 'orders') => {
+    if (label === 'Team Members') {
+      navigate('/profile');
+      setSidebarOpen(false);
+      return;
+    }
     setActiveNav(label);
     setSidebarOpen(false);
     if (badgeKey) clearCount(badgeKey);
