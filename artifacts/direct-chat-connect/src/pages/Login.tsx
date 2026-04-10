@@ -7,17 +7,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
-async function claimOwnershipIfFirst(): Promise<void> {
-  try {
-    const { data, error } = await supabase.rpc('claim_owner_if_unclaimed');
-    if (error) {
-      console.warn('claim_owner_if_unclaimed error:', error.message);
-    } else if (data === false) {
-      console.info('Workspace already has an owner — no claim made.');
-    }
-  } catch (e) {
-    console.warn('claim_owner_if_unclaimed threw:', e);
-  }
+/**
+ * Attempts to claim app ownership for the currently authenticated user.
+ * Returns true  — ownership was just claimed (this user is now Admin)
+ * Returns false — ownership was already taken (workspace has an owner)
+ * Throws        — RPC call failed (treat as an error, do not claim success)
+ */
+async function tryClaimOwnership(): Promise<boolean> {
+  const { data, error } = await supabase.rpc('claim_owner_if_unclaimed');
+  if (error) throw new Error(error.message);
+  return data === true;
 }
 
 const Login = () => {
@@ -30,13 +29,19 @@ const Login = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         toast.error("Error signing in: " + error.message);
-      } else if (data.session) {
-        await claimOwnershipIfFirst();
-        navigate("/");
+        return;
       }
+      // Edge-case: first user verified email, then signed in.
+      // If app_owner is still empty, claim it now (idempotent — no harm if already owned).
+      try {
+        await tryClaimOwnership();
+      } catch {
+        // Non-fatal on sign-in path — user is still authenticated.
+      }
+      navigate("/");
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       toast.error("Network error: " + (msg || "Could not reach Supabase."));
@@ -50,12 +55,15 @@ const Login = () => {
     if (password.length < 6) { toast.error("Password must be at least 6 characters"); return; }
     setIsLoading(true);
     try {
+      // ── Check whether a workspace owner already exists ────────────────────
       const { count, error: ownerCheckError } = await supabase
         .from('app_owner')
         .select('user_id', { count: 'exact', head: true });
 
       if (ownerCheckError) {
-        console.warn('app_owner check failed:', ownerCheckError.message);
+        // Fail-closed: if we cannot confirm the workspace is unclaimed, block signup.
+        toast.error("Unable to verify workspace status. Please try again.");
+        return;
       }
 
       if (typeof count === 'number' && count > 0) {
@@ -63,15 +71,35 @@ const Login = () => {
         return;
       }
 
+      // ── Proceed with signup ───────────────────────────────────────────────
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) {
         toast.error("Error signing up: " + error.message);
-      } else if (data.session) {
-        await claimOwnershipIfFirst();
-        toast.success("Account created! You are now the Admin with full access.");
-        navigate("/");
+        return;
+      }
+
+      if (data.session) {
+        // Email confirmation disabled — user is logged in immediately. Claim ownership now.
+        try {
+          const claimed = await tryClaimOwnership();
+          if (claimed) {
+            toast.success("Account created! You are now the Admin with full access.");
+            navigate("/");
+          } else {
+            // Race condition: another user claimed ownership between our check and this claim.
+            await supabase.auth.signOut();
+            toast.error("Another admin has already claimed this workspace. Please use an invite link to join.");
+          }
+        } catch (rpcErr) {
+          // RPC failed — sign out to leave the user in a clean state.
+          await supabase.auth.signOut();
+          const msg = rpcErr instanceof Error ? rpcErr.message : String(rpcErr);
+          toast.error("Account created but admin assignment failed: " + msg + ". Please contact support.");
+        }
       } else {
-        toast.info("Account created! Please check your email to verify, then sign in — you will be set as Admin automatically.");
+        // Email confirmation is still enabled in Supabase settings.
+        // Ownership will be claimed when the user verifies their email and signs in.
+        toast.info("Account created! Please check your email to verify. You will be set as Admin automatically when you sign in.");
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
