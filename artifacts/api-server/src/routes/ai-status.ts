@@ -20,6 +20,7 @@ import pg from "pg";
 import mysql from "mysql2/promise";
 import { MongoClient } from "mongodb";
 import { createClient as createRedis } from "redis";
+import { getServerDbConfig } from "../lib/server-db-config";
 
 const router = Router();
 
@@ -134,21 +135,49 @@ router.post("/ai-status", async (req: Request, res: Response) => {
     return void res.status(400).json({ error: "session_id is required" });
   }
 
+  // Resolve effective credentials:
+  // 1. Use what was passed in the request (explicit)
+  // 2. Fall back to server-stored credentials (saved from dashboard)
+  let effectiveUrl = supabase_url;
+  let effectiveKey = anon_key;
+  let effectiveCreds = creds;
+
+  if (!effectiveUrl && !effectiveCreds) {
+    const stored = getServerDbConfig();
+    if (stored) {
+      if (stored.dbType === "supabase" && stored.supabase_url) {
+        effectiveUrl = stored.supabase_url;
+        effectiveKey = stored.anon_key || stored.service_role_key;
+      } else if (stored.dbType !== "supabase") {
+        effectiveCreds = {
+          dbType: stored.dbType as NonSupaCreds["dbType"],
+          host: stored.host,
+          port: stored.port,
+          dbUsername: stored.dbUsername,
+          dbPassword: stored.dbPassword,
+          dbName: stored.dbName,
+          connectionString: stored.connectionString,
+        };
+      }
+    }
+  }
+
   try {
     let aiEnabled = true;
 
-    if (supabase_url && anon_key) {
-      aiEnabled = await checkSupabase(supabase_url, anon_key, session_id);
-    } else if (creds?.dbType === "postgresql") {
-      aiEnabled = await checkPostgres(creds, session_id);
-    } else if (creds?.dbType === "mysql") {
-      aiEnabled = await checkMysql(creds, session_id);
-    } else if (creds?.dbType === "mongodb") {
-      aiEnabled = await checkMongo(creds, session_id);
-    } else if (creds?.dbType === "redis") {
-      aiEnabled = await checkRedis(creds, session_id);
+    if (effectiveUrl && effectiveKey) {
+      aiEnabled = await checkSupabase(effectiveUrl, effectiveKey, session_id);
+    } else if (effectiveCreds?.dbType === "postgresql") {
+      aiEnabled = await checkPostgres(effectiveCreds, session_id);
+    } else if (effectiveCreds?.dbType === "mysql") {
+      aiEnabled = await checkMysql(effectiveCreds, session_id);
+    } else if (effectiveCreds?.dbType === "mongodb") {
+      aiEnabled = await checkMongo(effectiveCreds, session_id);
+    } else if (effectiveCreds?.dbType === "redis") {
+      aiEnabled = await checkRedis(effectiveCreds, session_id);
     } else {
-      return void res.status(400).json({ error: "Either supabase_url+anon_key or creds.dbType must be provided" });
+      // No credentials at all — default AI ON and let the workflow continue
+      return void res.json({ ai_enabled: true, session_id, note: "no_db_config" });
     }
 
     res.json({ ai_enabled: aiEnabled, session_id });

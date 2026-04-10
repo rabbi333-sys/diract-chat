@@ -98,7 +98,7 @@ function getN8nNodes(apiUrl: string): Record<MainDbType, { node: string; fields:
       fields: [
         { label: 'Method', value: 'POST' },
         { label: 'URL', value: apiUrl || '<your-app-url>/api/ai-status', isUrl: true },
-        { label: 'Body', value: '{\n  "session_id": "{{ $json.session_id }}",\n  "supabase_url": "https://YOUR-PROJECT.supabase.co",\n  "anon_key": "YOUR-ANON-KEY"\n}' },
+        { label: 'Body', value: '{\n  "session_id": "{{ $json.session_id }}"\n}' },
         { label: 'Returns', value: '{ "ai_enabled": true | false }' },
       ],
       ifPath: '{{ $json.ai_enabled }}',

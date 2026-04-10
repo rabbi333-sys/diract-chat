@@ -115,8 +115,33 @@ export function getActiveConnection(): MainDbConnection | null {
 
 const DB_CHANGE_EVENT = 'meta_db_change';
 
+/** Push the active connection to the API server so n8n can call /api/ai-status
+ *  with just session_id. Fires silently in the background. */
+function syncActiveConnectionToServer(): void {
+  const conn = getActiveConnection();
+  if (!conn) return;
+  const body: Record<string, string | undefined> = {
+    dbType: conn.dbType,
+    supabase_url: conn.url || undefined,
+    anon_key: conn.anonKey || undefined,
+    service_role_key: conn.serviceRoleKey || undefined,
+    host: conn.host || undefined,
+    port: conn.port || undefined,
+    dbUsername: conn.dbUsername || undefined,
+    dbPassword: conn.dbPassword || undefined,
+    dbName: conn.dbName || undefined,
+    connectionString: conn.connectionString || undefined,
+  };
+  fetch('/api/db-config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).catch(() => { /* silent — don't block the UI */ });
+}
+
 function notifyChange() {
   window.dispatchEvent(new CustomEvent(DB_CHANGE_EVENT));
+  syncActiveConnectionToServer();
 }
 
 export function onDbChange(handler: () => void): () => void {
