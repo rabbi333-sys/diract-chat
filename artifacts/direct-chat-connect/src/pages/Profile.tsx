@@ -19,7 +19,7 @@ import {
 import { clearGuestSession } from '@/lib/guestSession';
 import { getStoredConnection } from '@/lib/externalDb';
 import { signOutMember, hasMemberSetup } from '@/lib/memberAuth';
-import { clearAdminSession } from '@/lib/adminAuth';
+import { clearAdminSession, getAdminEmail, updateAdminCredentials, hashPassword, verifyAdminCredentials } from '@/lib/adminAuth';
 import {
   buildCreds, encodeNonSupabaseCreds,
   proxyInit, proxyListInvites, proxyCreateInvite,
@@ -865,6 +865,15 @@ const Profile = () => {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
+  // ── Admin credentials change ─────────────────────────────────────────────
+  const [credEmail, setCredEmail] = useState(() => getAdminEmail());
+  const [credPassword, setCredPassword] = useState('');
+  const [credConfirm, setCredConfirm] = useState('');
+  const [credCurrentPw, setCredCurrentPw] = useState('');
+  const [credSaving, setCredSaving] = useState(false);
+  const [credError, setCredError] = useState('');
+  const [credSuccess, setCredSuccess] = useState(false);
+
   const [dbConnections, setDbConnections] = useState<MainDbConnection[]>([]);
   const [activeDbId, setActiveDbId] = useState<string | null>(null);
   const [dbDeleteConfirmId, setDbDeleteConfirmId] = useState<string | null>(null);
@@ -1044,6 +1053,40 @@ const Profile = () => {
       clearGuestSession();
       await supabase.auth.signOut();
       navigate('/');
+    }
+  };
+
+  // ── Save admin login credentials ────────────────────────────────────────────
+  const handleSaveCredentials = async () => {
+    setCredError('');
+    setCredSuccess(false);
+    const email = credEmail.trim();
+    if (!email || !email.includes('@')) { setCredError('Enter a valid email address.'); return; }
+    if (credPassword && credPassword !== credConfirm) { setCredError('Passwords do not match.'); return; }
+    if (credPassword && credPassword.length < 6) { setCredError('Password must be at least 6 characters.'); return; }
+    if (!credCurrentPw) { setCredError('Enter your current password to confirm changes.'); return; }
+
+    setCredSaving(true);
+    try {
+      const currentEmail = getAdminEmail();
+      const valid = await verifyAdminCredentials(currentEmail, credCurrentPw);
+      if (!valid) { setCredError('Current password is incorrect.'); return; }
+
+      const newHash = await hashPassword(credPassword || credCurrentPw);
+      updateAdminCredentials(email, newHash);
+      setCredSuccess(true);
+      setCredPassword('');
+      setCredConfirm('');
+      setCredCurrentPw('');
+      toast.success('Login credentials updated. Please sign in again.');
+      setTimeout(() => {
+        clearAdminSession();
+        navigate('/');
+      }, 1500);
+    } catch {
+      setCredError('Failed to update credentials.');
+    } finally {
+      setCredSaving(false);
     }
   };
 
@@ -1314,6 +1357,95 @@ const Profile = () => {
             <p className="text-[13px] text-muted-foreground">{user?.email}</p>
           </div>
         </div>
+
+        {/* ── Login Credentials (admin only) ── */}
+        {isAdmin && (
+          <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-border/40 bg-gradient-to-r from-violet-50/60 to-transparent dark:from-violet-900/10 flex items-center gap-2">
+              <KeyRound size={14} className="text-primary" />
+              <h2 className="text-sm font-semibold text-foreground">Login Credentials</h2>
+            </div>
+            <div className="px-5 py-5 space-y-4">
+              <p className="text-[12px] text-muted-foreground">
+                Change the admin email and password used to sign in. You must confirm your current password before saving.
+              </p>
+
+              {/* Email */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Email</label>
+                <Input
+                  type="email"
+                  value={credEmail}
+                  onChange={e => { setCredEmail(e.target.value); setCredError(''); setCredSuccess(false); }}
+                  placeholder="admin@example.com"
+                  className="h-9 text-sm"
+                />
+              </div>
+
+              {/* New password */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">New Password <span className="font-normal normal-case">(leave blank to keep current)</span></label>
+                <Input
+                  type="password"
+                  value={credPassword}
+                  onChange={e => { setCredPassword(e.target.value); setCredError(''); setCredSuccess(false); }}
+                  placeholder="New password"
+                  className="h-9 text-sm"
+                  autoComplete="new-password"
+                />
+              </div>
+
+              {/* Confirm new password */}
+              {credPassword && (
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Confirm New Password</label>
+                  <Input
+                    type="password"
+                    value={credConfirm}
+                    onChange={e => { setCredConfirm(e.target.value); setCredError(''); setCredSuccess(false); }}
+                    placeholder="Repeat new password"
+                    className="h-9 text-sm"
+                    autoComplete="new-password"
+                  />
+                </div>
+              )}
+
+              {/* Divider */}
+              <div className="border-t border-border/40 pt-4 space-y-1.5">
+                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Current Password <span className="text-red-500">*</span></label>
+                <Input
+                  type="password"
+                  value={credCurrentPw}
+                  onChange={e => { setCredCurrentPw(e.target.value); setCredError(''); setCredSuccess(false); }}
+                  placeholder="Enter current password to confirm"
+                  className="h-9 text-sm"
+                  autoComplete="current-password"
+                />
+              </div>
+
+              {/* Error / success */}
+              {credError && (
+                <p className="text-[12px] text-red-500 flex items-center gap-1.5">
+                  <X size={12} /> {credError}
+                </p>
+              )}
+              {credSuccess && (
+                <p className="text-[12px] text-emerald-600 flex items-center gap-1.5">
+                  <Check size={12} /> Saved — signing you out…
+                </p>
+              )}
+
+              <button
+                onClick={handleSaveCredentials}
+                disabled={credSaving}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-[13px] font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
+              >
+                {credSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                Save Credentials
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Team Members (admin only) ── */}
         {isAdmin && (
