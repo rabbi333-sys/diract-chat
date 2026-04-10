@@ -152,8 +152,10 @@ const Login = () => {
           <CardHeader className="text-center relative pb-2">
             <button
               onClick={() => {
-                // Clear the active connection so ProtectedRoute shows ConnectDB
+                // Clear all connection data so ProtectedRoute shows ConnectDB
+                // (getActiveConnection falls back to connections[0], so active ID alone isn't enough)
                 localStorage.removeItem('meta_db_active_id');
+                localStorage.removeItem('meta_db_connections');
                 window.location.href = '/';
               }}
               className="absolute left-0 top-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium text-muted-foreground bg-muted/60 hover:bg-muted hover:text-foreground transition-all border border-border/40"
