@@ -292,7 +292,13 @@ export const useSavePromptDirect = () => {
         updated_at: new Date().toISOString(),
       });
       if (error) {
-        if (error.code === '42P01') {
+        const isTableMissing =
+          error.code === '42P01' ||
+          error.code === 'PGRST205' ||
+          /could not find the (public\.)?n8n_bot_settings/i.test(error.message) ||
+          /relation.*n8n_bot_settings.*does not exist/i.test(error.message) ||
+          /table.*n8n_bot_settings.*not found/i.test(error.message);
+        if (isTableMissing) {
           throw new Error('Table not found — run the SQL in Step 1 first');
         }
         throw new Error(error.message);

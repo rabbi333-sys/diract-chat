@@ -300,7 +300,7 @@ export const N8nPromptSettings = () => {
 
         <Button
           onClick={handleSavePrompt}
-          disabled={savePromptMutation.isPending || !form.supabaseUrl}
+          disabled={savePromptMutation.isPending || !form.supabaseUrl || !form.supabaseAnonKey}
           size="sm"
           className="w-full"
           data-testid="button-save-prompt"
