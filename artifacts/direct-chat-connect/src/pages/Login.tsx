@@ -42,7 +42,7 @@ const Login = () => {
         <Card>
           <CardHeader className="text-center pb-2">
             <CardTitle className="text-2xl font-bold">
-              Meta <span className="text-primary">Automation</span>
+              Chat <span className="text-primary">Monitor</span>
             </CardTitle>
             <CardDescription>Sign in to access the dashboard</CardDescription>
           </CardHeader>

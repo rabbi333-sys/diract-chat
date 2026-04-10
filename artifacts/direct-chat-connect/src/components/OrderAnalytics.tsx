@@ -61,7 +61,7 @@ async function generateAnalyticsPDF(
     fill(C.indigo); pdf.rect(W*.55,0,W*.45,40,'F');
     fill(C.white); pdf.circle(MARGIN+9,20,8,'F');
     color(C.primary); pdf.setFontSize(13); pdf.setFont('helvetica','bold'); pdf.text('M',MARGIN+9,24,{align:'center'});
-    color(C.white); pdf.setFontSize(17); pdf.setFont('helvetica','bold'); pdf.text('Meta Automation',MARGIN+22,16);
+    color(C.white); pdf.setFontSize(17); pdf.setFont('helvetica','bold'); pdf.text('Chat Monitor',MARGIN+22,16);
     pdf.setFontSize(10); pdf.setFont('helvetica','normal'); pdf.text('Analytics Report',MARGIN+22,24);
     pdf.setFontSize(8);
     pdf.text(format(new Date(),'dd MMM yyyy'),W-MARGIN,14,{align:'right'});
@@ -128,7 +128,7 @@ async function generateAnalyticsPDF(
       fill(C.light); pdf.rect(0,pH-11,W,11,'F');
       stroke(C.slate200); pdf.setLineWidth(0.3); pdf.line(0,pH-11,W,pH-11);
       color(C.muted); pdf.setFontSize(7); pdf.setFont('helvetica','normal');
-      pdf.text('Meta Automation — Confidential Analytics Report',MARGIN,pH-4);
+      pdf.text('Chat Monitor — Confidential Analytics Report',MARGIN,pH-4);
       pdf.text(`Page ${i} of ${pageCount}`,W-MARGIN,pH-4,{align:'right'});
     }
     pdf.save(`analytics-report-${format(new Date(),'dd-MMM-yyyy')}.pdf`);
