@@ -368,7 +368,7 @@ export const N8nPromptSettings = () => {
                 <code className="font-mono text-[10px] bg-muted px-2 py-1 rounded text-foreground break-all flex-1">
                   {`apikey: ${anonKey}`}
                 </code>
-                <CopyButton value={anonKey} label="anon key" />
+                <CopyButton value={`apikey: ${anonKey}`} label="apikey header" />
               </div>
             </div>
 
@@ -380,7 +380,7 @@ export const N8nPromptSettings = () => {
                 <code className="font-mono text-[10px] bg-muted px-2 py-1 rounded text-foreground break-all flex-1">
                   {`Authorization: Bearer ${anonKey}`}
                 </code>
-                <CopyButton value={`Bearer ${anonKey}`} label="auth header" />
+                <CopyButton value={`Authorization: Bearer ${anonKey}`} label="auth header" />
               </div>
             </div>
           </div>

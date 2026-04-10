@@ -310,7 +310,7 @@ export const useSavePromptDirect = () => {
 /** Load the saved system prompt from Supabase n8n_bot_settings table. */
 export const useLoadPromptDirect = (supabaseUrl: string, supabaseAnonKey: string) => {
   return useQuery({
-    queryKey: ['n8n-prompt-direct', supabaseUrl],
+    queryKey: ['n8n-prompt-direct', supabaseUrl, supabaseAnonKey],
     queryFn: async () => {
       if (!supabaseUrl || !supabaseAnonKey) return '';
       const { createClient } = await import('@supabase/supabase-js');
