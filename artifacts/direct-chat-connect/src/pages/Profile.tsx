@@ -1077,7 +1077,7 @@ const Profile = () => {
       const perms = (inviteRole === 'admin' || inviteRole === 'sub-admin') ? PERMISSION_OPTIONS.map((p) => p.key) : invitePerms;
       const conn = getActiveConnection();
       let token = '';
-      const createdBy = user?.id || 'admin';
+      const createdBy = user?.id || null;
 
       if (!conn || conn.dbType === 'supabase') {
         // Supabase path
