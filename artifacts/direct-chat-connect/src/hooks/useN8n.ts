@@ -280,7 +280,22 @@ export const useUpdateN8nPrompt = () => {
         p.systemMessage = newPrompt;
       }
 
-      await callN8n(settings, 'PUT', `workflows/${workflowId}`, updated);
+      // n8n's PUT /workflows/{id} rejects extra fields from the GET response
+      // (id, active, createdAt, updatedAt, meta, etc.) — send only allowed fields.
+      const putBody: Record<string, unknown> = {
+        name: updated.name,
+        nodes: updated.nodes,
+        connections: updated.connections,
+        settings: updated.settings ?? {},
+        staticData: updated.staticData ?? null,
+        pinData: updated.pinData ?? {},
+      };
+      if (updated.versionId) putBody.versionId = updated.versionId;
+      if (updated.tags && updated.tags.length > 0) {
+        putBody.tags = updated.tags.map((t) => ({ id: t.id }));
+      }
+
+      await callN8n(settings, 'PUT', `workflows/${workflowId}`, putBody);
     },
     onSuccess: (_, { workflowId }) => {
       queryClient.invalidateQueries({ queryKey: ['n8n-workflow', workflowId] });
