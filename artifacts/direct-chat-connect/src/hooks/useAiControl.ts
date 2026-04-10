@@ -30,13 +30,13 @@ export function useGlobalAiControl() {
         .select('ai_enabled')
         .eq('session_id', '__global__')
         .maybeSingle();
-      return data?.ai_enabled ?? true;
+      return data?.ai_enabled ?? false;
     },
     staleTime: 5_000,
     refetchInterval: 15_000,
   });
 
-  const globalOn = stateQuery.data ?? true;
+  const globalOn = !(stateQuery.data ?? false);
 
   const toggleMutation = useMutation({
     mutationFn: async (turnOn: boolean) => {
@@ -54,7 +54,7 @@ export function useGlobalAiControl() {
     },
     onSuccess: (_, turnOn) => {
       queryClient.invalidateQueries({ queryKey: ['ai-control'] });
-      toast.success(turnOn ? 'All AI active — Start ✓' : 'All AI stopped — Shutdown ✓');
+      toast.success(!turnOn ? 'All AI active — Start ✓' : 'All AI stopped — Shutdown ✓');
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['ai-control-global'] });
@@ -63,7 +63,7 @@ export function useGlobalAiControl() {
 
   return {
     globalOn,
-    toggle: () => toggleMutation.mutate(!globalOn),
+    toggle: () => toggleMutation.mutate(globalOn),
     isPending: toggleMutation.isPending || stateQuery.isLoading,
   };
 }
