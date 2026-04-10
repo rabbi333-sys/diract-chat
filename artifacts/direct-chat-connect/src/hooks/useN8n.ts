@@ -235,6 +235,41 @@ export const useN8nWorkflow = (settings: N8nSettings | null, workflowId: string 
   });
 };
 
+/** Helper: apply the new prompt text to a workflow node's parameters in-place. */
+function applyPromptToNode(p: Record<string, unknown>, newPrompt: string): void {
+  if (p.systemMessage !== undefined) {
+    p.systemMessage = newPrompt;
+  } else if (p.system_message !== undefined) {
+    p.system_message = newPrompt;
+  } else if (p.systemPrompt !== undefined) {
+    p.systemPrompt = newPrompt;
+  } else if (p.prompt !== undefined) {
+    p.prompt = newPrompt;
+  } else if (
+    p.options &&
+    typeof p.options === 'object' &&
+    (p.options as Record<string, unknown>).systemMessage !== undefined
+  ) {
+    (p.options as Record<string, unknown>).systemMessage = newPrompt;
+  } else {
+    p.systemMessage = newPrompt;
+  }
+}
+
+/** Helper: build a minimal PUT body that n8n accepts (no extra read-only fields). */
+function buildPutBody(wf: N8nWorkflow): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    name: wf.name,
+    nodes: wf.nodes,
+    connections: wf.connections,
+  };
+  if (wf.settings && Object.keys(wf.settings).length > 0) body.settings = wf.settings;
+  if (wf.pinData && Object.keys(wf.pinData as object).length > 0) body.pinData = wf.pinData;
+  if (wf.versionId) body.versionId = wf.versionId;
+  if (wf.tags && wf.tags.length > 0) body.tags = wf.tags.map((t) => ({ id: t.id }));
+  return body;
+}
+
 export const useUpdateN8nPrompt = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -248,68 +283,56 @@ export const useUpdateN8nPrompt = () => {
       workflowId: string;
       nodeId: string;
       newPrompt: string;
-    }) => {
-      const freshWorkflow = (await callN8n(
-        settings,
-        'GET',
-        `workflows/${workflowId}`
-      )) as N8nWorkflow;
+    }): Promise<{ savedVia: 'supabase' | 'n8n' }> => {
 
-      const updated: N8nWorkflow = JSON.parse(JSON.stringify(freshWorkflow));
-      const nodeIdx = updated.nodes.findIndex((n) => n.id === nodeId);
-      if (nodeIdx === -1) throw new Error('AI Agent node not found in workflow');
+      // ── Strategy 1: save to Supabase n8n_bot_settings table (no API schema issues) ──
+      try {
+        const { supabase } = await import('@/integrations/supabase/client');
+        const { error: sbError } = await supabase
+          .from('n8n_bot_settings')
+          .upsert({
+            id: `${workflowId}_${nodeId}`,
+            workflow_id: workflowId,
+            node_id: nodeId,
+            system_prompt: newPrompt,
+            updated_at: new Date().toISOString(),
+          });
 
-      const node = updated.nodes[nodeIdx];
-      const p = node.parameters;
-
-      if (p.systemMessage !== undefined) {
-        p.systemMessage = newPrompt;
-      } else if (p.system_message !== undefined) {
-        p.system_message = newPrompt;
-      } else if (p.systemPrompt !== undefined) {
-        p.systemPrompt = newPrompt;
-      } else if (p.prompt !== undefined) {
-        p.prompt = newPrompt;
-      } else if (
-        p.options &&
-        typeof p.options === 'object' &&
-        (p.options as Record<string, unknown>).systemMessage !== undefined
-      ) {
-        (p.options as Record<string, unknown>).systemMessage = newPrompt;
-      } else {
-        p.systemMessage = newPrompt;
-      }
-
-      // n8n PUT /workflows/{id} only accepts a specific set of fields.
-      // Sending anything else (id, active, createdAt, updatedAt, meta, etc.)
-      // causes "must NOT have additional properties". Be minimal — only include
-      // fields that actually have meaningful values.
-      const putBody: Record<string, unknown> = {
-        name: updated.name,
-        nodes: updated.nodes,
-        connections: updated.connections,
-      };
-      if (updated.settings && Object.keys(updated.settings).length > 0) {
-        putBody.settings = updated.settings;
-      }
-      if (updated.staticData !== undefined && updated.staticData !== null) {
-        putBody.staticData = updated.staticData;
-      }
-      if (updated.pinData && Object.keys(updated.pinData as object).length > 0) {
-        putBody.pinData = updated.pinData;
-      }
-      if (updated.versionId) {
-        putBody.versionId = updated.versionId;
-      }
-      if (updated.tags && updated.tags.length > 0) {
-        putBody.tags = updated.tags.map((t) => ({ id: t.id }));
+        if (!sbError) {
+          // Supabase saved — also try n8n PUT silently as bonus (ignore errors)
+          try {
+            const fresh = (await callN8n(settings, 'GET', `workflows/${workflowId}`)) as N8nWorkflow;
+            const wf: N8nWorkflow = JSON.parse(JSON.stringify(fresh));
+            const idx = wf.nodes.findIndex((n) => n.id === nodeId);
+            if (idx !== -1) {
+              applyPromptToNode(wf.nodes[idx].parameters, newPrompt);
+              await callN8n(settings, 'PUT', `workflows/${workflowId}`, buildPutBody(wf));
+            }
+          } catch {
+            // n8n PUT failed — that's OK, Supabase has the prompt
+          }
+          return { savedVia: 'supabase' };
+        }
+      } catch {
+        // Supabase not available — fall through to n8n direct save
       }
 
-      await callN8n(settings, 'PUT', `workflows/${workflowId}`, putBody);
+      // ── Strategy 2: direct n8n PUT (fallback) ──────────────────────────────
+      const fresh = (await callN8n(settings, 'GET', `workflows/${workflowId}`)) as N8nWorkflow;
+      const wf: N8nWorkflow = JSON.parse(JSON.stringify(fresh));
+      const idx = wf.nodes.findIndex((n) => n.id === nodeId);
+      if (idx === -1) throw new Error('AI Agent node not found in workflow');
+      applyPromptToNode(wf.nodes[idx].parameters, newPrompt);
+      await callN8n(settings, 'PUT', `workflows/${workflowId}`, buildPutBody(wf));
+      return { savedVia: 'n8n' };
     },
-    onSuccess: (_, { workflowId }) => {
+    onSuccess: (result, { workflowId }) => {
       queryClient.invalidateQueries({ queryKey: ['n8n-workflow', workflowId] });
-      toast.success('Prompt saved! Changes active from next conversation.');
+      if (result.savedVia === 'supabase') {
+        toast.success('Prompt saved to Supabase! n8n reads it from your database.');
+      } else {
+        toast.success('Prompt saved directly to n8n workflow!');
+      }
     },
     onError: (error: Error) => {
       toast.error(`Save failed: ${error.message}`);

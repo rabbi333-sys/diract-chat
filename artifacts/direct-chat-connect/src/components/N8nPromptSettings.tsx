@@ -516,6 +516,34 @@ export const N8nPromptSettings = () => {
         </div>
       )}
 
+      {/* ── Supabase Table Setup Guide ── */}
+      <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-3.5 space-y-3">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wider">
+          <Zap size={11} /> Supabase Table Setup (one-time)
+        </div>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Prompts are saved to a <code className="font-mono text-[10px] bg-muted px-1 rounded">n8n_bot_settings</code> table in your Supabase database.
+          Run this SQL once in your Supabase <strong>SQL Editor</strong>:
+        </p>
+        <pre className="text-[10px] bg-muted/60 border border-border rounded-lg p-3 overflow-x-auto text-foreground font-mono leading-relaxed whitespace-pre-wrap break-all">{`CREATE TABLE IF NOT EXISTS n8n_bot_settings (
+  id          TEXT PRIMARY KEY,
+  workflow_id TEXT,
+  node_id     TEXT,
+  system_prompt TEXT,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);`}</pre>
+        <div className="space-y-1.5">
+          <p className="text-[11px] font-semibold text-foreground">How n8n reads the prompt:</p>
+          <ol className="text-[11px] text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>In your n8n workflow, add an <strong>HTTP Request</strong> node at the start</li>
+            <li>Method: <code className="font-mono text-[10px] bg-muted px-1 rounded">GET</code></li>
+            <li>URL: <code className="font-mono text-[10px] bg-muted px-1 rounded">{'YOUR_SUPABASE_URL/rest/v1/n8n_bot_settings?select=system_prompt&limit=1'}</code></li>
+            <li>Add header: <code className="font-mono text-[10px] bg-muted px-1 rounded">apikey: YOUR_SUPABASE_ANON_KEY</code></li>
+            <li>Use <code className="font-mono text-[10px] bg-muted px-1 rounded">{'{{$json[0].system_prompt}}'}</code> as the AI Agent's System Message</li>
+          </ol>
+        </div>
+      </div>
+
       {/* Info box */}
       <div className="rounded-xl border border-border bg-muted/20 p-3.5">
         <div className="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
