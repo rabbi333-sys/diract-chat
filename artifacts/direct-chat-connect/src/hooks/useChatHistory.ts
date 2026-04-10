@@ -384,6 +384,44 @@ export const useChatHistory = (sessionId?: string) => {
   });
 };
 
+// ─── Real-time activity tracker ───────────────────────────────────────────────
+// Tracks per-session message counts + the wall-clock time a new message was
+// first detected. This lets us show real "last active" times even when the
+// database table (e.g. n8n_chat_histories) has no created_at column.
+const _activityTracker = new Map<string, { count: number; last_active_at: string }>();
+
+function trackSessionActivity(sessions: { session_id: string; recipient: string; last_message_at: string; message_count: number; is_active: boolean }[]): { session_id: string; recipient: string; last_message_at: string; message_count: number; is_active: boolean }[] {
+  const FALLBACK_TS = '2000-01-01T00:00:00.000Z';
+  const now = new Date().toISOString();
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+  return sessions.map((s) => {
+    const tracked = _activityTracker.get(s.session_id);
+
+    if (!tracked) {
+      // First time seeing this session — record count but do NOT mark active yet.
+      // Use the DB timestamp as the starting last_active_at (may be fallback).
+      _activityTracker.set(s.session_id, { count: s.message_count, last_active_at: s.last_message_at });
+      return s;
+    }
+
+    if (s.message_count > tracked.count) {
+      // A new message just arrived — stamp it with the current wall-clock time.
+      _activityTracker.set(s.session_id, { count: s.message_count, last_active_at: now });
+      return { ...s, last_message_at: now, is_active: true };
+    }
+
+    // No new messages — use whatever time we tracked.
+    const effectiveTs =
+      s.last_message_at === FALLBACK_TS ? tracked.last_active_at : s.last_message_at;
+    return {
+      ...s,
+      last_message_at: effectiveTs,
+      is_active: effectiveTs !== FALLBACK_TS && effectiveTs >= fiveMinutesAgo,
+    };
+  });
+}
+
 // ─── useSessions ──────────────────────────────────────────────────────────────
 export const useSessions = (filterDate?: Date | null) => {
   const dbKey = useDbConnectionKey();
@@ -403,10 +441,11 @@ export const useSessions = (filterDate?: Date | null) => {
           if (filterDate) body.filterDate = format(filterDate, 'yyyy-MM-dd');
           const { sessions } = await apiPost<{ sessions: { session_id: string; recipient: string; last_message_at: string; message_count: number }[] }>('/api/sessions/list', body);
           const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-          return sessions.map((s) => ({
+          const withActive = sessions.map((s) => ({
             ...s,
             is_active: s.last_message_at >= fiveMinutesAgo,
           })) as SessionInfo[];
+          return trackSessionActivity(withActive) as SessionInfo[];
         } catch {
           return [] as SessionInfo[];
         }
@@ -423,7 +462,7 @@ export const useSessions = (filterDate?: Date | null) => {
                 catch { return true; }
               })
             : msgs;
-          return buildSessionsFromMessages(filtered) as SessionInfo[];
+          return trackSessionActivity(buildSessionsFromMessages(filtered)) as SessionInfo[];
         } catch (e: unknown) {
           if (e instanceof Error && e.message === 'TABLE_NOT_FOUND') return [] as SessionInfo[];
           throw e;
@@ -440,7 +479,7 @@ export const useSessions = (filterDate?: Date | null) => {
                 catch { return true; }
               })
             : msgs;
-          return buildSessionsFromMessages(filtered) as SessionInfo[];
+          return trackSessionActivity(buildSessionsFromMessages(filtered)) as SessionInfo[];
         } catch (e: unknown) {
           if (e instanceof Error && e.message === 'TABLE_NOT_FOUND') return [] as SessionInfo[];
           throw e;
@@ -460,7 +499,7 @@ export const useSessions = (filterDate?: Date | null) => {
         });
         if (error) throw new Error(error.message);
         if (data?.error === 'TABLE_NOT_FOUND') return [] as SessionInfo[];
-        return (data?.sessions ?? []) as SessionInfo[];
+        return trackSessionActivity((data?.sessions ?? []) as SessionInfo[]) as SessionInfo[];
       } catch {
         return [] as SessionInfo[];
       }

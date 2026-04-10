@@ -188,9 +188,12 @@ export const ChatMessage = ({ message, onReply, isFirst = true, isLast = true }:
     s.type === 'voice-placeholder' || s.type === 'image-placeholder' || s.type === 'video-placeholder'
   );
 
-  const time = message.timestamp
-    ? new Date(message.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-    : '';
+  const time = (() => {
+    if (!message.timestamp || message.timestamp === '2000-01-01T00:00:00.000Z') return '';
+    try {
+      return new Date(message.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch { return ''; }
+  })();
 
   // Messenger-style corner rounding
   const rightRadius = cn('rounded-tl-[18px]', isFirst ? 'rounded-tr-[18px]' : 'rounded-tr-[5px]', 'rounded-br-[5px] rounded-bl-[18px]');
