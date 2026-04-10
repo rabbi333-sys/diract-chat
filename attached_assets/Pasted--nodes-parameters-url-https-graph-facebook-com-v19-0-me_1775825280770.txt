@@ -1,0 +1,147 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v19.0/me/conversations?user_id={{ $node[\"Respond to Webhook1\"].json.body.entry[0].messaging[0].sender.id }}&fields=participants{name,email,id}&access_token=EAAjlKR2bH1kBRNlpqKLYXdIXlo1FsPfNWUeg4zSZCcirzOgs5wb9hX7QLZCOmpB0B9wSQhpy2fmuRMJxu2JkWlI8ugBXZAEz2yMhaJwZBOUiaUaYThDq7cQ1fQRSVfEEAn8wZCoT0MAbtBZAnmjTxZCiADJQw8ZAHDfZCv1je3YZCWAue2U2OcwOar8BcXiSM9Bl6z1z52lAjCuZCAMCSZBUAVv5bPw25QZDZD",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -3312,
+        752
+      ],
+      "id": "e78a1ad3-96bb-4c2d-928d-8ff7169bc1b3",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "62408025-33ac-4f59-acd7-b0b371ed9bff",
+              "name": "body.entry[0].messaging[0].sender.id",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].sender.id }}",
+              "type": "string"
+            },
+            {
+              "id": "05239148-2a3b-4054-ab79-02352b9ecc5c",
+              "name": "body.entry[0].messaging[0].recipient.id",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].recipient.id }}",
+              "type": "string"
+            },
+            {
+              "id": "7f03d013-4d3a-448e-a7b7-0a46e12d83f9",
+              "name": "body.entry[0].messaging[0].message.mid",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].message.mid }}",
+              "type": "string"
+            },
+            {
+              "id": "9fc2d403-8652-41ae-b227-9460f9199e81",
+              "name": "body.entry[0].messaging[0].message.text",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].message.text }}",
+              "type": "string"
+            },
+            {
+              "id": "3b0f5aa6-4b7b-49e7-9d44-e506188b80dc",
+              "name": "body.entry[0].messaging[0].timestamp",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].timestamp }}",
+              "type": "number"
+            },
+            {
+              "id": "b5637374-da4c-4121-ae60-c95be74dbb88",
+              "name": "body.entry[0].messaging[0].message.reply_to",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].message.reply_to }}",
+              "type": "object"
+            },
+            {
+              "id": "68aca9e7-a176-490e-9470-3fa04ab78ce4",
+              "name": "body.entry[0].messaging[0].message.reply_to",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].message.reply_to }}",
+              "type": "object"
+            },
+            {
+              "id": "4e2459b9-0ade-4d62-a743-b092533db824",
+              "name": "body.entry[0].messaging[0].message.attachments[0]",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].message.attachments[0] }}",
+              "type": "object"
+            },
+            {
+              "id": "57ed1e56-fafc-4cc8-94aa-e454fa6dd5d8",
+              "name": "body.entry[0].messaging[0].message.attachments[0]",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].message.attachments[0] }}",
+              "type": "object"
+            },
+            {
+              "id": "5cb3e158-3c42-4045-8245-3668afd39c48",
+              "name": "body.entry[0].changes[0].value.post",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].changes[0].value.post }}",
+              "type": "object"
+            },
+            {
+              "id": "db217c7d-6724-4bb0-8fce-a3a92f14b18f",
+              "name": "body.entry[0].changes[0].value.post.id",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].changes[0].value.post.id }}",
+              "type": "string"
+            },
+            {
+              "id": "5685e278-7ab9-491b-a7fe-c4979511b60b",
+              "name": "body.entry[0].changes[0].value.message",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].changes[0].value.message }}",
+              "type": "string"
+            },
+            {
+              "id": "86710a90-cb22-46bf-928f-ed9de40acf87",
+              "name": "body.entry[0].changes[0].value.comment_id",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].changes[0].value.comment_id }}",
+              "type": "string"
+            },
+            {
+              "id": "fcd528ab-2312-4222-bb35-99334450984a",
+              "name": "data[0].participants.data[0].name",
+              "value": "={{ $json.data[0].participants.data[0].name }}",
+              "type": "string"
+            },
+            {
+              "id": "d9805822-7af4-4040-a611-3f0000c7fc75",
+              "name": "body.entry[0].messaging[0].message.mid",
+              "value": "={{ $('Respond to Webhook1').item.json.body.entry[0].messaging[0].message.mid }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3120,
+        752
+      ],
+      "id": "1628e07b-522f-4156-b184-5a178e3e6f05",
+      "name": "Edit Fields21"
+    }
+  ],
+  "connections": {
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields21",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields21": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "bae75dd4b8e7a37fbcc9a6565a18bb0fccb52c8e5f0d6e6a8d1493bfec8d0912"
+  }
+}
