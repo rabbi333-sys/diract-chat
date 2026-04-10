@@ -54,6 +54,42 @@ export function updateAdminCredentials(email: string, passwordHash: string): voi
   localStorage.setItem(ADMIN_CREDS_KEY, JSON.stringify(creds));
 }
 
+// ── Admin profile: display name & avatar ─────────────────────────────────────
+const ADMIN_PROFILE_KEY = "meta_admin_profile";
+
+interface AdminProfile {
+  displayName?: string;
+  avatarUrl?: string;
+}
+
+function getAdminProfile(): AdminProfile {
+  try {
+    const raw = localStorage.getItem(ADMIN_PROFILE_KEY);
+    return raw ? (JSON.parse(raw) as AdminProfile) : {};
+  } catch { return {}; }
+}
+
+function saveAdminProfile(patch: AdminProfile): void {
+  const current = getAdminProfile();
+  localStorage.setItem(ADMIN_PROFILE_KEY, JSON.stringify({ ...current, ...patch }));
+}
+
+export function getAdminDisplayName(): string {
+  return getAdminProfile().displayName || '';
+}
+
+export function setAdminDisplayName(name: string): void {
+  saveAdminProfile({ displayName: name });
+}
+
+export function getAdminAvatarUrl(): string {
+  return getAdminProfile().avatarUrl || '';
+}
+
+export function setAdminAvatarUrl(url: string): void {
+  saveAdminProfile({ avatarUrl: url });
+}
+
 export interface AdminSession {
   email: string;
   loggedInAt: number;

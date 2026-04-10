@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
 import { getGuestSession, clearGuestSession } from '@/lib/guestSession';
 import { hasMemberSetup, getMemberUser, getMemberClient } from '@/lib/memberAuth';
-import { isAdminLoggedIn, getAdminSession } from '@/lib/adminAuth';
+import { isAdminLoggedIn, getAdminSession, getAdminDisplayName, getAdminAvatarUrl } from '@/lib/adminAuth';
 
 export interface TeamRole {
   user: User | null;
@@ -51,6 +51,8 @@ export function useTeamRole(): TeamRole {
         // ── 0. Hard-coded admin session ──────────────────────────────────────
         if (isAdminLoggedIn()) {
           const adminSession = getAdminSession();
+          const storedName = getAdminDisplayName();
+          const fallback = adminSession?.email?.split('@')[0] || 'Admin';
           if (!cancelled) {
             setUser(null);
             setIsGuest(false);
@@ -58,7 +60,7 @@ export function useTeamRole(): TeamRole {
             setRole('admin');
             setPermissions([]);
             setNotAuthorized(false);
-            setDisplayName(adminSession?.email?.split('@')[0] || 'Admin');
+            setDisplayName(storedName || fallback);
           }
           return;
         }

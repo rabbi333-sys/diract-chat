@@ -19,7 +19,7 @@ import {
 import { clearGuestSession } from '@/lib/guestSession';
 import { getStoredConnection } from '@/lib/externalDb';
 import { signOutMember, hasMemberSetup } from '@/lib/memberAuth';
-import { clearAdminSession, getAdminEmail, updateAdminCredentials, hashPassword, verifyAdminCredentials } from '@/lib/adminAuth';
+import { clearAdminSession, getAdminEmail, updateAdminCredentials, hashPassword, verifyAdminCredentials, getAdminDisplayName, setAdminDisplayName, getAdminAvatarUrl, setAdminAvatarUrl } from '@/lib/adminAuth';
 import {
   buildCreds, encodeNonSupabaseCreds,
   proxyInit, proxyListInvites, proxyCreateInvite,
@@ -964,8 +964,14 @@ const Profile = () => {
   }, [isAdmin, pageLoading]);
 
   useEffect(() => {
-    if (user?.user_metadata?.avatar_url) setAvatarUrl(user.user_metadata.avatar_url);
-  }, [user]);
+    if (user?.user_metadata?.avatar_url) {
+      setAvatarUrl(user.user_metadata.avatar_url);
+    } else if (isAdmin && !user) {
+      // Admin is localStorage-only — load avatar from local storage
+      const stored = getAdminAvatarUrl();
+      if (stored) setAvatarUrl(stored);
+    }
+  }, [user, isAdmin]);
 
   const loadInvites = async (userId: string) => {
     setInvitesLoading(true);
@@ -1002,7 +1008,7 @@ const Profile = () => {
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user) return;
+    if (!file) return;
     if (!file.type.startsWith('image/')) { toast.error('Please select an image file'); return; }
     setIsUploadingAvatar(true);
     try {
@@ -1022,10 +1028,17 @@ const Profile = () => {
         img.onerror = reject;
         img.src = objectUrl;
       });
-      const { error } = await supabase.auth.updateUser({ data: { avatar_url: dataUrl } });
-      if (error) { toast.error('Failed to save avatar'); return; }
-      setAvatarUrl(dataUrl);
-      toast.success('Profile photo updated!');
+      if (isAdmin && !user) {
+        // Admin: save to localStorage
+        setAdminAvatarUrl(dataUrl);
+        setAvatarUrl(dataUrl);
+        toast.success('Profile photo updated!');
+      } else if (user) {
+        const { error } = await supabase.auth.updateUser({ data: { avatar_url: dataUrl } });
+        if (error) { toast.error('Failed to save avatar'); return; }
+        setAvatarUrl(dataUrl);
+        toast.success('Profile photo updated!');
+      }
     } catch {
       toast.error('Could not process image');
     } finally {
@@ -1035,12 +1048,19 @@ const Profile = () => {
   };
 
   const handleSaveName = async () => {
-    if (!user || !editName.trim()) return;
+    if (!editName.trim()) return;
     setIsSavingName(true);
     try {
-      const { error } = await supabase.auth.updateUser({ data: { display_name: editName.trim() } });
-      if (error) { toast.error('Failed to update name'); }
-      else { toast.success('Name updated'); setIsEditingName(false); }
+      if (isAdmin && !user) {
+        // Admin: save name to localStorage
+        setAdminDisplayName(editName.trim());
+        toast.success('Name updated');
+        setIsEditingName(false);
+      } else if (user) {
+        const { error } = await supabase.auth.updateUser({ data: { display_name: editName.trim() } });
+        if (error) { toast.error('Failed to update name'); }
+        else { toast.success('Name updated'); setIsEditingName(false); }
+      }
     } finally { setIsSavingName(false); }
   };
 
