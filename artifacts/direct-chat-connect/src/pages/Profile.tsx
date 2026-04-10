@@ -98,6 +98,9 @@ const StatusPill = ({ status }: { status: string }) => {
   );
 };
 
+
+
+
 const INVITE_FIX_SQL = `-- Step 1: Create team_invites table (safe on fresh AND existing databases)
 CREATE TABLE IF NOT EXISTS public.team_invites (
   id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -446,102 +449,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(api_key);`,
 );`,
   },
 ];
-
-const GUIDE_COLORS: Record<string, { badge: string; dot: string; ring: string; icon: string }> = {
-  blue:   { badge: 'bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300',     dot: 'bg-blue-500',    ring: 'ring-blue-200 dark:ring-blue-800',    icon: 'text-blue-500' },
-  emerald:{ badge: 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500', ring: 'ring-emerald-200 dark:ring-emerald-800', icon: 'text-emerald-500' },
-  orange: { badge: 'bg-orange-100 dark:bg-orange-950/50 text-orange-700 dark:text-orange-300', dot: 'bg-orange-500',  ring: 'ring-orange-200 dark:ring-orange-800',  icon: 'text-orange-500' },
-  violet: { badge: 'bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300', dot: 'bg-violet-500',  ring: 'ring-violet-200 dark:ring-violet-800',  icon: 'text-violet-500' },
-  red:    { badge: 'bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300',           dot: 'bg-red-500',     ring: 'ring-red-200 dark:ring-red-800',      icon: 'text-red-500' },
-  indigo: { badge: 'bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300', dot: 'bg-indigo-500',  ring: 'ring-indigo-200 dark:ring-indigo-800',  icon: 'text-indigo-500' },
-  cyan:   { badge: 'bg-cyan-100 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300',       dot: 'bg-cyan-500',    ring: 'ring-cyan-200 dark:ring-cyan-800',    icon: 'text-cyan-500' },
-  pink:   { badge: 'bg-pink-100 dark:bg-pink-950/50 text-pink-700 dark:text-pink-300',       dot: 'bg-pink-500',    ring: 'ring-pink-200 dark:ring-pink-800',    icon: 'text-pink-500' },
-};
-
-function SqlCopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={async () => { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-      className={cn('flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all',
-        copied ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400' : 'bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground')}
-    >
-      {copied ? <Check size={11} /> : <Copy size={11} />}
-      {copied ? 'Copied!' : 'Copy SQL'}
-    </button>
-  );
-}
-
-function SqlSetupGuideCard() {
-  const [openId, setOpenId] = useState<string | null>('messages');
-  const [allOpen, setAllOpen] = useState(false);
-
-  return (
-    <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-border/40 bg-gradient-to-r from-slate-50/80 to-zinc-50/40 dark:from-zinc-800/40 dark:to-zinc-900/20 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center">
-            <BookOpen size={13} className="text-white" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-foreground">SQL Setup Guide</h3>
-            <p className="text-[10px] text-muted-foreground">Run these scripts in your Supabase SQL Editor</p>
-          </div>
-        </div>
-        <button onClick={() => { if (allOpen) { setAllOpen(false); setOpenId(null); } else { setAllOpen(true); } }}
-          className="text-[11px] text-blue-500 hover:text-blue-600 font-semibold transition-colors">
-          {allOpen ? 'Collapse all' : 'Expand all'}
-        </button>
-      </div>
-
-      {/* Info banner */}
-      <div className="mx-4 mt-4 mb-1 px-3.5 py-3 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40 flex items-start gap-2.5">
-        <Zap size={13} className="text-blue-500 flex-shrink-0 mt-0.5" />
-        <p className="text-[11px] text-blue-700 dark:text-blue-300 leading-relaxed">
-          <strong>One database, all features.</strong> Connect your Supabase project once and all tabs — Messages, Orders, Handoffs, Team, AI Control — will use the same database automatically.
-        </p>
-      </div>
-
-      {/* Accordion items */}
-      <div className="p-4 space-y-2">
-        {SETUP_GUIDES.map((guide) => {
-          const isOpen = allOpen || openId === guide.id;
-          const colors = GUIDE_COLORS[guide.color];
-          return (
-            <div key={guide.id} className={cn('rounded-xl border overflow-hidden transition-all', isOpen ? `ring-1 ${colors.ring} border-transparent` : 'border-border/40')}>
-              <button
-                className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-muted/30 transition-colors"
-                onClick={() => { if (allOpen) { setAllOpen(false); setOpenId(openId === guide.id ? null : guide.id); } else { setOpenId(openId === guide.id ? null : guide.id); } }}
-              >
-                <div className={cn('w-2 h-2 rounded-full flex-shrink-0', colors.dot)} />
-                <span className={cn('flex-shrink-0', colors.icon)}>{guide.icon}</span>
-                <span className="flex-1 text-sm font-semibold text-foreground">{guide.title}</span>
-                <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full hidden sm:inline-flex', colors.badge)}>1 table</span>
-                {isOpen ? <ChevronUp size={13} className="text-muted-foreground flex-shrink-0" /> : <ChevronDown size={13} className="text-muted-foreground flex-shrink-0" />}
-              </button>
-              {isOpen && (
-                <div className="px-4 pb-4">
-                  <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed">{guide.description}</p>
-                  <div className="relative rounded-xl overflow-hidden border border-border/40">
-                    <div className="flex items-center justify-between px-3 py-2 bg-zinc-900/95 dark:bg-zinc-950 border-b border-white/10">
-                      <span className="text-[10px] text-zinc-400 font-mono font-semibold">SQL</span>
-                      <SqlCopyButton text={guide.sql} />
-                    </div>
-                    <pre className="bg-zinc-900/95 dark:bg-zinc-950 text-zinc-200 text-[10.5px] font-mono leading-relaxed p-4 overflow-x-auto whitespace-pre-wrap break-words">{guide.sql}</pre>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground/60 mt-2">
-                    Run in <span className="font-semibold text-muted-foreground">Supabase → SQL Editor → New Query</span>
-                  </p>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 /* ── DbSetupCard ──────────────────────────────────────────────────────────── */
 const DbSetupCard = ({
@@ -1972,8 +1879,6 @@ const Profile = () => {
           />
         )}
 
-        {/* ── SQL Setup Guide ── */}
-        {isAdmin && <SqlSetupGuideCard />}
 
       </div>
     </div>
