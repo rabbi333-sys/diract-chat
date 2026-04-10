@@ -209,7 +209,21 @@ const Conversation = () => {
     (messages || []).filter(m => m.sender === 'Agent').map(m => m.message_text)
   );
   const dedupedLocal = localMessages.filter(m => !dbAgentTexts.has(m.message_text));
-  const allMessages = [...(messages || []), ...dedupedLocal];
+
+  // When agent sends voice/image/video, local keeps the blob URL for playback.
+  // The DB stores a placeholder text like [voice message]/[image]/[video].
+  // Hide DB placeholder entries that are superseded by local blob messages.
+  const MEDIA_PLACEHOLDERS = new Set(['[voice message]', '[image]', '[video]', '[audio]']);
+  const localBlobCount = localMessages.filter(m => m.message_text.startsWith('blob:')).length;
+  let blobSlotsLeft = localBlobCount;
+  const filteredDbMessages = (messages || []).filter(m => {
+    if (m.sender !== 'Agent') return true;
+    if (!MEDIA_PLACEHOLDERS.has(m.message_text.trim())) return true;
+    if (blobSlotsLeft > 0) { blobSlotsLeft--; return false; }
+    return true;
+  });
+
+  const allMessages = [...filteredDbMessages, ...dedupedLocal];
 
   useEffect(() => {
     scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -286,7 +300,10 @@ const Conversation = () => {
     const mediaType: 'image' | 'audio' | 'video' = isImage ? 'image' : isAudio ? 'audio' : 'video';
 
     // Optimistic: show local preview instantly
-    const localUrl = URL.createObjectURL(file);
+    // Prefix the blob URL so ChatMessage knows the media type
+    const rawUrl = URL.createObjectURL(file);
+    const prefix = isImage ? 'blob-image:' : isVideo ? 'blob-video:' : 'blob-audio:';
+    const localUrl = prefix + rawUrl;
     const id = nextId();
     addOptimistic(id, localUrl, replyingTo);
     setReplyingTo(null);
@@ -311,11 +328,11 @@ const Conversation = () => {
         await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
       }
       markSent(id);
+      // Keep local blob URL — don't revert so image/video preview stays visible
       await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
-      revertOptimistic(id);
     } catch (err: unknown) {
       revertOptimistic(id);
-      URL.revokeObjectURL(localUrl);
+      URL.revokeObjectURL(rawUrl);
       toast.error(err instanceof Error ? err.message : 'Failed to send');
     } finally {
       setUploadingId(null);
@@ -383,8 +400,8 @@ const Conversation = () => {
           const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
           await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
           markSent(id);
+          // Keep local blob URL — don't revert so the audio player stays visible
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
-          revertOptimistic(id);
         } else if (fbConn) {
           toast.error('Facebook does not support voice send. Use WhatsApp instead.');
           revertOptimistic(id);

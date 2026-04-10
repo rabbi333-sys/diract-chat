@@ -22,7 +22,12 @@ type Segment =
 function parseSegments(text: string): Segment[] {
   const trimmed = text.trim();
 
-  // blob: URLs = optimistic voice messages recorded in-browser
+  // Prefixed blob URLs from file picker optimistic messages
+  if (trimmed.startsWith('blob-image:')) return [{ type: 'image', url: trimmed.slice('blob-image:'.length) }];
+  if (trimmed.startsWith('blob-video:')) return [{ type: 'video', url: trimmed.slice('blob-video:'.length) }];
+  if (trimmed.startsWith('blob-audio:')) return [{ type: 'audio', url: trimmed.slice('blob-audio:'.length) }];
+
+  // Plain blob: URLs = optimistic voice recordings (legacy / stopAndSendVoice)
   if (trimmed.startsWith('blob:')) return [{ type: 'audio', url: trimmed }];
 
   // Meta placeholder strings
