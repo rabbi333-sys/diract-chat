@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import Conversation from "./pages/Conversation";
 import OrderDetail from "./pages/OrderDetail";
 import Profile from "./pages/Profile";
+import TeamMembers from "./pages/TeamMembers";
 import InviteAccept from "./pages/InviteAccept";
 import ProtectedRoute from "./components/ProtectedRoute";
 import PermissionRoute from "./components/PermissionRoute";
@@ -38,6 +39,11 @@ const App = () => (
           <Route path="/profile" element={
             <ProtectedRoute>
               <Profile />
+            </ProtectedRoute>
+          } />
+          <Route path="/team-members" element={
+            <ProtectedRoute>
+              <TeamMembers />
             </ProtectedRoute>
           } />
           <Route path="/conversation/:sessionId" element={

@@ -105,7 +105,7 @@ const Index = () => {
 
   const handleNavClick = (label: string, badgeKey?: 'handoff' | 'failed' | 'orders') => {
     if (label === 'Team Members') {
-      navigate('/profile');
+      navigate('/team-members');
       setSidebarOpen(false);
       return;
     }
