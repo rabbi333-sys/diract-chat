@@ -48,7 +48,11 @@ function normalizeRow(raw: Record<string, any>): NormalizedMessage | null {
   const id = (raw.id ?? raw._id ?? "") as string | number;
   const session_id = String(raw.session_id ?? raw.sessionId ?? raw.conversation_id ?? "unknown");
   const recipient = (raw.recipient ?? raw.to ?? raw.phone ?? undefined) as string | undefined;
-  const timestamp = String(raw.created_at ?? raw.timestamp ?? raw.createdAt ?? new Date().toISOString());
+  const timestamp = String(
+    raw.created_at ?? raw.timestamp ?? raw.createdAt ??
+    raw.updated_at ?? raw.updatedAt ?? raw.date ?? raw.time ??
+    '2000-01-01T00:00:00.000Z'
+  );
 
   // n8n / LangChain format: { message: { type, data: { content } } }
   if (raw.message && typeof raw.message === "object") {

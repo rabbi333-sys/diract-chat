@@ -70,7 +70,14 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     | string
     | undefined;
   const timestamp = String(
-    raw.created_at ?? raw.timestamp ?? raw.createdAt ?? new Date().toISOString()
+    raw.created_at ??
+    raw.timestamp ??
+    raw.createdAt ??
+    raw.updated_at ??
+    raw.updatedAt ??
+    raw.date ??
+    raw.time ??
+    '2000-01-01T00:00:00.000Z'
   );
 
   // n8n / LangChain native: { message: { type, data: { content } } }
