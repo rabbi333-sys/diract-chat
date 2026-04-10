@@ -98,23 +98,44 @@ const StatusPill = ({ status }: { status: string }) => {
   );
 };
 
-const INVITE_FIX_SQL = `-- Step 1: Add base invite columns
+const INVITE_FIX_SQL = `-- Step 1: Create team_invites table (safe on fresh AND existing databases)
+CREATE TABLE IF NOT EXISTS public.team_invites (
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email                  text NOT NULL DEFAULT '',
+  role                   text NOT NULL DEFAULT 'viewer',
+  created_by             uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  permissions            text[] NOT NULL DEFAULT '{}',
+  token                  uuid UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  status                 text NOT NULL DEFAULT 'pending',
+  accepted_user_id       uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  submitted_name         text,
+  submitted_email        text,
+  submitted_password_hash text,
+  submitted_at           timestamptz,
+  last_login_at          timestamptz
+);
+
+-- Step 2: Add any missing columns for existing installs (safe no-ops if already present)
 ALTER TABLE public.team_invites
   ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS permissions text[] DEFAULT '{}' NOT NULL,
   ADD COLUMN IF NOT EXISTS token uuid DEFAULT gen_random_uuid() UNIQUE NOT NULL,
   ADD COLUMN IF NOT EXISTS status text DEFAULT 'pending' NOT NULL,
-  ADD COLUMN IF NOT EXISTS accepted_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL;
-
--- Step 2: Add member-submission columns (approval-based auth)
-ALTER TABLE public.team_invites
+  ADD COLUMN IF NOT EXISTS accepted_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS submitted_name text,
   ADD COLUMN IF NOT EXISTS submitted_email text,
   ADD COLUMN IF NOT EXISTS submitted_password_hash text,
-  ADD COLUMN IF NOT EXISTS submitted_at timestamptz;
+  ADD COLUMN IF NOT EXISTS submitted_at timestamptz,
+  ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
 
-UPDATE public.team_invites SET created_by = invited_by WHERE created_by IS NULL;
-ALTER TABLE public.team_invites ALTER COLUMN created_by SET NOT NULL;
+-- Migrate data from old invited_by column if it exists
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'team_invites' AND column_name = 'invited_by') THEN
+    UPDATE public.team_invites SET created_by = invited_by WHERE created_by IS NULL;
+  END IF;
+END $$;
+
 ALTER TABLE public.team_invites ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Admins can manage invites" ON public.team_invites;
@@ -181,9 +202,7 @@ BEGIN
 END;
 $$;
 
--- Step 6: Add last_login_at column (run if upgrading from an earlier version)
-ALTER TABLE public.team_invites
-  ADD COLUMN IF NOT EXISTS last_login_at timestamptz;`;
+-- (last_login_at is included in the CREATE TABLE and Step 2 above)`;
 
 const PG_SETUP_SQL = `-- PostgreSQL: Create team_invites table (auto-created by API server on first invite)
 CREATE TABLE IF NOT EXISTS team_invites (

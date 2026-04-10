@@ -1,0 +1,86 @@
+-- Step 1: Add base invite columns
+ALTER TABLE public.team_invites
+  ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS permissions text[] DEFAULT '{}' NOT NULL,
+  ADD COLUMN IF NOT EXISTS token uuid DEFAULT gen_random_uuid() UNIQUE NOT NULL,
+  ADD COLUMN IF NOT EXISTS status text DEFAULT 'pending' NOT NULL,
+  ADD COLUMN IF NOT EXISTS accepted_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL;
+
+-- Step 2: Add member-submission columns (approval-based auth)
+ALTER TABLE public.team_invites
+  ADD COLUMN IF NOT EXISTS submitted_name text,
+  ADD COLUMN IF NOT EXISTS submitted_email text,
+  ADD COLUMN IF NOT EXISTS submitted_password_hash text,
+  ADD COLUMN IF NOT EXISTS submitted_at timestamptz;
+
+UPDATE public.team_invites SET created_by = invited_by WHERE created_by IS NULL;
+ALTER TABLE public.team_invites ALTER COLUMN created_by SET NOT NULL;
+ALTER TABLE public.team_invites ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admins can manage invites" ON public.team_invites;
+CREATE POLICY "Admins can manage invites" ON public.team_invites
+  USING (auth.uid() = created_by);
+
+-- Step 3: RPC for reading a pending invite by token (admin-level, SECURITY DEFINER)
+CREATE OR REPLACE FUNCTION public.get_invite_by_token(p_token uuid)
+RETURNS TABLE (id uuid, email text, role text, permissions text[], status text, created_by uuid, invited_by uuid)
+LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT id, email, role, permissions, status, created_by, invited_by
+  FROM public.team_invites WHERE token = p_token AND status = 'pending';
+$$;
+
+-- Step 4: RPC for members to submit their registration request (bypasses RLS safely)
+CREATE OR REPLACE FUNCTION public.submit_invite_request(
+  p_token uuid,
+  p_name text,
+  p_email text,
+  p_password_hash text
+)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_id uuid;
+BEGIN
+  SELECT id INTO v_id FROM public.team_invites
+  WHERE token = p_token AND status = 'pending';
+  IF v_id IS NULL THEN RETURN 'not_found'; END IF;
+  UPDATE public.team_invites SET
+    submitted_name = p_name,
+    submitted_email = p_email,
+    submitted_password_hash = p_password_hash,
+    submitted_at = now()
+  WHERE id = v_id;
+  RETURN 'ok';
+END;
+$$;
+
+-- Step 5: RPC for member login — validates credentials server-side (bypasses RLS)
+CREATE OR REPLACE FUNCTION public.member_login_by_credentials(
+  p_email text,
+  p_password_hash text
+)
+RETURNS TABLE (
+  id uuid,
+  role text,
+  permissions text[],
+  submitted_name text,
+  submitted_email text
+)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE public.team_invites SET last_login_at = NOW()
+  WHERE submitted_email = lower(trim(p_email))
+    AND submitted_password_hash = p_password_hash
+    AND status = 'accepted';
+  RETURN QUERY
+  SELECT t.id, t.role, t.permissions, t.submitted_name, t.submitted_email
+  FROM public.team_invites t
+  WHERE t.submitted_email = lower(trim(p_email))
+    AND t.submitted_password_hash = p_password_hash
+    AND t.status = 'accepted';
+END;
+$$;
+
+-- Step 6: Add last_login_at column (run if upgrading from an earlier version)
+ALTER TABLE public.team_invites
+  ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
