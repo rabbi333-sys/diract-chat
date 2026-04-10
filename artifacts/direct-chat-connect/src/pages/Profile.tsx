@@ -115,7 +115,8 @@ CREATE TABLE IF NOT EXISTS public.team_invites (
   submitted_email        text,
   submitted_password_hash text,
   submitted_at           timestamptz,
-  last_login_at          timestamptz
+  last_login_at          timestamptz,
+  created_at             timestamptz DEFAULT now()
 );
 
 -- Step 2: Add any missing columns for existing installs (safe no-ops if already present)
@@ -129,7 +130,8 @@ ALTER TABLE public.team_invites
   ADD COLUMN IF NOT EXISTS submitted_email text,
   ADD COLUMN IF NOT EXISTS submitted_password_hash text,
   ADD COLUMN IF NOT EXISTS submitted_at timestamptz,
-  ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
+  ADD COLUMN IF NOT EXISTS last_login_at timestamptz,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
 
 -- Migrate data from old invited_by column if it exists
 DO $$ BEGIN
@@ -208,7 +210,57 @@ BEGIN
 END;
 $$;
 
--- (last_login_at is included in the CREATE TABLE and Step 2 above)`;
+-- Step 6: RPC to list ALL invites for admin dashboard (SECURITY DEFINER bypasses RLS)
+CREATE OR REPLACE FUNCTION public.list_team_invites()
+RETURNS TABLE (
+  id uuid,
+  email text,
+  role text,
+  created_by uuid,
+  permissions text[],
+  token uuid,
+  status text,
+  accepted_user_id uuid,
+  submitted_name text,
+  submitted_email text,
+  submitted_at timestamptz,
+  last_login_at timestamptz,
+  created_at timestamptz
+)
+LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT id, email, role, created_by, permissions, token, status,
+         accepted_user_id, submitted_name, submitted_email,
+         submitted_at, last_login_at, created_at
+  FROM public.team_invites
+  ORDER BY created_at DESC NULLS LAST;
+$$;
+
+-- Step 7: RPC to create an invite (SECURITY DEFINER — bypasses RLS for admin without auth.uid)
+CREATE OR REPLACE FUNCTION public.create_team_invite(
+  p_email text,
+  p_role text,
+  p_permissions text[]
+)
+RETURNS TABLE (id uuid, token uuid)
+LANGUAGE sql SECURITY DEFINER AS $$
+  INSERT INTO public.team_invites (email, role, permissions)
+  VALUES (p_email, p_role, p_permissions)
+  RETURNING id, token;
+$$;
+
+-- Step 8: RPC to update invite status (SECURITY DEFINER — bypasses RLS)
+CREATE OR REPLACE FUNCTION public.update_invite_status(p_id uuid, p_status text)
+RETURNS void
+LANGUAGE sql SECURITY DEFINER AS $$
+  UPDATE public.team_invites SET status = p_status WHERE id = p_id;
+$$;
+
+-- Step 9: RPC to delete an invite (SECURITY DEFINER — bypasses RLS)
+CREATE OR REPLACE FUNCTION public.delete_team_invite(p_id uuid)
+RETURNS void
+LANGUAGE sql SECURITY DEFINER AS $$
+  DELETE FROM public.team_invites WHERE id = p_id;
+$$;`;
 
 const PG_SETUP_SQL = `-- PostgreSQL: Create team_invites table (auto-created by API server on first invite)
 CREATE TABLE IF NOT EXISTS team_invites (
@@ -842,11 +894,17 @@ const Profile = () => {
           const { proxyListInvites: pli, buildCreds: bc } = await import('@/lib/memberAuthProxy');
           fresh = (await pli(bc(conn), effectiveUserId)) as unknown as Invite[];
         } else {
-          // Admin without user.id: list all invites; otherwise filter by created_by
-          let q = supabase.from('team_invites').select('*').order('created_at', { ascending: false });
-          if (effectiveUserId !== 'admin') q = (q as typeof q).eq('created_by', effectiveUserId) as typeof q;
-          const { data } = await q;
-          fresh = (data ?? []) as unknown as Invite[];
+          // Try SECURITY DEFINER RPC first (bypasses RLS entirely)
+          const { data: rpcData, error: rpcErr } = await (supabase as any).rpc('list_team_invites');
+          if (!rpcErr && rpcData) {
+            fresh = rpcData as unknown as Invite[];
+          } else {
+            // Fallback: direct query
+            let q = supabase.from('team_invites').select('*').order('created_at', { ascending: false });
+            if (effectiveUserId !== 'admin') q = (q as typeof q).eq('created_by', effectiveUserId) as typeof q;
+            const { data } = await q;
+            fresh = (data ?? []) as unknown as Invite[];
+          }
         }
       } catch { return; }
 
@@ -912,7 +970,14 @@ const Profile = () => {
         return;
       }
 
-      // Supabase path — admin (no real user.id) lists all invites
+      // Supabase path — try SECURITY DEFINER RPC first (bypasses RLS entirely)
+      const { data: rpcData, error: rpcErr } = await (supabase as any).rpc('list_team_invites');
+      if (!rpcErr && rpcData) {
+        setInvites(rpcData as unknown as Invite[]);
+        return;
+      }
+
+      // Fallback: direct table query (works if RLS "Allow all" policy is active)
       const isAdminNoUser = userId === 'admin';
       let query = supabase.from('team_invites').select('*').order('created_at', { ascending: false });
       if (!isAdminNoUser) query = (query as typeof query).eq('created_by', userId) as typeof query;
@@ -1083,22 +1148,35 @@ const Profile = () => {
       const createdBy = user?.id || null;
 
       if (!conn || conn.dbType === 'supabase') {
-        // Supabase path
-        const { data, error } = await supabase.from('team_invites').insert({
-          created_by: createdBy,
-          email: inviteName.trim() || '',
-          role: inviteRole,
-          permissions: perms,
-        }).select().single();
-        if (error) {
-          if (error.message.includes('created_by') || error.message.includes('schema cache')) {
-            toast.error('Database needs updating — see Database Setup at the bottom of this page');
-          } else {
-            toast.error('Failed to create invite: ' + error.message);
+        // Supabase path — use SECURITY DEFINER RPC to bypass RLS
+        const { data: rpcRow, error: rpcInsertErr } = await (supabase as any).rpc('create_team_invite', {
+          p_email: inviteName.trim() || '',
+          p_role: inviteRole,
+          p_permissions: perms,
+        });
+        if (rpcInsertErr) {
+          // RPC not yet created — fall back to direct insert
+          const { data, error } = await (supabase as any).from('team_invites').insert({
+            created_by: createdBy ?? '',
+            email: inviteName.trim() || '',
+            role: inviteRole,
+            permissions: perms,
+          }).select().single();
+          if (error) {
+            if (error.message.includes('row-level security') || error.message.includes('RLS') || error.message.includes('policy')) {
+              toast.error('RLS policy blocked the insert. Go to Account → Database Setup → Supabase tab, copy the SQL and run it in your Supabase SQL Editor, then try again.', { duration: 10000 });
+            } else if (error.message.includes('created_by') || error.message.includes('schema cache')) {
+              toast.error('Database needs updating — see Database Setup at the bottom of this page');
+            } else {
+              toast.error('Failed to create invite: ' + error.message);
+            }
+            return;
           }
-          return;
+          token = data.token;
+        } else {
+          const row = Array.isArray(rpcRow) ? rpcRow[0] : rpcRow;
+          token = row?.token ?? '';
         }
-        token = data.token;
       } else {
         // Non-Supabase path — via API server
         const creds = buildCreds(conn);
@@ -1109,7 +1187,7 @@ const Profile = () => {
           email: inviteName.trim() || '',
           role: inviteRole,
           permissions: perms,
-          created_by: createdBy,
+          created_by: createdBy ?? '',
         });
         token = created.token;
       }
@@ -1134,13 +1212,21 @@ const Profile = () => {
 
   const getConnForInvites = () => getActiveConnection();
 
+  const supabaseUpdateInvite = async (inviteId: string, status: string) => {
+    // Try SECURITY DEFINER RPC first — bypasses RLS entirely
+    const { error: rpcErr } = await (supabase as any).rpc('update_invite_status', { p_id: inviteId, p_status: status });
+    if (!rpcErr) return;
+    // Fallback to direct update (works if "Allow all" RLS policy is active)
+    const { error } = await supabase.from('team_invites').update({ status }).eq('id', inviteId);
+    if (error) throw new Error(error.message);
+  };
+
   const handleAccept = async (inviteId: string) => {
     if (!user && !isAdmin) return;
     const conn = getConnForInvites();
     try {
       if (!conn || conn.dbType === 'supabase') {
-        const { error } = await supabase.from('team_invites').update({ status: 'accepted' }).eq('id', inviteId);
-        if (error) throw new Error(error.message);
+        await supabaseUpdateInvite(inviteId, 'accepted');
       } else {
         await proxyUpdateInvite(buildCreds(conn), inviteId, { status: 'accepted' });
       }
@@ -1154,8 +1240,7 @@ const Profile = () => {
     const conn = getConnForInvites();
     try {
       if (!conn || conn.dbType === 'supabase') {
-        const { error } = await supabase.from('team_invites').update({ status: 'rejected' }).eq('id', inviteId);
-        if (error) throw new Error(error.message);
+        await supabaseUpdateInvite(inviteId, 'rejected');
       } else {
         await proxyUpdateInvite(buildCreds(conn), inviteId, { status: 'rejected' });
       }
@@ -1170,8 +1255,7 @@ const Profile = () => {
     setRevokeConfirmId(null);
     try {
       if (!conn || conn.dbType === 'supabase') {
-        const { error } = await supabase.from('team_invites').update({ status: 'revoked' }).eq('id', inviteId);
-        if (error) throw new Error(error.message);
+        await supabaseUpdateInvite(inviteId, 'revoked');
       } else {
         await proxyUpdateInvite(buildCreds(conn), inviteId, { status: 'revoked' });
       }
@@ -1186,8 +1270,13 @@ const Profile = () => {
     setDeleteConfirmId(null);
     try {
       if (!conn || conn.dbType === 'supabase') {
-        const { error } = await supabase.from('team_invites').delete().eq('id', inviteId);
-        if (error) throw new Error(error.message);
+        // Try SECURITY DEFINER RPC first — bypasses RLS entirely
+        const { error: rpcErr } = await (supabase as any).rpc('delete_team_invite', { p_id: inviteId });
+        if (rpcErr) {
+          // Fallback to direct delete
+          const { error } = await supabase.from('team_invites').delete().eq('id', inviteId);
+          if (error) throw new Error(error.message);
+        }
       } else {
         await proxyDeleteInvite(buildCreds(conn), inviteId);
       }
