@@ -12,6 +12,7 @@ import {
   DB_TYPES,
   getConnectionDisplayUrl,
 } from "@/lib/db-config";
+
 import { toast } from "sonner";
 import {
   Key,
@@ -435,36 +436,22 @@ const ConnectDB = () => {
     setTestOk(null);
   };
 
-  const currentType = DB_TYPES.find(t => t.value === form.dbType)!;
+  const canTest = () => !!form.url.trim() && !!form.anonKey.trim();
 
-  const canTest = () => {
-    if (form.dbType === 'supabase') return !!form.url.trim() && !!form.anonKey.trim();
-    if (form.dbType === 'postgresql' || form.dbType === 'mysql') return !!form.host.trim() && !!form.dbUsername.trim();
-    return !!form.connectionString.trim();
-  };
-
-  const canSave = () => {
-    if (!form.name.trim()) return false;
-    return canTest();
-  };
+  const canSave = () => !!form.name.trim() && canTest();
 
   const testConnection = async () => {
     if (!canTest()) { toast.error("Please fill in the required fields"); return; }
     setTesting(true);
     setTestOk(null);
     try {
-      if (form.dbType === 'supabase') {
-        const client = createClient(form.url.trim(), form.anonKey.trim(), {
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
-        const { error } = await client.auth.getSession();
-        if (error && !error.message.toLowerCase().includes("refresh token")) throw error;
-        setTestOk(true);
-        toast.success("Connection successful!");
-      } else {
-        setTestOk(true);
-        toast.success("Settings valid!");
-      }
+      const client = createClient(form.url.trim(), form.anonKey.trim(), {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { error } = await client.auth.getSession();
+      if (error && !error.message.toLowerCase().includes("refresh token")) throw error;
+      setTestOk(true);
+      toast.success("Connection successful!");
     } catch (e) {
       setTestOk(false);
       const msg = e instanceof Error ? e.message : String(e);
@@ -479,17 +466,15 @@ const ConnectDB = () => {
     if (!canTest()) { toast.error("Please fill in the required fields"); return; }
     setSaving(true);
     try {
-      const base = { name: form.name.trim(), dbType: form.dbType, url: '', anonKey: '' };
-      let conn: Omit<MainDbConnection, 'id' | 'createdAt'>;
-      if (form.dbType === 'supabase') {
-        conn = { ...base, url: form.url.trim(), anonKey: form.anonKey.trim(), serviceRoleKey: form.serviceRoleKey.trim() || undefined };
-      } else if (form.dbType === 'postgresql' || form.dbType === 'mysql') {
-        conn = { ...base, host: form.host.trim(), port: form.port.trim() || currentType.defaultPort, dbUsername: form.dbUsername.trim(), dbPassword: form.dbPassword, dbName: form.dbName.trim() };
-      } else {
-        conn = { ...base, connectionString: form.connectionString.trim() };
-      }
+      const conn: Omit<MainDbConnection, 'id' | 'createdAt'> = {
+        name: form.name.trim(),
+        dbType: 'supabase',
+        url: form.url.trim(),
+        anonKey: form.anonKey.trim(),
+        serviceRoleKey: form.serviceRoleKey.trim() || undefined,
+      };
 
-      const didAutoSetup = form.dbType === 'supabase' && form.pgDbPassword.trim().length > 0;
+      const didAutoSetup = form.pgDbPassword.trim().length > 0;
       let setupOutcome: "done" | "partial" | "failed" | null = null;
 
       if (didAutoSetup) {
@@ -717,34 +702,11 @@ const ConnectDB = () => {
 
             {/* Card header */}
             <div className="px-6 py-5 border-b border-border/40 bg-gradient-to-r from-blue-50/60 to-indigo-50/40 dark:from-blue-950/20 dark:to-indigo-950/10">
-              <h2 className="text-base font-bold text-foreground">New Database Connection</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Choose your database type and enter credentials</p>
+              <h2 className="text-base font-bold text-foreground">Connect Supabase</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Enter your Supabase project credentials</p>
             </div>
 
             <div className="p-6 space-y-5">
-              {/* DB Type pills */}
-              <div>
-                <label className={labelCls}>Database Type</label>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {DB_TYPES.map(t => (
-                    <button
-                      key={t.value}
-                      onClick={() => { setField('dbType', t.value); setTestOk(null); }}
-                      data-testid={`dbtype-${t.value}`}
-                      className={cn(
-                        "flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl border-2 text-center transition-all select-none",
-                        form.dbType === t.value
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 shadow-sm shadow-blue-500/10"
-                          : "border-transparent bg-muted/30 hover:bg-muted/60 hover:border-border/60"
-                      )}
-                    >
-                      <span className="text-xl leading-none">{t.icon}</span>
-                      <span className={cn("text-[10px] font-bold leading-none", form.dbType === t.value ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground")}>{t.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Connection Name */}
               <div>
                 <label className={labelCls}>Connection Name <span className="text-red-400">*</span></label>
@@ -809,61 +771,6 @@ const ConnectDB = () => {
                         )}
                       </div>
                     )}
-                  </div>
-                </div>
-              )}
-
-              {/* PostgreSQL / MySQL fields */}
-              {(form.dbType === 'postgresql' || form.dbType === 'mysql') && (
-                <div className="space-y-3 rounded-xl border border-border/50 bg-muted/20 p-4">
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
-                      <label className={labelCls}>Host <span className="text-red-400">*</span></label>
-                      <input value={form.host} onChange={e => setField("host", e.target.value)} placeholder={form.dbType === 'postgresql' ? 'db.example.com' : 'mysql.example.com'} className={inputCls} data-testid="input-host" />
-                    </div>
-                    <div>
-                      <label className={labelCls}>Port</label>
-                      <input value={form.port} onChange={e => setField("port", e.target.value)} placeholder={currentType.defaultPort} className={inputCls} data-testid="input-port" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className={labelCls}>Username <span className="text-red-400">*</span></label>
-                      <input value={form.dbUsername} onChange={e => setField("dbUsername", e.target.value)} placeholder={form.dbType === 'postgresql' ? 'postgres' : 'root'} className={inputCls} data-testid="input-username" />
-                    </div>
-                    <div>
-                      <label className={labelCls}>Password</label>
-                      <div className="relative">
-                        <input value={form.dbPassword} onChange={e => setField("dbPassword", e.target.value)} placeholder="••••••••" type={showPassword ? 'text' : 'password'} className={cn(inputCls, "pr-10")} data-testid="input-password" />
-                        <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">{showPassword ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Database Name</label>
-                    <input value={form.dbName} onChange={e => setField("dbName", e.target.value)} placeholder="mydb" className={inputCls} data-testid="input-dbname" />
-                  </div>
-                </div>
-              )}
-
-              {/* MongoDB */}
-              {form.dbType === 'mongodb' && (
-                <div className="rounded-xl border border-border/50 bg-muted/20 p-4">
-                  <label className={labelCls}>MongoDB URI <span className="text-red-400">*</span></label>
-                  <div className="relative">
-                    <input value={form.connectionString} onChange={e => setField("connectionString", e.target.value)} placeholder="mongodb+srv://user:pass@cluster.mongodb.net/db" type={showPassword ? 'text' : 'password'} className={cn(inputCls, "pr-10 font-mono placeholder:font-sans")} data-testid="input-mongo-uri" />
-                    <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">{showPassword ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-                  </div>
-                </div>
-              )}
-
-              {/* Redis */}
-              {form.dbType === 'redis' && (
-                <div className="rounded-xl border border-border/50 bg-muted/20 p-4">
-                  <label className={labelCls}>Redis Connection String <span className="text-red-400">*</span></label>
-                  <div className="relative">
-                    <input value={form.connectionString} onChange={e => setField("connectionString", e.target.value)} placeholder="redis://default:password@host:6379" type={showPassword ? 'text' : 'password'} className={cn(inputCls, "pr-10 font-mono placeholder:font-sans")} data-testid="input-redis-uri" />
-                    <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">{showPassword ? <EyeOff size={14} /> : <Eye size={14} />}</button>
                   </div>
                 </div>
               )}
