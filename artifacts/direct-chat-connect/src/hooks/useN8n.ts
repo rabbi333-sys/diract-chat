@@ -270,6 +270,66 @@ function buildPutBody(wf: N8nWorkflow): Record<string, unknown> {
   return body;
 }
 
+/** Save the system prompt directly to Supabase n8n_bot_settings table. */
+export const useSavePromptDirect = () => {
+  return useMutation({
+    mutationFn: async ({
+      prompt,
+      supabaseUrl,
+      supabaseAnonKey,
+    }: {
+      prompt: string;
+      supabaseUrl: string;
+      supabaseAnonKey: string;
+    }) => {
+      const { createClient } = await import('@supabase/supabase-js');
+      const client = createClient(supabaseUrl, supabaseAnonKey);
+      const { error } = await client.from('n8n_bot_settings').upsert({
+        id: 'default',
+        workflow_id: null,
+        node_id: null,
+        system_prompt: prompt,
+        updated_at: new Date().toISOString(),
+      });
+      if (error) {
+        if (error.code === '42P01') {
+          throw new Error('Table not found — run the SQL in Step 1 first');
+        }
+        throw new Error(error.message);
+      }
+    },
+    onSuccess: () => {
+      toast.success('Prompt saved! Your n8n bot will use it from next conversation.');
+    },
+    onError: (error: Error) => {
+      toast.error(`Save failed: ${error.message}`);
+    },
+  });
+};
+
+/** Load the saved system prompt from Supabase n8n_bot_settings table. */
+export const useLoadPromptDirect = (supabaseUrl: string, supabaseAnonKey: string) => {
+  return useQuery({
+    queryKey: ['n8n-prompt-direct', supabaseUrl],
+    queryFn: async () => {
+      if (!supabaseUrl || !supabaseAnonKey) return '';
+      const { createClient } = await import('@supabase/supabase-js');
+      const client = createClient(supabaseUrl, supabaseAnonKey);
+      const { data, error } = await client
+        .from('n8n_bot_settings')
+        .select('system_prompt')
+        .eq('id', 'default')
+        .maybeSingle();
+      if (error || !data) return '';
+      return (data.system_prompt as string) || '';
+    },
+    enabled: !!supabaseUrl && !!supabaseAnonKey,
+    staleTime: 10000,
+    retry: false,
+  });
+};
+
+// useUpdateN8nPrompt is kept for potential future use (n8n direct workflow editing).
 export const useUpdateN8nPrompt = () => {
   const queryClient = useQueryClient();
   return useMutation({
