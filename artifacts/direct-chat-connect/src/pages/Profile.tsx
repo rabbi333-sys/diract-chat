@@ -815,13 +815,14 @@ const Profile = () => {
   }, [displayName]);
 
   useEffect(() => {
-    if (!pageLoading && isAdmin && user) loadInvites(user.id);
+    if (!pageLoading && isAdmin) loadInvites(user?.id || 'admin');
   }, [pageLoading, isAdmin, user?.id]);
 
   // ── Polling: auto-refresh invites & notify admin when member submits ────────
   const knownSubmissions = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!isAdmin || !user || pageLoading) return;
+    if (!isAdmin || pageLoading) return;
+    const effectiveUserId = user?.id || 'admin';
     // Seed known submissions from initial load so we don't fire on mount
     const seed = () => {
       invites.forEach(inv => {
@@ -830,20 +831,18 @@ const Profile = () => {
     };
     seed();
     const poll = setInterval(async () => {
-      if (!user) return;
       // Silently reload — don't touch invitesLoading state
       const conn = getActiveConnection();
       let fresh: Invite[] = [];
       try {
         if (conn && conn.dbType !== 'supabase') {
           const { proxyListInvites: pli, buildCreds: bc } = await import('@/lib/memberAuthProxy');
-          fresh = (await pli(bc(conn), user.id)) as unknown as Invite[];
+          fresh = (await pli(bc(conn), effectiveUserId)) as unknown as Invite[];
         } else {
-          const { data } = await supabase
-            .from('team_invites')
-            .select('*')
-            .eq('created_by', user.id)
-            .order('created_at', { ascending: false });
+          // Admin without user.id: list all invites; otherwise filter by created_by
+          let q = supabase.from('team_invites').select('*').order('created_at', { ascending: false });
+          if (effectiveUserId !== 'admin') q = (q as typeof q).eq('created_by', effectiveUserId) as typeof q;
+          const { data } = await q;
           fresh = (data ?? []) as unknown as Invite[];
         }
       } catch { return; }
@@ -910,14 +909,14 @@ const Profile = () => {
         return;
       }
 
-      // Supabase path
-      const { data: d1, error: e1 } = await supabase
-        .from('team_invites')
-        .select('*')
-        .eq('created_by', userId)
-        .order('created_at', { ascending: false });
+      // Supabase path — admin (no real user.id) lists all invites
+      const isAdminNoUser = userId === 'admin';
+      let query = supabase.from('team_invites').select('*').order('created_at', { ascending: false });
+      if (!isAdminNoUser) query = (query as typeof query).eq('created_by', userId) as typeof query;
 
-      if (e1?.message?.includes('created_by')) {
+      const { data: d1, error: e1 } = await query;
+
+      if (e1?.message?.includes('created_by') && !isAdminNoUser) {
         const { data: d2 } = await supabase
           .from('team_invites')
           .select('*')
@@ -1071,17 +1070,19 @@ const Profile = () => {
   };
 
   const handleGenerateInvite = async () => {
-    if (!user) return;
+    // Admin has user=null — still allowed to generate invites
+    if (!user && !isAdmin) return;
     setIsGeneratingInvite(true);
     try {
       const perms = (inviteRole === 'admin' || inviteRole === 'sub-admin') ? PERMISSION_OPTIONS.map((p) => p.key) : invitePerms;
       const conn = getActiveConnection();
       let token = '';
+      const createdBy = user?.id || 'admin';
 
       if (!conn || conn.dbType === 'supabase') {
         // Supabase path
         const { data, error } = await supabase.from('team_invites').insert({
-          created_by: user.id,
+          created_by: createdBy,
           email: inviteName.trim() || '',
           role: inviteRole,
           permissions: perms,
@@ -1105,7 +1106,7 @@ const Profile = () => {
           email: inviteName.trim() || '',
           role: inviteRole,
           permissions: perms,
-          created_by: user.id,
+          created_by: createdBy,
         });
         token = created.token;
       }
@@ -1117,7 +1118,7 @@ const Profile = () => {
       setInviteRole('viewer');
       setInvitePerms(['overview', 'messages']);
       setInviteName('');
-      loadInvites(user.id);
+      loadInvites(user?.id || 'admin');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create invite');
     } finally { setIsGeneratingInvite(false); }
@@ -1126,7 +1127,7 @@ const Profile = () => {
   const getConnForInvites = () => getActiveConnection();
 
   const handleAccept = async (inviteId: string) => {
-    if (!user) return;
+    if (!user && !isAdmin) return;
     const conn = getConnForInvites();
     try {
       if (!conn || conn.dbType === 'supabase') {
@@ -1136,12 +1137,12 @@ const Profile = () => {
         await proxyUpdateInvite(buildCreds(conn), inviteId, { status: 'accepted' });
       }
       toast.success('Member approved — they can now sign in');
-      loadInvites(user.id);
+      loadInvites(user?.id || 'admin');
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to approve member'); }
   };
 
   const handleReject = async (inviteId: string) => {
-    if (!user) return;
+    if (!user && !isAdmin) return;
     const conn = getConnForInvites();
     try {
       if (!conn || conn.dbType === 'supabase') {
@@ -1151,12 +1152,12 @@ const Profile = () => {
         await proxyUpdateInvite(buildCreds(conn), inviteId, { status: 'rejected' });
       }
       toast.success('Request rejected');
-      loadInvites(user.id);
+      loadInvites(user?.id || 'admin');
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to reject request'); }
   };
 
   const handleRevoke = async (inviteId: string) => {
-    if (!user) return;
+    if (!user && !isAdmin) return;
     const conn = getConnForInvites();
     setRevokeConfirmId(null);
     try {
@@ -1167,12 +1168,12 @@ const Profile = () => {
         await proxyUpdateInvite(buildCreds(conn), inviteId, { status: 'revoked' });
       }
       toast.success('Access revoked — member can no longer sign in');
-      loadInvites(user.id);
+      loadInvites(user?.id || 'admin');
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to revoke access'); }
   };
 
   const handleDelete = async (inviteId: string) => {
-    if (!user) return;
+    if (!user && !isAdmin) return;
     const conn = getConnForInvites();
     setDeleteConfirmId(null);
     try {
@@ -1183,7 +1184,7 @@ const Profile = () => {
         await proxyDeleteInvite(buildCreds(conn), inviteId);
       }
       toast.success('Member removed');
-      loadInvites(user.id);
+      loadInvites(user?.id || 'admin');
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to delete member'); }
   };
 
