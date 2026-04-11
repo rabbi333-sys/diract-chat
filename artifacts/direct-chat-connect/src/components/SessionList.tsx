@@ -312,11 +312,6 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
         >
           {initials}
         </div>
-        {/* Status dot on avatar */}
-        <span className={cn(
-          "absolute top-0 right-0 w-3 h-3 rounded-full border-2 border-background",
-          isLive(session) ? "bg-emerald-500" : "bg-muted-foreground/30"
-        )} />
         {/* Message count badge */}
         <div
           className="absolute -bottom-1 -right-1 min-w-[20px] h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold px-1 shadow border-2 border-background"
