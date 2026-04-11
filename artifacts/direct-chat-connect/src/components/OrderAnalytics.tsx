@@ -570,6 +570,39 @@ const OrderAnalytics = () => {
             <span className="text-[10px] text-[#565959] dark:text-muted-foreground">Success rate</span>
           </div>
         </div>
+
+        {/* Remaining status cards merged in */}
+        {(['confirmed','processing','shipped','cancelled'] as const).map(key => {
+          const meta = STATUS_META[key];
+          const { count, change } = summary.statuses[key];
+          const pct = summary.total > 0 ? Math.round((count / summary.total) * 100) : 0;
+          const Icon = meta.icon;
+          return (
+            <div key={key} className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl p-4">
+              <p className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide mb-2">
+                {meta.label}
+              </p>
+              <div className="flex items-end justify-between gap-2">
+                <p className="text-[28px] font-black leading-none tracking-tight" style={{ color: meta.dot }}>
+                  {count}
+                </p>
+                {change !== 0 && (
+                  <span className={cn(
+                    'flex items-center gap-0.5 text-[11px] font-bold mb-0.5',
+                    change >= 0 ? 'text-[#007600] dark:text-emerald-400' : 'text-[#CC0C39] dark:text-red-400'
+                  )}>
+                    {change >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
+                    {Math.abs(change)}%
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#EAEDED] dark:border-border/40">
+                <Icon size={11} className="text-[#565959] dark:text-muted-foreground flex-shrink-0" />
+                <span className="text-[10px] text-[#565959] dark:text-muted-foreground">{pct}% of orders</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Revenue chart ──────────────────────────────────── */}
@@ -727,46 +760,6 @@ const OrderAnalytics = () => {
           </div>
         </div>
       )}
-
-      {/* ── Order status breakdown cards ──────────────────── */}
-      <div>
-        <div className="mb-3">
-          <h3 className="text-[13px] font-bold text-[#0F1111] dark:text-foreground">Order Status Breakdown</h3>
-          <p className="text-[10.5px] text-[#565959] dark:text-muted-foreground mt-0.5">{summary.total} total orders across all statuses</p>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          {(Object.entries(STATUS_META) as [string, typeof STATUS_META[string]][]).map(([key, meta]) => {
-            const { count, change } = summary.statuses[key as keyof typeof summary.statuses];
-            const pct = summary.total > 0 ? Math.round((count / summary.total) * 100) : 0;
-            const Icon = meta.icon;
-            return (
-              <div key={key} className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl p-4">
-                <p className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide mb-2">
-                  {meta.label}
-                </p>
-                <div className="flex items-end justify-between gap-2">
-                  <p className="text-[28px] font-black leading-none tracking-tight" style={{ color: meta.dot }}>
-                    {count}
-                  </p>
-                  {change !== 0 && (
-                    <span className={cn(
-                      'flex items-center gap-0.5 text-[11px] font-bold mb-0.5',
-                      change >= 0 ? 'text-[#007600] dark:text-emerald-400' : 'text-[#CC0C39] dark:text-red-400'
-                    )}>
-                      {change >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
-                      {Math.abs(change)}%
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#EAEDED] dark:border-border/40">
-                  <Icon size={11} className="text-[#565959] dark:text-muted-foreground flex-shrink-0" />
-                  <span className="text-[10px] text-[#565959] dark:text-muted-foreground">{pct}% of orders</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
 
       {/* Empty state */}
       {filteredOrders.length === 0 && !isLoading && (
