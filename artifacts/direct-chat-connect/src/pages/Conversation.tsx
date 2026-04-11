@@ -105,7 +105,7 @@ const nextId = () => ++_msgCounter;
 const Conversation = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
-  const { data: messages, isLoading, error } = useChatHistory(sessionId);
+  const { data: messages, isLoading, error, refetch } = useChatHistory(sessionId);
   const { data: sessions } = useSessions();
   const isSessionActive = sessions?.find(s => s.session_id === sessionId)?.is_active ?? false;
   const { data: recipientNames } = useRecipientNames();
@@ -503,12 +503,22 @@ const Conversation = () => {
     </div>
   );
 
-  if (error) return (
+  // Only show the error screen when there's an error AND no cached/placeholder
+  // messages to display. If we have previous data (placeholderData), let it
+  // render normally below — a subtle banner handles the error.
+  if (error && !messages?.length) return (
     <div className="h-screen flex flex-col bg-background">
       <div className="h-14 px-4 flex items-center gap-3 border-b border-border">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/')}><ArrowLeft size={18} /></Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => navigate('/')}><ArrowLeft size={18} /></Button>
+        <div className="flex flex-col min-w-0">
+          <span className="font-semibold text-sm truncate">{displayName}</span>
+          {sessionId && <span className="text-xs text-muted-foreground truncate">{sessionId}</span>}
+        </div>
       </div>
-      <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Could not load messages</div>
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground text-sm">
+        <span>Could not load messages</span>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
+      </div>
     </div>
   );
 

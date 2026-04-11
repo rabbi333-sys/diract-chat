@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { AiControlGuide } from '@/components/AiControlGuide';
 import { getActiveConnection } from '@/lib/db-config';
@@ -64,6 +64,7 @@ const NAV_LABEL_KEYS: Record<string, 'overview'|'messages'|'handoff'|'failed'|'o
 
 const Index = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useLanguage();
   const { user, isAdmin, role, permissions, notAuthorized, displayName, initials, loading: roleLoading } = useTeamRole();
 
@@ -80,23 +81,27 @@ const Index = () => {
 
   // ── Handle handoff "Open Chat" → live inbox navigation ──────────────────────
   // HandoffPanel navigates to /?openSession=<id>&recipient=<rec>&disable_ai=1
-  // We switch to Messages tab then immediately open the conversation so the user
-  // lands in the main layout (not the isolated standalone page).
+  // We must watch location.search (not window.location.search + [] deps) because
+  // Index.tsx is ALREADY mounted when the handoff panel calls navigate() — the
+  // component is never unmounted, so [] would only fire once on initial load.
+  const handledOpenSession = useRef<string | null>(null);
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     const openSession = params.get('openSession');
-    if (!openSession) return;
+    // Skip if no param, or we already handled this exact session id
+    if (!openSession || openSession === handledOpenSession.current) return;
+    handledOpenSession.current = openSession;
     // Switch to Messages tab
     setActiveNav('Messages');
-    // Clean the URL immediately so back-navigation doesn't re-trigger this
-    window.history.replaceState({}, '', '/');
-    // Navigate to the conversation
+    // Clean the URL via React Router so the search string goes empty
+    navigate('/', { replace: true });
+    // Then open the conversation
     const qs = new URLSearchParams({ disable_ai: params.get('disable_ai') || '1' });
     const recipient = params.get('recipient');
     if (recipient) qs.set('recipient', recipient);
     navigate(`/conversation/${openSession}?${qs.toString()}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once on mount
+  }, [location.search]);
 
   useEffect(() => {
     if (settingsSection !== 'ai-control') return;
