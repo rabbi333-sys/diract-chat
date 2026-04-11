@@ -281,15 +281,26 @@ export async function queryExternalSupabase(
 
   const client = getExternalClient(url, key);
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let q: any = client.from(tbl).select('*');
+  let q: any = client.from(tbl).select('*').abortSignal(controller.signal);
   if (sessionId && type === 'messages') {
     q = q.eq('session_id', sessionId).order('id', { ascending: true }).limit(500);
   } else {
     q = q.order('id', { ascending: false }).limit(2000);
   }
 
-  const { data, error } = await q;
+  let data: Record<string, unknown>[] | null;
+  let error: { code?: string; message?: string } | null;
+  try {
+    const result = await q;
+    data = result.data;
+    error = result.error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (error) {
     const msg = String(error.message ?? '');

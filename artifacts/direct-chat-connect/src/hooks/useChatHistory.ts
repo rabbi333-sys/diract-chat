@@ -378,8 +378,8 @@ export const useAnalytics = () => {
       }
 
       if (main && main.dbType === 'supabase' && main.url && (main.serviceRoleKey || main.anonKey)) {
+        const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
         try {
-          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
           const msgs = await queryExternalSupabase(fakeConn, 'sessions');
           setMsgCache(msgs, dbKey);
           const result = computeAnalytics(msgs);
@@ -650,9 +650,8 @@ export const useSessions = (filterDate?: Date | null) => {
           const result = trackSessionActivity(buildSessionsFromMessages(filtered)) as SessionInfo[];
           lsSet(sessLsKey, result);
           return result;
-        } catch (e: unknown) {
-          if (e instanceof Error && e.message === 'TABLE_NOT_FOUND') return [] as SessionInfo[];
-          throw e;
+        } catch {
+          return [] as SessionInfo[];
         }
       }
 
@@ -670,9 +669,8 @@ export const useSessions = (filterDate?: Date | null) => {
           const result = trackSessionActivity(buildSessionsFromMessages(filtered)) as SessionInfo[];
           lsSet(sessLsKey, result);
           return result;
-        } catch (e: unknown) {
-          if (e instanceof Error && e.message === 'TABLE_NOT_FOUND') return [] as SessionInfo[];
-          throw e;
+        } catch {
+          return [] as SessionInfo[];
         }
       }
 
