@@ -312,15 +312,13 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
         >
           {initials}
         </div>
-        {/* Message count badge — green when active, gradient when offline */}
-        <div
+        {/* Active/offline indicator dot */}
+        <span
           className={cn(
-            "absolute -bottom-1 -right-1 min-w-[20px] h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold px-1 shadow border-2 border-background",
+            "absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background",
+            isLive(session) ? "bg-emerald-500" : "bg-muted-foreground/30"
           )}
-          style={{ background: isLive(session) ? '#10b981' : `linear-gradient(135deg, ${g1} 0%, ${g2} 100%)` }}
-        >
-          {session.message_count > 99 ? '99+' : session.message_count}
-        </div>
+        />
       </div>
 
       {/* Content */}
