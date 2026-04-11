@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useSessions, useRecipientNames, useUpdateRecipientName, useAutoResolveNames, fetchMessages, SessionInfo } from '@/hooks/useChatHistory';
+import { useSessions, useRecipientNames, useUpdateRecipientName, useAutoResolveNames, fetchMessages, useDbConnectionKey, SessionInfo } from '@/hooks/useChatHistory';
 import { usePlatformConnections } from '@/hooks/usePlatformConnections';
 import { Search, RefreshCw, Pencil, Check, X, MessageCircle, MessagesSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -105,13 +105,15 @@ export const SessionList = () => {
     return () => clearTimeout(timer);
   }, [sessions, queryClient]);
 
+  const dbKey = useDbConnectionKey();
+
   const prefetchSession = useCallback((sessionId: string) => {
     queryClient.prefetchQuery({
-      queryKey: ['chat-history', sessionId],
-      staleTime: 0,
+      queryKey: ['chat-history', sessionId, dbKey],
+      staleTime: 30_000,
       queryFn: () => fetchMessages(sessionId),
     });
-  }, [queryClient]);
+  }, [queryClient, dbKey]);
 
   // Apply frozen order: existing sessions in frozen order, new sessions prepended
   const sorted = useMemo(() => {

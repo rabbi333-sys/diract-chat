@@ -405,10 +405,11 @@ export const useChatHistory = (sessionId?: string) => {
     queryKey: ['chat-history', sessionId, dbKey],
     enabled: !!sessionId,
     retry: 1,
-    staleTime: 0,
-    gcTime: 5 * 60_000,
-    refetchInterval: 3_000,
+    staleTime: 30_000,      // show cached messages instantly; background refetch after 30 s
+    gcTime: 10 * 60_000,    // keep in memory for 10 min
+    refetchInterval: 3_000, // live-poll every 3 s while conversation is open
     refetchIntervalInBackground: false,
+    placeholderData: (prev: any) => prev, // show previous data immediately while refetching
     queryFn: () => fetchMessages(sessionId!),
   });
 };
