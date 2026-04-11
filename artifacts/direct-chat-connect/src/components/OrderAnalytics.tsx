@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
@@ -12,10 +12,10 @@ import {
   ArrowUpRight, ArrowDownRight, Clock, PackageCheck, Loader2,
   ShoppingBag, RefreshCw, BarChart2, Download, TrendingDown,
   BarChart3 as BarChartIcon, PieChart as PieChartIcon,
-  Sparkles,
+  Sparkles, CalendarDays, X,
 } from 'lucide-react';
 
-type ViewMode = 'daily' | 'weekly' | 'monthly';
+type ViewMode = 'daily' | 'weekly' | 'monthly' | 'custom';
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string; border: string; icon: any; chartColor: string; dot: string }> = {
   pending:    { label: 'Pending',    color: 'text-amber-600',   bg: 'bg-amber-50 dark:bg-amber-950/30',   border: 'border-amber-200/60 dark:border-amber-800/40',   icon: Clock,        chartColor: 'hsl(38,92%,50%)',  dot: '#f59e0b' },
@@ -229,6 +229,21 @@ const OrderAnalytics = () => {
   const [days] = useState(90);
   const [isDownloading, setIsDownloading] = useState(false);
   const [orderChartType, setOrderChartType] = useState<'area' | 'bar'>('area');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [customApplied, setCustomApplied] = useState(false);
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowCustomPicker(false);
+      }
+    };
+    if (showCustomPicker) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showCustomPicker]);
 
   const { data: orders = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ['orders-analytics'],
@@ -240,16 +255,30 @@ const OrderAnalytics = () => {
     refetchInterval: 30000,
   });
 
-  const dateRange = useMemo(() => ({ end: new Date(), start: subDays(new Date(), days) }), [days]);
+  const dateRange = useMemo(() => {
+    if (viewMode === 'custom' && customApplied && customFrom && customTo) {
+      const start = new Date(customFrom + 'T00:00:00');
+      const end = new Date(customTo + 'T23:59:59');
+      return { start, end };
+    }
+    return { end: new Date(), start: subDays(new Date(), days) };
+  }, [viewMode, customApplied, customFrom, customTo, days]);
 
   const filteredOrders = useMemo(() =>
     orders.filter(o => isWithinInterval(parseISO(o.created_at), dateRange)), [orders, dateRange]);
 
+  const customRangeDays = useMemo(() => {
+    if (viewMode === 'custom' && customApplied && customFrom && customTo) {
+      return Math.ceil((new Date(customTo).getTime() - new Date(customFrom).getTime()) / 86400000) + 1;
+    }
+    return days;
+  }, [viewMode, customApplied, customFrom, customTo, days]);
+
   const previousOrders = useMemo(() => {
     const end = subDays(dateRange.start, 1);
-    const start = subDays(end, days);
+    const start = subDays(end, customRangeDays);
     return orders.filter(o => isWithinInterval(parseISO(o.created_at), { start, end }));
-  }, [orders, dateRange, days]);
+  }, [orders, dateRange, customRangeDays]);
 
   const calcChange = (curr: number, prev: number) =>
     prev === 0 ? (curr > 0 ? 100 : 0) : Math.round(((curr - prev) / prev) * 100);
@@ -276,13 +305,21 @@ const OrderAnalytics = () => {
     };
   }, [filteredOrders, previousOrders]);
 
+  const customBucketMode: 'daily' | 'weekly' | 'monthly' = useMemo(() => {
+    if (viewMode !== 'custom') return 'daily';
+    if (customRangeDays <= 31) return 'daily';
+    if (customRangeDays <= 120) return 'weekly';
+    return 'monthly';
+  }, [viewMode, customRangeDays]);
+
   const chartData = useMemo(() => {
     const buckets: Record<string, ChartRow> = {};
+    const bucketing = viewMode === 'custom' ? customBucketMode : viewMode;
     filteredOrders.forEach(order => {
       const d = parseISO(order.created_at);
       let key: string, label: string;
-      if (viewMode === 'daily') { key = format(d, 'yyyy-MM-dd'); label = format(d, 'dd MMM'); }
-      else if (viewMode === 'weekly') { const ws = startOfWeek(d, { weekStartsOn: 6 }); key = format(ws, 'yyyy-MM-dd'); label = `W${format(ws, 'dd MMM')}`; }
+      if (bucketing === 'daily') { key = format(d, 'yyyy-MM-dd'); label = format(d, 'dd MMM'); }
+      else if (bucketing === 'weekly') { const ws = startOfWeek(d, { weekStartsOn: 6 }); key = format(ws, 'yyyy-MM-dd'); label = `W${format(ws, 'dd MMM')}`; }
       else { const ms = startOfMonth(d); key = format(ms, 'yyyy-MM'); label = format(ms, 'MMM yy'); }
       if (!buckets[key]) buckets[key] = { label, total: 0, delivered: 0, cancelled: 0, pending: 0, revenue: 0 };
       buckets[key].total++;
@@ -292,7 +329,7 @@ const OrderAnalytics = () => {
       buckets[key].revenue += Number(order.total_price) || 0;
     });
     return Object.values(buckets);
-  }, [filteredOrders, viewMode]);
+  }, [filteredOrders, viewMode, customBucketMode]);
 
   const statusPieData = useMemo(() =>
     Object.entries(summary.statuses)
@@ -313,27 +350,123 @@ const OrderAnalytics = () => {
     );
   }
 
-  const viewLabel = viewMode === 'daily' ? 'Day' : viewMode === 'weekly' ? 'Week' : 'Month';
+  const viewLabel = viewMode === 'daily' ? 'Day' : viewMode === 'weekly' ? 'Week' : viewMode === 'monthly' ? 'Month' : 'Custom';
   const avgOrder = summary.total > 0 ? Math.round(summary.revenue / summary.total) : 0;
+  const customLabel = customApplied && customFrom && customTo
+    ? `${format(new Date(customFrom), 'dd MMM')} – ${format(new Date(customTo), 'dd MMM yyyy')}`
+    : 'Custom';
 
   return (
     <div className="space-y-3">
 
       {/* ── Amazon-style top toolbar ───────────────────────── */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center rounded-md border border-[#D5D9D9] dark:border-border overflow-hidden text-[12px] font-medium">
-          {(['daily', 'weekly', 'monthly'] as ViewMode[]).map((m, idx) => (
-            <button key={m} onClick={() => setViewMode(m)}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Period tabs */}
+          <div className="flex items-center rounded-md border border-[#D5D9D9] dark:border-border overflow-hidden text-[12px] font-medium">
+            {(['daily', 'weekly', 'monthly'] as const).map((m, idx) => (
+              <button key={m} onClick={() => setViewMode(m)}
+                className={cn(
+                  'px-3.5 py-1.5 transition-colors',
+                  idx !== 0 && 'border-l border-[#D5D9D9] dark:border-border',
+                  viewMode === m
+                    ? 'bg-[#FFE9C0] dark:bg-amber-900/30 text-[#C45500] dark:text-amber-400 font-semibold'
+                    : 'bg-white dark:bg-card text-[#0F1111] dark:text-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/40'
+                )}
+              >{m.charAt(0).toUpperCase() + m.slice(1)}</button>
+            ))}
+          </div>
+
+          {/* Custom date range button + popover */}
+          <div className="relative" ref={pickerRef}>
+            <button
+              onClick={() => { setViewMode('custom'); setShowCustomPicker(v => !v); }}
               className={cn(
-                'px-3.5 py-1.5 transition-colors',
-                idx !== 0 && 'border-l border-[#D5D9D9] dark:border-border',
-                viewMode === m
-                  ? 'bg-[#FFE9C0] dark:bg-amber-900/30 text-[#C45500] dark:text-amber-400 font-semibold'
-                  : 'bg-white dark:bg-card text-[#0F1111] dark:text-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/40'
+                'flex items-center gap-1.5 text-[12px] font-medium px-3 py-1.5 rounded border transition-colors',
+                viewMode === 'custom'
+                  ? 'bg-[#FFE9C0] dark:bg-amber-900/30 text-[#C45500] dark:text-amber-400 border-[#FFA41C] font-semibold'
+                  : 'bg-white dark:bg-card text-[#0F1111] dark:text-foreground border-[#D5D9D9] dark:border-border hover:bg-[#F7F8F8] dark:hover:bg-muted/40'
               )}
-            >{m.charAt(0).toUpperCase() + m.slice(1)}</button>
-          ))}
+            >
+              <CalendarDays size={13} />
+              <span>{viewMode === 'custom' ? customLabel : 'Custom'}</span>
+              {viewMode === 'custom' && customApplied && (
+                <span
+                  className="ml-1 flex items-center justify-center w-4 h-4 rounded-full bg-[#C45500] text-white hover:bg-red-600 transition-colors"
+                  onClick={e => { e.stopPropagation(); setCustomApplied(false); setCustomFrom(''); setCustomTo(''); setViewMode('daily'); setShowCustomPicker(false); }}
+                >
+                  <X size={9} />
+                </span>
+              )}
+            </button>
+
+            {showCustomPicker && (
+              <div className="absolute top-full left-0 mt-1.5 z-50 bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl shadow-lg p-4 w-72">
+                <p className="text-[11px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide mb-3">Custom Date Range</p>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div>
+                    <label className="text-[10.5px] text-[#565959] dark:text-muted-foreground font-medium mb-1 block">From</label>
+                    <input
+                      type="date"
+                      value={customFrom}
+                      max={customTo || format(new Date(), 'yyyy-MM-dd')}
+                      onChange={e => setCustomFrom(e.target.value)}
+                      className="w-full text-[11.5px] px-2 py-1.5 rounded border border-[#D5D9D9] dark:border-border bg-white dark:bg-background text-[#0F1111] dark:text-foreground focus:outline-none focus:ring-1 focus:ring-[#FF9900]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10.5px] text-[#565959] dark:text-muted-foreground font-medium mb-1 block">To</label>
+                    <input
+                      type="date"
+                      value={customTo}
+                      min={customFrom}
+                      max={format(new Date(), 'yyyy-MM-dd')}
+                      onChange={e => setCustomTo(e.target.value)}
+                      className="w-full text-[11.5px] px-2 py-1.5 rounded border border-[#D5D9D9] dark:border-border bg-white dark:bg-background text-[#0F1111] dark:text-foreground focus:outline-none focus:ring-1 focus:ring-[#FF9900]"
+                    />
+                  </div>
+                </div>
+
+                {/* Quick presets */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {[
+                    { label: 'Last 7d', days: 7 }, { label: 'Last 14d', days: 14 },
+                    { label: 'Last 30d', days: 30 }, { label: 'Last 90d', days: 90 },
+                  ].map(p => (
+                    <button key={p.label}
+                      onClick={() => {
+                        const to = format(new Date(), 'yyyy-MM-dd');
+                        const from = format(subDays(new Date(), p.days - 1), 'yyyy-MM-dd');
+                        setCustomFrom(from); setCustomTo(to);
+                      }}
+                      className="text-[10.5px] px-2 py-1 rounded border border-[#D5D9D9] dark:border-border bg-[#F7F8F8] dark:bg-muted/40 text-[#007185] dark:text-blue-400 hover:bg-[#FFE9C0] hover:text-[#C45500] hover:border-[#FFA41C] transition-colors font-medium"
+                    >{p.label}</button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    disabled={!customFrom || !customTo}
+                    onClick={() => { if (customFrom && customTo) { setCustomApplied(true); setShowCustomPicker(false); } }}
+                    className="flex-1 text-[11.5px] font-semibold py-1.5 rounded border border-[#FFA41C] bg-gradient-to-b from-[#FFD78C] to-[#F5A623] text-[#0F1111] disabled:opacity-40 hover:from-[#F5C26B] hover:to-[#E8951E] transition-all"
+                  >Apply</button>
+                  <button
+                    onClick={() => { setCustomFrom(''); setCustomTo(''); setCustomApplied(false); setShowCustomPicker(false); setViewMode('daily'); }}
+                    className="px-3 text-[11.5px] font-medium py-1.5 rounded border border-[#D5D9D9] dark:border-border bg-white dark:bg-card text-[#565959] dark:text-muted-foreground hover:bg-[#F7F8F8] transition-colors"
+                  >Clear</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Active custom range badge */}
+          {viewMode === 'custom' && customApplied && (
+            <span className="text-[10.5px] font-medium text-[#007185] dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40 px-2 py-1 rounded-full">
+              {customRangeDays}d range · {customBucketMode}
+            </span>
+          )}
         </div>
+
         <div className="flex items-center gap-2">
           <button onClick={() => refetch()} disabled={isFetching}
             className="flex items-center gap-1.5 text-[11.5px] font-medium text-[#007185] dark:text-blue-400 hover:text-[#C45500] dark:hover:text-amber-400 px-3 py-1.5 rounded border border-[#D5D9D9] dark:border-border bg-white dark:bg-card transition-colors"
