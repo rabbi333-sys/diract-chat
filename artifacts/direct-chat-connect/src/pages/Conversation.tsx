@@ -217,10 +217,21 @@ const Conversation = () => {
   };
 
   // Deduplicate: remove local optimistic messages already present in DB response
-  const dbAgentTexts = new Set(
-    (messages || []).filter(m => m.sender === 'Agent').map(m => m.message_text)
-  );
-  const dedupedLocal = localMessages.filter(m => !dbAgentTexts.has(m.message_text));
+  const dbAgentMessages = (messages || []).filter(m => m.sender === 'Agent');
+  const dbAgentTexts = new Set(dbAgentMessages.map(m => m.message_text));
+  const dedupedLocal = localMessages.filter(m => {
+    // Exact match — always deduplicate
+    if (dbAgentTexts.has(m.message_text)) return false;
+    // Blob media: suppress local preview once DB already has the real data URL version
+    if (m.message_text.startsWith('blob-image:') &&
+        dbAgentMessages.some(db => db.message_text?.startsWith('data:image/'))) return false;
+    if (m.message_text.startsWith('blob-video:') &&
+        dbAgentMessages.some(db => db.message_text?.startsWith('data:video/'))) return false;
+    if (m.message_text.startsWith('blob-audio:') &&
+        dbAgentMessages.some(db =>
+          db.message_text?.startsWith('data:audio/') || db.message_text?.startsWith('blob-audio:'))) return false;
+    return true;
+  });
 
   const allMessages = [...(messages || []), ...dedupedLocal];
 
