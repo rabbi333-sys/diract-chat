@@ -43,6 +43,7 @@ export interface SessionInfo {
   last_message_at: string;
   message_count: number;
   is_active: boolean;
+  last_message_text?: string;
 }
 
 export interface RecipientName {
@@ -467,7 +468,7 @@ export const useSessions = (filterDate?: Date | null) => {
           const creds = buildSessionsCreds(main);
           const body: Record<string, unknown> = { creds };
           if (filterDate) body.filterDate = format(filterDate, 'yyyy-MM-dd');
-          const { sessions } = await apiPost<{ sessions: { session_id: string; recipient: string; last_message_at: string; message_count: number }[] }>('/api/sessions/list', body);
+          const { sessions } = await apiPost<{ sessions: { session_id: string; recipient: string; last_message_at: string; message_count: number; last_message_text?: string }[] }>('/api/sessions/list', body);
           const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
           const withActive = sessions.map((s) => ({
             ...s,

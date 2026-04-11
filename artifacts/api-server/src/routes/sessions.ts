@@ -38,6 +38,7 @@ export type SessionInfo = {
   recipient: string;
   last_message_at: string;
   message_count: number;
+  last_message_text?: string;
 };
 
 // ─── Row normalizer (mirrors frontend normalizeRow) ───────────────────────────
@@ -109,19 +110,20 @@ function normalizeRow(raw: Record<string, any>): NormalizedMessage | null {
 }
 
 function buildSessions(msgs: NormalizedMessage[]): SessionInfo[] {
-  const map = new Map<string, { recipient: string; count: number; last_ts: string; last_id: string | number }>();
+  const map = new Map<string, { recipient: string; count: number; last_ts: string; last_id: string | number; last_text: string }>();
   for (const m of msgs) {
     const ex = map.get(m.session_id);
     if (!ex) {
-      map.set(m.session_id, { recipient: m.recipient ?? m.session_id, count: 1, last_ts: m.timestamp, last_id: m.id });
+      map.set(m.session_id, { recipient: m.recipient ?? m.session_id, count: 1, last_ts: m.timestamp, last_id: m.id, last_text: m.message_text || '' });
     } else {
       ex.count++;
-      if (m.timestamp > ex.last_ts) { ex.last_ts = m.timestamp; ex.last_id = m.id; ex.recipient = m.recipient ?? ex.recipient; }
+      if (m.timestamp > ex.last_ts) { ex.last_ts = m.timestamp; ex.last_id = m.id; ex.recipient = m.recipient ?? ex.recipient; ex.last_text = m.message_text || ''; }
+      else if (m.timestamp === ex.last_ts && String(m.id) > String(ex.last_id)) { ex.last_id = m.id; ex.last_text = m.message_text || ''; }
     }
   }
   const FALLBACK_TS = '2000-01-01T00:00:00.000Z';
   const sessions = Array.from(map.entries()).map(([session_id, info]) => ({
-    session_id, recipient: info.recipient, last_message_at: info.last_ts, last_id: info.last_id, message_count: info.count,
+    session_id, recipient: info.recipient, last_message_at: info.last_ts, last_id: info.last_id, message_count: info.count, last_message_text: info.last_text,
   }));
   const allFallback = sessions.every(s => s.last_message_at === FALLBACK_TS);
   if (allFallback) {

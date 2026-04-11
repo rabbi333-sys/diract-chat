@@ -42,6 +42,7 @@ export interface SessionInfo {
   last_message_at: string;
   message_count: number;
   is_active: boolean;
+  last_message_text?: string;
 }
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
@@ -145,7 +146,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
 export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInfo[] {
   const map = new Map<
     string,
-    { recipient: string; last_id: string | number; count: number; last_ts: string }
+    { recipient: string; last_id: string | number; count: number; last_ts: string; last_text: string }
   >();
   msgs.forEach((m) => {
     const ex = map.get(m.session_id);
@@ -155,12 +156,17 @@ export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInf
         last_id: m.id,
         count: 1,
         last_ts: m.timestamp,
+        last_text: m.message_text || '',
       });
     } else {
       ex.count++;
       if (m.timestamp > ex.last_ts) {
         ex.last_ts = m.timestamp;
         ex.last_id = m.id;
+        ex.last_text = m.message_text || '';
+      } else if (m.timestamp === ex.last_ts && String(m.id) > String(ex.last_id)) {
+        ex.last_id = m.id;
+        ex.last_text = m.message_text || '';
       }
     }
   });
@@ -173,6 +179,7 @@ export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInf
     last_id: info.last_id,
     message_count: info.count,
     is_active: info.last_ts >= fiveMinutesAgo,
+    last_message_text: info.last_text,
   }));
   // If no real timestamps exist, sort by the highest row-id (more recent inserts first)
   const allFallback = sessions.every(s => s.last_message_at === FALLBACK_TS);

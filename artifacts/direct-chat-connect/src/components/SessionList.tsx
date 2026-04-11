@@ -312,6 +312,11 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
         >
           {initials}
         </div>
+        {/* Status dot on avatar */}
+        <span className={cn(
+          "absolute top-0 right-0 w-3 h-3 rounded-full border-2 border-background",
+          isLive(session) ? "bg-emerald-500" : "bg-muted-foreground/30"
+        )} />
         {/* Message count badge */}
         <div
           className="absolute -bottom-1 -right-1 min-w-[20px] h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold px-1 shadow border-2 border-background"
@@ -363,27 +368,10 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
           </div>
         )}
 
-        {/* Sub row */}
-        <div className="flex items-center gap-2 mt-0.5">
-          {recipientName && (
-            <span className="text-[10px] text-muted-foreground/50 font-mono truncate max-w-[90px]">
-              {session.recipient}
-            </span>
-          )}
-          {recipientName && <span className="text-muted-foreground/30 text-[10px]">·</span>}
-          <div className="flex items-center gap-1">
-            <span className={cn(
-              "w-1.5 h-1.5 rounded-full flex-shrink-0",
-              isLive(session) ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/30"
-            )} />
-            <span className={cn(
-              "text-[11px] font-medium",
-              isLive(session) ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/40"
-            )}>
-              {isLive(session) ? 'Active' : 'Offline'}
-            </span>
-          </div>
-        </div>
+        {/* Sub row — last message preview */}
+        <p className="text-[11px] text-muted-foreground/60 truncate mt-0.5 leading-snug max-w-[200px]">
+          {session.last_message_text || (recipientName ? session.recipient : 'No messages yet')}
+        </p>
       </div>
 
       {/* Timestamp */}
