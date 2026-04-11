@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fetchNameFromMeta, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage } from '@/components/ChatMessage';
-import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus } from 'lucide-react';
 import { useAiControl } from '@/hooks/useAiControl';
 import { useTeamRole } from '@/hooks/useTeamRole';
 import { Button } from '@/components/ui/button';
@@ -122,6 +122,10 @@ const Conversation = () => {
 
   // Upload state
   const [uploadingId, setUploadingId] = useState<number | null>(null);
+
+  // Multi-image staging (Messenger-style)
+  const [pendingFiles,    setPendingFiles]    = useState<File[]>([]);
+  const [pendingPreviews, setPendingPreviews] = useState<string[]>([]);
 
   // Voice recording
   const [recording, setRecording] = useState(false);
@@ -277,43 +281,58 @@ const Conversation = () => {
     setLocalMessages(prev => prev.map(m => m.id === id ? { ...m, _sending: false } : m));
   };
 
-  // ── Send text ──────────────────────────────────────────────────────────────
-  const handleSendText = () => {
+  // ── Remove a staged image ──────────────────────────────────────────────────
+  const removePendingFile = useCallback((index: number) => {
+    setPendingPreviews(prev => { URL.revokeObjectURL(prev[index]); return prev.filter((_, i) => i !== index); });
+    setPendingFiles(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // ── Unified send (text + optional staged images) ───────────────────────────
+  const handleSend = () => {
     const text = replyText.trim();
-    if (!text || !activeConn) {
-      if (!activeConn) toast.error('Add a connection in Settings first');
-      return;
-    }
-    const id = nextId();
+    const files = pendingFiles;
+    if (!text && !files.length) return;
+    if (!activeConn) { toast.error('Add a connection in Settings first'); return; }
+
     const rt = replyingTo;
-    // INSTANT: add to UI immediately (shows as "sending")
-    addOptimistic(id, text, rt);
+
+    // Clear inputs instantly
     setReplyText('');
+    setPendingFiles([]);
+    setPendingPreviews(prev => { prev.forEach(URL.revokeObjectURL); return []; });
     setReplyingTo(null);
     setShowEmoji(false);
     setShowQuickReplies(false);
     inputRef.current?.focus();
+
     (async () => {
-      // Fire DB write in parallel (don't await — non-blocking)
-      insertMessageToExternalDb(getStoredConnection(), {
-        session_id: sessionId || '',
-        sender: 'Agent',
-        message_text: text,
-        timestamp: new Date().toISOString(),
-        recipient,
-      });
-      try {
-        if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
-        else if (fbConn) await fbPost(fbConn, recipient, { text });
-        else if (igConn) await fbPost(igConn, recipient, { text });
-        // Mark sent (tick indicator) then refetch DB
-        markSent(id);
-        await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
-        // Remove optimistic — DB now has the real message
-        revertOptimistic(id);
-      } catch (err: unknown) {
-        revertOptimistic(id);
-        toast.error(err instanceof Error ? err.message : 'Failed to send');
+      // 1. Send caption text first (if any)
+      if (text) {
+        const id = nextId();
+        addOptimistic(id, text, rt);
+        insertMessageToExternalDb(getStoredConnection(), {
+          session_id: sessionId || '',
+          sender: 'Agent',
+          message_text: text,
+          timestamp: new Date().toISOString(),
+          recipient,
+        });
+        try {
+          if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
+          else if (fbConn) await fbPost(fbConn, recipient, { text });
+          else if (igConn) await fbPost(igConn, recipient, { text });
+          markSent(id);
+          await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+          revertOptimistic(id);
+        } catch (err: unknown) {
+          revertOptimistic(id);
+          toast.error(err instanceof Error ? err.message : 'Failed to send');
+        }
+      }
+
+      // 2. Send each staged image sequentially
+      for (const file of files) {
+        await handleFileSelected(file);
       }
     })();
   };
@@ -502,13 +521,28 @@ const Conversation = () => {
   return (
     <div className="h-screen flex flex-col bg-background">
 
-      {/* Hidden file input */}
+      {/* Hidden file input — multiple for images; single for video/audio */}
       <input
         ref={fileInputRef}
         type="file"
+        multiple
         accept="image/*,video/*,audio/*"
         className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelected(f); e.target.value = ''; }}
+        onChange={e => {
+          const files = Array.from(e.target.files || []);
+          e.target.value = '';
+          if (!files.length) return;
+          const images = files.filter(f => f.type.startsWith('image/'));
+          const others = files.filter(f => !f.type.startsWith('image/'));
+          // Non-image files (video/audio) → send immediately
+          others.forEach(f => handleFileSelected(f));
+          // Image files → stage in thumbnail strip
+          if (images.length) {
+            const previews = images.map(f => URL.createObjectURL(f));
+            setPendingFiles(prev => [...prev, ...images]);
+            setPendingPreviews(prev => [...prev, ...previews]);
+          }
+        }}
       />
 
       {/* ── Header ───────────────────────────────────────────────────────────── */}
@@ -675,6 +709,30 @@ const Conversation = () => {
             </div>
           )}
 
+          {/* Staged image thumbnails */}
+          {pendingPreviews.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap mb-2 px-0.5 animate-in slide-in-from-bottom-1 duration-150">
+              {pendingPreviews.map((src, i) => (
+                <div key={i} className="relative w-[60px] h-[60px] rounded-xl overflow-hidden border border-border/60 group flex-shrink-0 bg-muted">
+                  <img src={src} alt="" className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => removePendingFile(i)}
+                    className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+              {/* Add more images button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-[60px] h-[60px] rounded-xl border-2 border-dashed border-border/60 flex items-center justify-center text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors flex-shrink-0"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
+          )}
+
           {recording ? (
             /* Recording UI */
             <div className="flex items-center gap-2">
@@ -720,7 +778,7 @@ const Conversation = () => {
                   placeholder="Aa"
                   value={replyText}
                   onChange={e => setReplyText(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendText(); } }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                   rows={1}
                   className="w-full bg-muted/60 dark:bg-white/5 border border-border/40 rounded-[22px] px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all resize-none leading-relaxed"
                   style={{ minHeight: 42, maxHeight: 120 }}
@@ -734,7 +792,7 @@ const Conversation = () => {
 
               {/* Right: emoji + send */}
               <div className="flex items-center gap-0.5 flex-shrink-0 pb-1">
-                {!replyText.trim() && (
+                {!replyText.trim() && !pendingFiles.length && (
                   <button
                     onClick={() => { setShowEmoji(v => !v); setShowQuickReplies(false); }}
                     className={cn('w-9 h-9 rounded-full flex items-center justify-center transition-colors',
@@ -744,15 +802,15 @@ const Conversation = () => {
                   </button>
                 )}
                 <button
-                  onClick={handleSendText}
-                  disabled={!replyText.trim()}
+                  onClick={handleSend}
+                  disabled={!replyText.trim() && !pendingFiles.length}
                   className={cn(
                     'w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-150',
-                    replyText.trim()
+                    (replyText.trim() || pendingFiles.length)
                       ? 'text-white hover:scale-105 active:scale-95 shadow-md'
                       : 'bg-muted text-muted-foreground/30 cursor-not-allowed'
                   )}
-                  style={replyText.trim() ? { background: 'linear-gradient(135deg,#7c3aed,#6d28d9)' } : {}}>
+                  style={(replyText.trim() || pendingFiles.length) ? { background: 'linear-gradient(135deg,#7c3aed,#6d28d9)' } : {}}>
                   <Send size={17} />
                 </button>
               </div>
