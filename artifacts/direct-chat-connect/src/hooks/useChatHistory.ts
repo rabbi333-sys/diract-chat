@@ -78,14 +78,40 @@ function computeAnalytics(msgs: NormalizedMessage[]): AnalyticsData {
   };
 }
 
+const FALLBACK_TS = '2000-01-01T00:00:00.000Z';
+
 function computeChartData(msgs: NormalizedMessage[], timeRange: 'daily' | 'weekly' | 'monthly'): ChartData[] {
   const now = new Date();
+
+  // If no messages have real timestamps (all fallback), show totals in the most recent bucket
+  const hasRealTimestamps = msgs.some((m) => m.timestamp !== FALLBACK_TS);
+  if (!hasRealTimestamps && msgs.length > 0) {
+    const totalSessions = new Set(msgs.map((m) => m.session_id)).size;
+    const totalMessages = msgs.length;
+    if (timeRange === 'daily') {
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = subDays(now, 6 - i);
+        return { label: DAY_NAMES[d.getDay()], conversations: i === 6 ? totalSessions : 0, messages: i === 6 ? totalMessages : 0 };
+      });
+    }
+    if (timeRange === 'weekly') {
+      return Array.from({ length: 4 }, (_, i) => ({
+        label: `Week ${i + 1}`,
+        conversations: i === 3 ? totalSessions : 0,
+        messages: i === 3 ? totalMessages : 0,
+      }));
+    }
+    return Array.from({ length: 6 }, (_, i) => {
+      const ref = subMonths(now, 5 - i);
+      return { label: MONTH_NAMES[ref.getMonth()], conversations: i === 5 ? totalSessions : 0, messages: i === 5 ? totalMessages : 0 };
+    });
+  }
 
   if (timeRange === 'daily') {
     return Array.from({ length: 7 }, (_, i) => {
       const d = subDays(now, 6 - i);
       const dateStr = format(d, 'yyyy-MM-dd');
-      const dayMsgs = msgs.filter((m) => (m.timestamp || '').startsWith(dateStr));
+      const dayMsgs = msgs.filter((m) => m.timestamp !== FALLBACK_TS && (m.timestamp || '').startsWith(dateStr));
       const sessions = new Set(dayMsgs.map((m) => m.session_id));
       return { label: DAY_NAMES[d.getDay()], conversations: sessions.size, messages: dayMsgs.length };
     });
@@ -97,6 +123,7 @@ function computeChartData(msgs: NormalizedMessage[], timeRange: 'daily' | 'weekl
       const wStart = startOfWeek(weekRef);
       const wEnd = endOfWeek(weekRef);
       const wMsgs = msgs.filter((m) => {
+        if (m.timestamp === FALLBACK_TS) return false;
         try { const d = new Date(m.timestamp); return d >= wStart && d <= wEnd; } catch { return false; }
       });
       const sessions = new Set(wMsgs.map((m) => m.session_id));
@@ -110,6 +137,7 @@ function computeChartData(msgs: NormalizedMessage[], timeRange: 'daily' | 'weekl
     const yr = ref.getFullYear();
     const mo = ref.getMonth();
     const mMsgs = msgs.filter((m) => {
+      if (m.timestamp === FALLBACK_TS) return false;
       try { const d = new Date(m.timestamp); return d.getFullYear() === yr && d.getMonth() === mo; } catch { return false; }
     });
     const sessions = new Set(mMsgs.map((m) => m.session_id));
