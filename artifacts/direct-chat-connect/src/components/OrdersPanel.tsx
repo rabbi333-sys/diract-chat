@@ -163,7 +163,10 @@ const OrdersPanel = () => {
   const queryClient = useQueryClient();
   const { data: localOrders = [] } = useLocalOrders();
   const { data: supabaseOrders = [] } = useSupabaseOrders();
-  const orders = mergeOrders(localOrders, supabaseOrders);
+  const orders = useMemo(
+    () => mergeOrders(localOrders, supabaseOrders),
+    [localOrders, supabaseOrders]
+  );
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -281,7 +284,8 @@ const OrdersPanel = () => {
           <table className="w-full border-collapse">
             <thead className="sticky top-0 z-10">
               <tr className="bg-muted/60 backdrop-blur border-b border-border/60">
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-5 py-3.5 w-[150px]">Order</th>
+                <th className="text-left text-[11px] font-semibold text-muted-foreground px-5 py-3.5 w-[130px]">Order</th>
+                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5 hidden sm:table-cell">Product</th>
                 <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5">Customer</th>
                 <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5 hidden md:table-cell">Phone</th>
                 <th className="text-right text-[11px] font-semibold text-muted-foreground px-4 py-3.5">Total</th>
@@ -316,10 +320,17 @@ const OrdersPanel = () => {
                           </span>
                         )}
                       </div>
-                      {order.product_name && (
-                        <p className="text-[11px] text-muted-foreground mt-0.5 truncate max-w-[130px]">
-                          {order.product_name}
-                        </p>
+                    </td>
+
+                    {/* Product */}
+                    <td className="px-4 py-4 hidden sm:table-cell">
+                      <span className="text-[12px] text-foreground truncate max-w-[140px] block">
+                        {order.product_name || '—'}
+                      </span>
+                      {order.sku && (
+                        <span className="text-[10px] text-muted-foreground/70">
+                          {order.sku}
+                        </span>
                       )}
                     </td>
 
