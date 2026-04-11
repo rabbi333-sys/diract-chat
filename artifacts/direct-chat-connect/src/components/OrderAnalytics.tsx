@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
@@ -32,50 +32,189 @@ type SummaryType = {
 };
 type ChartRow = { label: string; total: number; delivered: number; cancelled: number; pending: number; revenue: number };
 
-async function exportPageAsPDF(
-  pageEl: HTMLElement | null,
+async function generateAnalyticsPDF(
+  summary: SummaryType,
   viewMode: ViewMode,
+  chartData: ChartRow[],
+  filteredOrders: { status: string; total_price: unknown }[],
   setDownloading: (v: boolean) => void,
 ) {
-  if (!pageEl) return;
   setDownloading(true);
   try {
-    const html2canvas = (await import('html2canvas')).default;
     const { jsPDF } = await import('jspdf');
+    const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
 
-    const canvas = await html2canvas(pageEl, {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      backgroundColor: '#ffffff',
-      windowWidth: pageEl.scrollWidth,
-      height: pageEl.scrollHeight,
-      scrollY: 0,
+    const W = 210;
+    const M = 14; // margin
+    const CW = W - M * 2;
+    const PH = 297; // A4 height
+
+    // ─── Color palette ────────────────────────────────────────
+    type RGB = [number, number, number];
+    const C: Record<string, RGB> = {
+      primary:  [37, 99, 235],
+      navy:     [15, 30, 70],
+      dark:     [15, 17, 17],
+      muted:    [86, 89, 89],
+      border:   [213, 217, 217],
+      bg:       [248, 249, 250],
+      white:    [255, 255, 255],
+      green:    [0, 118, 0],
+      red:      [204, 12, 57],
+      amber:    [180, 90, 0],
+      cyan:     [6, 100, 140],
+      violet:   [109, 40, 180],
+      emerald:  [4, 120, 87],
+      headerBg: [22, 50, 120],
+      accentBg: [239, 246, 255],
+      rowAlt:   [248, 250, 252],
+    };
+
+    const statusColors: Record<string, RGB> = {
+      pending: C.amber, confirmed: C.primary, processing: C.violet,
+      shipped: C.cyan, delivered: C.emerald, cancelled: C.red,
+    };
+
+    const fill = (c: RGB) => pdf.setFillColor(...c);
+    const stroke = (c: RGB) => pdf.setDrawColor(...c);
+    const color = (c: RGB) => pdf.setTextColor(...c);
+    const bold = (size: number) => { pdf.setFont('helvetica', 'bold'); pdf.setFontSize(size); };
+    const normal = (size: number) => { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(size); };
+
+    const addFooter = (page: number, total: number) => {
+      const y = PH - 12;
+      fill(C.bg); pdf.rect(0, y, W, 12, 'F');
+      stroke(C.border); pdf.setLineWidth(0.3); pdf.line(M, y, W - M, y);
+      color(C.muted); normal(7);
+      pdf.text('Chat Monitor  ·  Analytics Report  ·  Confidential', M, y + 7);
+      pdf.text(`Page ${page} of ${total}`, W - M, y + 7, { align: 'right' });
+    };
+
+    // ─── PAGE 1: Header ───────────────────────────────────────
+    // Full-width header band
+    fill(C.headerBg); pdf.rect(0, 0, W, 38, 'F');
+    // Accent strip
+    fill(C.primary); pdf.rect(0, 0, 5, 38, 'F');
+
+    // Logo circle
+    fill(C.white); pdf.circle(M + 9, 19, 8, 'F');
+    color(C.primary); bold(12); pdf.text('CM', M + 9, 23, { align: 'center' });
+
+    // Title
+    color(C.white); bold(18); pdf.text('Chat Monitor', M + 22, 15);
+    normal(9); pdf.text('Analytics Report', M + 22, 23);
+    normal(8); fill([255, 255, 255]); pdf.setTextColor(180, 200, 255);
+    pdf.text(`Period: ${viewMode.charAt(0).toUpperCase() + viewMode.slice(1)}  ·  Generated: ${format(new Date(), 'dd MMM yyyy, HH:mm')}`, M + 22, 31);
+
+    // ─── Summary KPI band ─────────────────────────────────────
+    let y = 50;
+    const avgOrder = summary.total > 0 ? Math.round(summary.revenue / summary.total) : 0;
+    const kpis = [
+      { label: 'Total Revenue', value: `Tk. ${summary.revenue.toLocaleString()}`, sub: summary.revenueChange >= 0 ? `▲ ${summary.revenueChange}%` : `▼ ${Math.abs(summary.revenueChange)}%`, subColor: summary.revenueChange >= 0 ? C.green : C.red, accent: C.primary },
+      { label: 'Total Orders', value: summary.total.toLocaleString(), sub: summary.totalChange >= 0 ? `▲ ${summary.totalChange}%` : `▼ ${Math.abs(summary.totalChange)}%`, subColor: summary.totalChange >= 0 ? C.green : C.red, accent: C.navy },
+      { label: 'Avg. Order Value', value: `Tk. ${avgOrder.toLocaleString()}`, sub: 'Per order avg', subColor: C.muted, accent: C.violet },
+      { label: 'Delivered', value: summary.statuses.delivered.count.toString(), sub: `${summary.total > 0 ? Math.round((summary.statuses.delivered.count / summary.total) * 100) : 0}% success`, subColor: C.emerald, accent: C.emerald },
+    ];
+
+    const KW = (CW - 6) / 4;
+    const KH = 28;
+    kpis.forEach((k, i) => {
+      const kx = M + i * (KW + 2);
+      fill(C.white); stroke(C.border); pdf.setLineWidth(0.3);
+      pdf.roundedRect(kx, y, KW, KH, 2, 2, 'FD');
+      // Left accent bar
+      fill(k.accent); pdf.rect(kx, y, 2.5, KH, 'F');
+      // Label
+      color(C.muted); normal(6.5); pdf.text(k.label.toUpperCase(), kx + 5, y + 7);
+      // Value
+      color(k.accent); bold(13); pdf.text(k.value, kx + 5, y + 17);
+      // Sub
+      color(k.subColor); normal(6.5); pdf.text(k.sub, kx + 5, y + 24);
     });
 
-    const imgData = canvas.toDataURL('image/png');
-    const imgW = canvas.width;
-    const imgH = canvas.height;
+    y += KH + 10;
 
-    const PDF_W = 210; // A4 mm width
-    const PDF_H = (imgH / imgW) * PDF_W;
+    // ─── Section: Order Status Breakdown ─────────────────────
+    color(C.dark); bold(11); pdf.text('Order Status Breakdown', M, y);
+    fill(C.primary); pdf.rect(M, y + 2, 34, 0.8, 'F');
+    y += 8;
 
-    const pdf = new jsPDF({
-      orientation: PDF_H > PDF_W ? 'p' : 'l',
-      unit: 'mm',
-      format: [PDF_W, PDF_H],
+    // Table header
+    const SCOLS = [38, 20, 20, 22, 38, 24];
+    const SHEADS = ['STATUS', 'COUNT', '% SHARE', 'CHANGE', 'REVENUE', 'SPREAD'];
+    fill(C.headerBg); pdf.rect(M, y, CW, 7, 'F');
+    color(C.white); bold(7);
+    let cx = M + 3;
+    SHEADS.forEach((h, i) => { pdf.text(h, cx, y + 4.8); cx += SCOLS[i]; });
+    y += 7;
+
+    Object.entries(STATUS_META).forEach(([key, meta], idx) => {
+      const { count, change } = summary.statuses[key] ?? { count: 0, change: 0 };
+      const pct = summary.total > 0 ? Math.round((count / summary.total) * 100) : 0;
+      const rev = filteredOrders.filter(o => o.status === key).reduce((s, o) => s + (Number(o.total_price) || 0), 0);
+      const rowH = 9;
+      fill(idx % 2 === 0 ? C.white : C.rowAlt); pdf.rect(M, y, CW, rowH, 'F');
+      stroke(C.border); pdf.setLineWidth(0.15); pdf.line(M, y + rowH, M + CW, y + rowH);
+
+      // Status dot + label
+      const sc = statusColors[key] ?? C.muted;
+      fill(sc); pdf.circle(M + 4, y + 4.5, 2, 'F');
+      color(C.dark); normal(8); pdf.text(meta.label, M + 8, y + 5.5);
+
+      cx = M + SCOLS[0] + 3;
+      bold(8); pdf.text(count.toString(), cx, y + 5.5); cx += SCOLS[1];
+      normal(8); color(C.muted); pdf.text(`${pct}%`, cx, y + 5.5); cx += SCOLS[2];
+      color(change >= 0 ? C.green : C.red); pdf.text(`${change >= 0 ? '+' : ''}${change}%`, cx, y + 5.5); cx += SCOLS[3];
+      color(C.dark); normal(8); pdf.text(`Tk. ${rev.toLocaleString()}`, cx, y + 5.5); cx += SCOLS[4];
+
+      // Mini progress bar
+      const barW = SCOLS[5] - 4;
+      fill(C.border); pdf.roundedRect(cx, y + 3.5, barW, 2.5, 1, 1, 'F');
+      if (pct > 0) { fill(sc); pdf.roundedRect(cx, y + 3.5, Math.max(1.5, (barW * pct) / 100), 2.5, 1, 1, 'F'); }
+
+      y += rowH;
     });
 
-    pdf.addImage(imgData, 'PNG', 0, 0, PDF_W, PDF_H);
+    // ─── Period breakdown ─────────────────────────────────────
+    if (chartData.length > 0) {
+      y += 10;
+      if (y > 230) { pdf.addPage(); y = 20; }
 
-    // Footer
-    const C = { muted: [100,116,139] as [number,number,number], light: [241,245,249] as [number,number,number], slate: [226,232,240] as [number,number,number] };
-    const pH = pdf.internal.pageSize.getHeight();
-    pdf.setFillColor(...C.light); pdf.rect(0, pH - 10, PDF_W, 10, 'F');
-    pdf.setDrawColor(...C.slate); pdf.setLineWidth(0.3); pdf.line(0, pH - 10, PDF_W, pH - 10);
-    pdf.setTextColor(...C.muted); pdf.setFontSize(7); pdf.setFont('helvetica', 'normal');
-    pdf.text('Chat Monitor — Analytics Report', 14, pH - 3.5);
-    pdf.text(`${viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} · ${format(new Date(), 'dd MMM yyyy HH:mm')}`, PDF_W - 14, pH - 3.5, { align: 'right' });
+      const periodLabel = viewMode === 'daily' ? 'Daily' : viewMode === 'weekly' ? 'Weekly' : 'Monthly';
+      color(C.dark); bold(11); pdf.text(`${periodLabel} Breakdown`, M, y);
+      fill(C.primary); pdf.rect(M, y + 2, 28, 0.8, 'F');
+      y += 8;
+
+      const PCOLS = [38, 22, 22, 22, 48];
+      const PHEADS = ['PERIOD', 'TOTAL', 'DELIVERED', 'CANCELLED', 'REVENUE'];
+      fill(C.headerBg); pdf.rect(M, y, CW, 7, 'F');
+      color(C.white); bold(7);
+      cx = M + 3;
+      PHEADS.forEach((h, i) => { pdf.text(h, cx, y + 4.8); cx += PCOLS[i]; });
+      y += 7;
+
+      chartData.slice(-25).forEach((row, idx) => {
+        if (y > 270) { pdf.addPage(); y = 20; }
+        const rowH = 7.5;
+        fill(idx % 2 === 0 ? C.white : C.rowAlt); pdf.rect(M, y, CW, rowH, 'F');
+        stroke(C.border); pdf.setLineWidth(0.15); pdf.line(M, y + rowH, M + CW, y + rowH);
+        color(C.dark); normal(8);
+        cx = M + 3;
+        pdf.text(row.label, cx, y + 5); cx += PCOLS[0];
+        bold(8); pdf.text(row.total.toString(), cx, y + 5); cx += PCOLS[1];
+        color(C.emerald); normal(8); pdf.text(row.delivered.toString(), cx, y + 5); cx += PCOLS[2];
+        color(C.red); pdf.text(row.cancelled.toString(), cx, y + 5); cx += PCOLS[3];
+        color(C.primary); bold(8); pdf.text(`Tk. ${row.revenue.toLocaleString()}`, cx, y + 5);
+        y += rowH;
+      });
+    }
+
+    // ─── Footer on all pages ──────────────────────────────────
+    const pageCount = (pdf as any).getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      pdf.setPage(i);
+      addFooter(i, pageCount);
+    }
 
     pdf.save(`analytics-report-${format(new Date(), 'dd-MMM-yyyy')}.pdf`);
   } catch (e) {
@@ -90,7 +229,6 @@ const OrderAnalytics = () => {
   const [days] = useState(90);
   const [isDownloading, setIsDownloading] = useState(false);
   const [orderChartType, setOrderChartType] = useState<'area' | 'bar'>('area');
-  const pageRef = useRef<HTMLDivElement>(null);
 
   const { data: orders = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ['orders-analytics'],
@@ -179,7 +317,7 @@ const OrderAnalytics = () => {
   const avgOrder = summary.total > 0 ? Math.round(summary.revenue / summary.total) : 0;
 
   return (
-    <div ref={pageRef} className="space-y-3">
+    <div className="space-y-3">
 
       {/* ── Amazon-style top toolbar ───────────────────────── */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -203,7 +341,7 @@ const OrderAnalytics = () => {
             <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} /> Refresh
           </button>
           <button
-            onClick={() => exportPageAsPDF(pageRef.current, viewMode, setIsDownloading)}
+            onClick={() => generateAnalyticsPDF(summary, viewMode, chartData, filteredOrders, setIsDownloading)}
             disabled={isDownloading}
             className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#0F1111] dark:text-foreground px-4 py-1.5 rounded border border-[#FFA41C] bg-gradient-to-b from-[#FFD78C] to-[#F5A623] dark:from-amber-500 dark:to-amber-600 hover:from-[#F5C26B] hover:to-[#E8951E] transition-all disabled:opacity-60 shadow-sm"
           >
