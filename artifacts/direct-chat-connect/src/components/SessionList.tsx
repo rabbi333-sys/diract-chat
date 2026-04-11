@@ -115,6 +115,37 @@ export const SessionList = () => {
     });
   }, [queryClient, dbKey]);
 
+  // ── Eager background pre-warm ─────────────────────────────────────────────
+  // As soon as the filtered list is available, pre-fetch every session in the
+  // background so clicking any row shows messages instantly (no skeleton).
+  // Requests are staggered in batches of 4 every 60 ms so we don't flood the
+  // network on a large list; already-cached entries are skipped by React Query.
+  const lastPrefetchKey = useRef('');
+  useEffect(() => {
+    if (!filtered || filtered.length === 0) return;
+    const key = filtered.map(s => s.session_id).join(',');
+    if (key === lastPrefetchKey.current) return;
+    lastPrefetchKey.current = key;
+
+    const BATCH = 4;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 0; i < filtered.length; i += BATCH) {
+      const batch = filtered.slice(i, i + BATCH);
+      const delay = Math.floor(i / BATCH) * 60;
+      const t = setTimeout(() => {
+        batch.forEach(s => {
+          queryClient.prefetchQuery({
+            queryKey: ['chat-history', s.session_id, dbKey],
+            staleTime: 30_000,
+            queryFn: () => fetchMessages(s.session_id),
+          });
+        });
+      }, delay);
+      timers.push(t);
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [filtered, queryClient, dbKey]);
+
   // Apply frozen order: existing sessions in frozen order, new sessions prepended
   const sorted = useMemo(() => {
     if (!sessions) return [];

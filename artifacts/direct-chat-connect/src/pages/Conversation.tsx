@@ -485,7 +485,10 @@ const Conversation = () => {
   const fmtSec = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
   // ── Loading / Error ─────────────────────────────────────────────────────────
-  if (isLoading) return (
+  // Only show the skeleton when there is truly no data yet (first open, nothing
+  // in cache). With eager prefetch + placeholderData this should almost never
+  // show — the vast majority of opens will have cached messages immediately.
+  if (isLoading && !messages?.length) return (
     <div className="h-screen flex flex-col bg-background">
       <div className="h-14 px-4 flex items-center gap-3 border-b border-border/50">
         <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => navigate('/')}><ArrowLeft size={18} /></Button>
