@@ -64,6 +64,25 @@ export interface ChartData {
   messages: number;
 }
 
+// ─── Shared message cache ─────────────────────────────────────────────────────
+let _msgCache: NormalizedMessage[] = [];
+let _msgCacheKey = '';
+let _msgCacheTs = 0;
+const MSG_CACHE_TTL = 15_000;
+
+function setMsgCache(msgs: NormalizedMessage[], key: string) {
+  _msgCache = msgs;
+  _msgCacheKey = key;
+  _msgCacheTs = Date.now();
+}
+
+function getMsgCache(key: string): NormalizedMessage[] | null {
+  if (_msgCacheKey === key && Date.now() - _msgCacheTs < MSG_CACHE_TTL && _msgCache.length > 0) {
+    return _msgCache;
+  }
+  return null;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -302,9 +321,11 @@ export const useAnalytics = () => {
     placeholderData: (prev: any) => prev,
     retry: 1,
     queryFn: async (): Promise<AnalyticsData> => {
+      const cached = getMsgCache(dbKey);
+      if (cached) return computeAnalytics(cached);
+
       const { legacy, main } = getActiveConn();
 
-      // Non-Supabase via API server
       if (main && shouldUseApiServer(main)) {
         try {
           const creds = buildSessionsCreds(main);
@@ -315,28 +336,27 @@ export const useAnalytics = () => {
         }
       }
 
-      // Supabase via new connection
       if (main && main.dbType === 'supabase' && main.url && (main.serviceRoleKey || main.anonKey)) {
         try {
           const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
           const msgs = await queryExternalSupabase(fakeConn, 'sessions');
+          setMsgCache(msgs, dbKey);
           return computeAnalytics(msgs);
         } catch {
           return { total_sessions: 0, total_messages: 0, human_messages: 0, ai_messages: 0 };
         }
       }
 
-      // Legacy Supabase connection
       if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
         try {
           const msgs = await queryExternalSupabase(legacy, 'sessions');
+          setMsgCache(msgs, dbKey);
           return computeAnalytics(msgs);
         } catch {
           return { total_sessions: 0, total_messages: 0, human_messages: 0, ai_messages: 0 };
         }
       }
 
-      // Edge function fallback
       try {
         const { data, error } = await supabase.functions.invoke('get-chat-history', {
           method: 'POST',
@@ -379,7 +399,9 @@ export const useChartData = (
           ? computeCustomRangeChartData(msgs, customStart!, customEnd!)
           : computeChartData(msgs, effectiveRange as 'daily' | 'weekly' | 'monthly');
 
-      // Non-Supabase via API server — fetch all messages then compute chart
+      const cached = getMsgCache(dbKey);
+      if (cached) return compute(cached);
+
       if (main && shouldUseApiServer(main)) {
         try {
           const creds = buildSessionsCreds(main);
@@ -398,28 +420,27 @@ export const useChartData = (
         }
       }
 
-      // Supabase via new connection
       if (main && main.dbType === 'supabase' && main.url && (main.serviceRoleKey || main.anonKey)) {
         try {
           const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
           const msgs = await queryExternalSupabase(fakeConn, 'sessions');
+          setMsgCache(msgs, dbKey);
           return compute(msgs);
         } catch {
           return compute([]);
         }
       }
 
-      // Legacy Supabase
       if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
         try {
           const msgs = await queryExternalSupabase(legacy, 'sessions');
+          setMsgCache(msgs, dbKey);
           return compute(msgs);
         } catch {
           return compute([]);
         }
       }
 
-      // Edge function fallback
       try {
         const { data, error } = await supabase.functions.invoke('get-chat-history', {
           method: 'POST',
@@ -558,6 +579,7 @@ export const useSessions = (filterDate?: Date | null) => {
         try {
           const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
           const msgs = await queryExternalSupabase(fakeConn, 'sessions');
+          setMsgCache(msgs, dbKey);
           const filtered = filterDate
             ? msgs.filter((m) => {
                 try { return format(new Date(m.timestamp), 'yyyy-MM-dd') === format(filterDate, 'yyyy-MM-dd'); }
@@ -575,6 +597,7 @@ export const useSessions = (filterDate?: Date | null) => {
       if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
         try {
           const msgs = await queryExternalSupabase(legacy, 'sessions');
+          setMsgCache(msgs, dbKey);
           const filtered = filterDate
             ? msgs.filter((m) => {
                 try { return format(new Date(m.timestamp), 'yyyy-MM-dd') === format(filterDate, 'yyyy-MM-dd'); }
