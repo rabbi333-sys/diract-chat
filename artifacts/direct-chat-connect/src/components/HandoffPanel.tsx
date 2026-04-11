@@ -109,21 +109,53 @@ export const HandoffPanel = () => {
 
   const [filter, setFilter] = useState<'all' | 'pending' | 'resolved'>('pending');
 
+  // Keep a ref to the latest sessions so the realtime callback (closed over
+  // an empty deps array) can still resolve the real session_id.
+  const sessionsRef = useRef(sessions);
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+
   // Track which session IDs we've already auto-disabled AI for (avoid repeat calls)
   const aiDisabledRef = useRef<Set<string>>(new Set());
+
+  // ── Resolve the canonical session_id for a handoff ────────────────────────
+  // Handoff rows may only carry sender_id (the Meta user ID). Look it up in the
+  // sessions cache to find the real session_id that matches the DB + ai_control.
+  function resolveRealSessionId(
+    req: Pick<HandoffRequest, 'session_id' | 'sender_id' | 'recipient'>,
+    sessionList: typeof sessions
+  ): string | null {
+    const candidate = req.sender_id || req.recipient;
+    const matched = sessionList.find(
+      s => s.recipient === candidate ||
+           s.session_id === req.session_id ||
+           s.session_id === req.sender_id
+    );
+    return matched?.session_id || req.session_id || req.sender_id || null;
+  }
+
+  // ── Disable AI: write to DB + pre-seed React Query cache ─────────────────
+  function disableAiForSession(sid: string) {
+    // Immediately reflect in UI (no waiting for DB round-trip)
+    queryClient.cancelQueries({ queryKey: ['ai-control', sid] });
+    queryClient.setQueryData(['ai-control', sid], false);
+    // Persist to DB
+    autoDisableAi(sid).then(ok => {
+      if (!ok) aiDisabledRef.current.delete(sid);
+      else queryClient.invalidateQueries({ queryKey: ['ai-control', sid] });
+    });
+  }
 
   // ── Auto-disable AI for all pending handoffs on load / change ──────────────
   useEffect(() => {
     for (const req of requests) {
-      // Use session_id; fall back to sender_id (same thing on Meta platforms)
-      const sid = req.session_id || req.sender_id;
-      if (req.status === 'pending' && sid && !aiDisabledRef.current.has(sid)) {
+      if (req.status !== 'pending') continue;
+      const sid = resolveRealSessionId(req, sessions);
+      if (sid && !aiDisabledRef.current.has(sid)) {
         aiDisabledRef.current.add(sid);
-        autoDisableAi(sid).then(ok => {
-          if (!ok) aiDisabledRef.current.delete(sid);
-        });
+        disableAiForSession(sid);
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests]);
 
   // ── Supabase realtime — also auto-disable AI on new INSERT ────────────────
@@ -136,31 +168,31 @@ export const HandoffPanel = () => {
         (payload) => {
           queryClient.invalidateQueries({ queryKey: ['supabase-handoffs'] });
           const newRow = payload.new as HandoffRequest | undefined;
-          const sid = newRow?.session_id || newRow?.sender_id;
+          if (!newRow) return;
 
-          if (sid && newRow?.status === 'pending') {
-            // INSERT = brand-new handoff. Always re-disable AI even if the user
-            // manually turned it back on after a previous request from this session.
+          const sid = resolveRealSessionId(newRow, sessionsRef.current);
+
+          if (sid && newRow.status === 'pending') {
+            // INSERT = brand-new handoff: always re-disable even if user turned
+            // AI back on manually after a previous request from this session.
             if (payload.eventType === 'INSERT') {
-              aiDisabledRef.current.delete(sid); // reset so disable runs again
+              aiDisabledRef.current.delete(sid);
             }
             if (!aiDisabledRef.current.has(sid)) {
               aiDisabledRef.current.add(sid);
-              autoDisableAi(sid).then(ok => {
-                if (!ok) aiDisabledRef.current.delete(sid);
-              });
+              disableAiForSession(sid);
             }
           }
 
-          // When a handoff is resolved, clear from Set so a future request
-          // for the same session will trigger a fresh AI-off again.
-          if (newRow?.status === 'resolved' && sid) {
+          // When resolved, clear from Set so a future request triggers fresh disable.
+          if (newRow.status === 'resolved' && sid) {
             aiDisabledRef.current.delete(sid);
           }
         }
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryClient]);
 
   const resolveMutation = useMutation({
