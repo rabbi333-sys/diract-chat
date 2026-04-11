@@ -296,6 +296,9 @@ export const useAnalytics = () => {
   return useQuery({
     queryKey: ['analytics', dbKey],
     staleTime: 60_000,
+    gcTime: 15 * 60_000,
+    refetchInterval: 60_000,
+    placeholderData: (prev: any) => prev,
     retry: 1,
     queryFn: async (): Promise<AnalyticsData> => {
       const { legacy, main } = getActiveConn();
@@ -360,6 +363,9 @@ export const useChartData = (
   return useQuery({
     queryKey: ['chart-data', timeRange, customStart, customEnd, dbKey],
     staleTime: 60_000,
+    gcTime: 15 * 60_000,
+    refetchInterval: 60_000,
+    placeholderData: (prev: any) => prev,
     retry: 1,
     enabled: !isCustom || hasCustomDates,
     queryFn: async (): Promise<ChartData[]> => {

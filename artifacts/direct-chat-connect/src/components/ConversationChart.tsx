@@ -194,14 +194,14 @@ export const ConversationChart = () => {
               <p className="text-xs text-muted-foreground/60 mt-1">Pick a start and end date to view data</p>
             </div>
           </div>
-        ) : isLoading ? (
+        ) : isLoading && !chartData?.length ? (
           <div className="h-[250px] flex items-center justify-center">
             <div className="flex flex-col items-center gap-2">
               <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
               <p className="text-xs text-muted-foreground">Loading data...</p>
             </div>
           </div>
-        ) : chartData && chartData.some((d) => d.conversations > 0 || d.messages > 0) ? (
+        ) : chartData && chartData.length > 0 ? (
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
               {chartType === 'area' ? (

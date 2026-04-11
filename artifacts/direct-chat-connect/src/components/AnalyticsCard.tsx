@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils';
 export const AnalyticsCard = () => {
   const { data: analytics, isLoading } = useAnalytics();
 
-  if (isLoading) {
+  // Only show skeleton on truly first load (no data at all, not even placeholderData)
+  if (isLoading && !analytics) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[...Array(4)].map((_, i) => (

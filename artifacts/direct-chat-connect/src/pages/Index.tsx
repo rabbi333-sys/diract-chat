@@ -19,6 +19,7 @@ import OrdersPanel from '@/components/OrdersPanel';
 import OrderAnalytics from '@/components/OrderAnalytics';
 import WebhookSettings from '@/components/WebhookSettings';
 import { useGlobalAiControl } from '@/hooks/useAiControl';
+import { useAnalytics, useChartData } from '@/hooks/useChatHistory';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useTeamRole } from '@/hooks/useTeamRole';
@@ -78,6 +79,12 @@ const Index = () => {
   const [aiEdgeFnUrl, setAiEdgeFnUrl] = useState('');
   const { enabled: notifEnabled, soundEnabled, toggleEnabled: toggleNotif, toggleSound, counts, clearCount } = useNotifications();
   const { globalOn, toggle: toggleGlobalAi, isPending: globalAiPending } = useGlobalAiControl();
+
+  // ── Pre-warm Overview cache in background ─────────────────────────────────
+  // Calling these hooks here (even when not on the Overview tab) populates the
+  // React Query cache so Overview renders instantly when the user navigates to it.
+  useAnalytics();
+  useChartData('daily');
 
   // ── Handle handoff "Open Chat" → live inbox navigation ──────────────────────
   // HandoffPanel navigates to /?openSession=<id>&recipient=<rec>&disable_ai=1
