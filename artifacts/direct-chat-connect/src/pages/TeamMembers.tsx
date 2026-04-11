@@ -1229,7 +1229,7 @@ const TeamMembers = () => {
                         </div>
                       </div>
 
-                      {/* Right side: time info + ⋯ menu */}
+                      {/* Right side: time info + remove button + ⋯ menu */}
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         {invite.status === 'accepted' ? (() => {
                           const seen = lastSeenDisplay(invite.last_login_at);
@@ -1246,6 +1246,18 @@ const TeamMembers = () => {
                           <span className="text-[10px] text-muted-foreground/40 hidden sm:flex items-center gap-0.5">
                             <Clock size={9} /> {timeAgo(invite.created_at)}
                           </span>
+                        )}
+
+                        {/* Direct Remove Access button — visible for active members */}
+                        {invite.status === 'accepted' && (
+                          <button
+                            onClick={() => handleRevoke(invite.id)}
+                            className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white border border-red-500/20 hover:border-red-500 transition-all"
+                            title="Remove dashboard access"
+                          >
+                            <ShieldOff size={11} />
+                            Remove access
+                          </button>
                         )}
 
                         <DropdownMenu>
