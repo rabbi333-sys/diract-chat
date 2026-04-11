@@ -163,17 +163,21 @@ const Conversation = () => {
   const disableAiOnOpen = searchParams.get('disable_ai') === '1';
   useEffect(() => {
     if (!disableAiOnOpen || !sessionId) return;
-    // Optimistic: show AI as OFF in the UI right away (no waiting for DB round-trip)
-    queryClient.setQueryData(['ai-control', sessionId], false);
-    // Persist: direct upsert bypasses auth check (ai_control uses "Allow all" RLS)
+    const qk = ['ai-control', sessionId];
+    // 1. Cancel any in-flight fetch so it can't land and overwrite our write
+    queryClient.cancelQueries({ queryKey: qk });
+    // 2. Optimistic: set AI as OFF immediately in the UI
+    queryClient.setQueryData(qk, false);
+    // 3. Persist to DB
     supabase.from('ai_control').upsert(
       { session_id: sessionId, ai_enabled: false, updated_at: new Date().toISOString() },
       { onConflict: 'session_id' }
     ).then(({ error }) => {
       if (error) {
-        // Revert optimistic if write failed
-        queryClient.invalidateQueries({ queryKey: ['ai-control', sessionId] });
+        // Revert optimistic only on real DB error
+        queryClient.invalidateQueries({ queryKey: qk });
       }
+      // On success: realtime subscription in useAiControl will keep cache in sync
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]); // run once on mount

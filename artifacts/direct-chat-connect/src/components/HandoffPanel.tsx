@@ -227,6 +227,11 @@ export const HandoffPanel = () => {
       toast.error('No session ID on this handoff — cannot open conversation');
       return;
     }
+    // Pre-seed the React Query cache so Conversation page mounts with AI=OFF
+    // This prevents the initial stale-time window from reading an old DB value
+    queryClient.cancelQueries({ queryKey: ['ai-control', navSessionId] });
+    queryClient.setQueryData(['ai-control', navSessionId], false);
+
     // Auto-resolve the handoff request when opening the chat
     if (req.status === 'pending') {
       resolveMutation.mutate({ id: req.id, status: 'resolved', source: req._source });

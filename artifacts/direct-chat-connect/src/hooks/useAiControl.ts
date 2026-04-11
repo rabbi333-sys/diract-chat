@@ -92,7 +92,7 @@ export function useAiControl(session_id: string | undefined) {
       return data?.ai_enabled ?? true;
     },
     enabled: !!session_id,
-    staleTime: 0,          // always re-fetch on mount / focus
+    staleTime: 10_000,       // keep cached value for 10 s — prevents mount-fetch from clobbering optimistic writes
     refetchInterval: 3_000,  // poll every 3 s as safety net (realtime handles instant)
   });
 
