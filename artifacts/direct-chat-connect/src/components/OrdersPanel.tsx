@@ -355,9 +355,10 @@ const OrdersPanel = () => {
       // Search filter
       if (q) {
         const haystack = [
-          o.order_id, o.customer_name, o.customer_phone,
-          o.product_name, o.product_sku, o.status,
-        ].join(' ').toLowerCase();
+          o.id, o.merchant_order_id, o.customer_name,
+          o.customer_phone, o.customer_address,
+          o.product_name, o.sku, o.status,
+        ].filter(Boolean).join(' ').toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
