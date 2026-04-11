@@ -64,21 +64,58 @@ export interface ChartData {
   messages: number;
 }
 
-// ─── Shared message cache ─────────────────────────────────────────────────────
+// ─── Shared message cache (in-memory + localStorage persistence) ──────────────
+const LS_RAW      = 'cm_raw_';
+const LS_SESSIONS = 'cm_sess_';
+const LS_ANALYTICS = 'cm_analytics_';
+const LS_CHART    = 'cm_chart_';
+const LS_MAX_AGE  = 120_000; // 2 min — localStorage data older than this is ignored
+const LS_MAX_MSGS = 2000;    // max messages stored to localStorage
+const MSG_CACHE_TTL = 8_000; // in-memory TTL — slightly longer than 5s poll
+
 let _msgCache: NormalizedMessage[] = [];
 let _msgCacheKey = '';
 let _msgCacheTs = 0;
-const MSG_CACHE_TTL = 15_000;
+
+function lsGet<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw) as { ts: number; data: T };
+    if (Date.now() - ts > LS_MAX_AGE) return null;
+    return data;
+  } catch { return null; }
+}
+
+function lsSet<T>(key: string, data: T) {
+  try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch { /* storage full */ }
+}
+
+function lsTs(key: string): number {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return 0;
+    return (JSON.parse(raw) as { ts: number }).ts ?? 0;
+  } catch { return 0; }
+}
 
 function setMsgCache(msgs: NormalizedMessage[], key: string) {
   _msgCache = msgs;
   _msgCacheKey = key;
   _msgCacheTs = Date.now();
+  lsSet(LS_RAW + key, msgs.slice(0, LS_MAX_MSGS));
 }
 
 function getMsgCache(key: string): NormalizedMessage[] | null {
   if (_msgCacheKey === key && Date.now() - _msgCacheTs < MSG_CACHE_TTL && _msgCache.length > 0) {
     return _msgCache;
+  }
+  const ls = lsGet<NormalizedMessage[]>(LS_RAW + key);
+  if (ls && ls.length > 0) {
+    _msgCache = ls;
+    _msgCacheKey = key;
+    _msgCacheTs = lsTs(LS_RAW + key);
+    return ls;
   }
   return null;
 }
@@ -314,15 +351,20 @@ export const useAnalytics = () => {
   const dbKey = useDbConnectionKey();
   return useQuery({
     queryKey: ['analytics', dbKey],
-    staleTime: 5_000,
-    gcTime: 15 * 60_000,
+    staleTime: 4_000,
+    gcTime: 30 * 60_000,
     refetchInterval: 5_000,
-    refetchIntervalInBackground: false,
-    placeholderData: (prev: any) => prev,
+    refetchIntervalInBackground: true,
     retry: 1,
+    initialData: () => lsGet<AnalyticsData>(LS_ANALYTICS + dbKey) ?? undefined,
+    initialDataUpdatedAt: () => lsTs(LS_ANALYTICS + dbKey),
     queryFn: async (): Promise<AnalyticsData> => {
       const cached = getMsgCache(dbKey);
-      if (cached) return computeAnalytics(cached);
+      if (cached) {
+        const result = computeAnalytics(cached);
+        lsSet(LS_ANALYTICS + dbKey, result);
+        return result;
+      }
 
       const { legacy, main } = getActiveConn();
 
@@ -341,7 +383,9 @@ export const useAnalytics = () => {
           const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
           const msgs = await queryExternalSupabase(fakeConn, 'sessions');
           setMsgCache(msgs, dbKey);
-          return computeAnalytics(msgs);
+          const result = computeAnalytics(msgs);
+          lsSet(LS_ANALYTICS + dbKey, result);
+          return result;
         } catch {
           return { total_sessions: 0, total_messages: 0, human_messages: 0, ai_messages: 0 };
         }
@@ -351,7 +395,9 @@ export const useAnalytics = () => {
         try {
           const msgs = await queryExternalSupabase(legacy, 'sessions');
           setMsgCache(msgs, dbKey);
-          return computeAnalytics(msgs);
+          const result = computeAnalytics(msgs);
+          lsSet(LS_ANALYTICS + dbKey, result);
+          return result;
         } catch {
           return { total_sessions: 0, total_messages: 0, human_messages: 0, ai_messages: 0 };
         }
@@ -363,7 +409,9 @@ export const useAnalytics = () => {
           body: { type: 'analytics', connection: legacy ? { ...legacy, is_active: true } : null },
         });
         if (error) throw error;
-        return data as AnalyticsData;
+        const result = data as AnalyticsData;
+        lsSet(LS_ANALYTICS + dbKey, result);
+        return result;
       } catch {
         return { total_sessions: 0, total_messages: 0, human_messages: 0, ai_messages: 0 };
       }
@@ -381,23 +429,29 @@ export const useChartData = (
   const isCustom = timeRange === 'custom';
   const hasCustomDates = isCustom && !!customStart && !!customEnd;
 
+  const chartLsKey = LS_CHART + timeRange + '_' + (customStart ?? '') + '_' + (customEnd ?? '') + '_' + dbKey;
+
   return useQuery({
     queryKey: ['chart-data', timeRange, customStart, customEnd, dbKey],
-    staleTime: 10_000,
-    gcTime: 15 * 60_000,
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: false,
-    placeholderData: (prev: any) => prev,
+    staleTime: 4_000,
+    gcTime: 30 * 60_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
     retry: 1,
     enabled: !isCustom || hasCustomDates,
+    initialData: () => lsGet<ChartData[]>(chartLsKey) ?? undefined,
+    initialDataUpdatedAt: () => lsTs(chartLsKey),
     queryFn: async (): Promise<ChartData[]> => {
       const effectiveRange = isCustom ? 'daily' : timeRange;
       const { legacy, main } = getActiveConn();
 
-      const compute = (msgs: NormalizedMessage[]) =>
-        isCustom && hasCustomDates
+      const compute = (msgs: NormalizedMessage[]) => {
+        const result = isCustom && hasCustomDates
           ? computeCustomRangeChartData(msgs, customStart!, customEnd!)
           : computeChartData(msgs, effectiveRange as 'daily' | 'weekly' | 'monthly');
+        if (result.length > 0) lsSet(chartLsKey, result);
+        return result;
+      };
 
       const cached = getMsgCache(dbKey);
       if (cached) return compute(cached);
@@ -447,9 +501,10 @@ export const useChartData = (
           body: { type: 'chart_data', time_range: isCustom ? 'daily' : timeRange, connection: legacy ? { ...legacy, is_active: true } : null },
         });
         if (error) throw error;
-        const msgs = (data as ChartData[]) ?? [];
+        const chartResult = (data as ChartData[]) ?? [];
+        if (!isCustom && chartResult.length > 0) lsSet(chartLsKey, chartResult);
         if (isCustom) return compute([]);
-        return msgs;
+        return chartResult;
       } catch {
         return compute([]);
       }
@@ -548,11 +603,18 @@ function trackSessionActivity(sessions: { session_id: string; recipient: string;
 // ─── useSessions ──────────────────────────────────────────────────────────────
 export const useSessions = (filterDate?: Date | null) => {
   const dbKey = useDbConnectionKey();
+  const dateKey = filterDate ? format(filterDate, 'yyyy-MM-dd') : 'all';
+  const sessLsKey = LS_SESSIONS + dateKey + '_' + dbKey;
+
   return useQuery({
-    queryKey: ['sessions', filterDate ? format(filterDate, 'yyyy-MM-dd') : 'all', dbKey],
-    staleTime: 5_000,
-    refetchInterval: 10_000,
+    queryKey: ['sessions', dateKey, dbKey],
+    staleTime: 4_000,
+    gcTime: 30 * 60_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
     retry: 1,
+    initialData: () => lsGet<SessionInfo[]>(sessLsKey) ?? undefined,
+    initialDataUpdatedAt: () => lsTs(sessLsKey),
     queryFn: async () => {
       const { legacy, main } = getActiveConn();
 
@@ -568,7 +630,9 @@ export const useSessions = (filterDate?: Date | null) => {
             ...s,
             is_active: s.last_message_at >= fiveMinutesAgo,
           })) as SessionInfo[];
-          return trackSessionActivity(withActive) as SessionInfo[];
+          const result = trackSessionActivity(withActive) as SessionInfo[];
+          lsSet(sessLsKey, result);
+          return result;
         } catch {
           return [] as SessionInfo[];
         }
@@ -586,7 +650,9 @@ export const useSessions = (filterDate?: Date | null) => {
                 catch { return true; }
               })
             : msgs;
-          return trackSessionActivity(buildSessionsFromMessages(filtered)) as SessionInfo[];
+          const result = trackSessionActivity(buildSessionsFromMessages(filtered)) as SessionInfo[];
+          lsSet(sessLsKey, result);
+          return result;
         } catch (e: unknown) {
           if (e instanceof Error && e.message === 'TABLE_NOT_FOUND') return [] as SessionInfo[];
           throw e;
@@ -604,7 +670,9 @@ export const useSessions = (filterDate?: Date | null) => {
                 catch { return true; }
               })
             : msgs;
-          return trackSessionActivity(buildSessionsFromMessages(filtered)) as SessionInfo[];
+          const result = trackSessionActivity(buildSessionsFromMessages(filtered)) as SessionInfo[];
+          lsSet(sessLsKey, result);
+          return result;
         } catch (e: unknown) {
           if (e instanceof Error && e.message === 'TABLE_NOT_FOUND') return [] as SessionInfo[];
           throw e;
