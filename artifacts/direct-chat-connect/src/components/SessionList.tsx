@@ -115,6 +115,34 @@ export const SessionList = () => {
     });
   }, [queryClient, dbKey]);
 
+  // Apply frozen order: existing sessions in frozen order, new sessions prepended
+  const sorted = useMemo(() => {
+    if (!sessions) return [];
+    if (frozenIds.length === 0) return sortSessions(sessions);
+    const sessionMap = new Map(sessions.map(s => [s.session_id, s]));
+    const ordered: SessionInfo[] = [];
+    // First: sessions in frozen order
+    for (const id of frozenIds) {
+      const s = sessionMap.get(id);
+      if (s) ordered.push(s);
+    }
+    // Then: any new sessions not yet in the frozen list (prepend at top)
+    const frozenSet = new Set(frozenIds);
+    const newSessions = sortSessions(sessions.filter(s => !frozenSet.has(s.session_id)));
+    return [...newSessions, ...ordered];
+  }, [sessions, frozenIds]);
+
+  const filtered = sorted.filter((s) => {
+    const name = (recipientNames?.[s.recipient] || '').toLowerCase();
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = name.includes(q) || s.recipient.includes(q);
+    // Active tab: only sessions with last message within 5 minutes
+    if (activeTab === 'active') return matchesSearch && isLive(s);
+    return matchesSearch;
+  });
+
+  const activeCount = sessions?.filter(s => isLive(s)).length || 0;
+
   // ── Eager background pre-warm ─────────────────────────────────────────────
   // As soon as the filtered list is available, pre-fetch every session in the
   // background so clicking any row shows messages instantly (no skeleton).
@@ -145,34 +173,6 @@ export const SessionList = () => {
     }
     return () => timers.forEach(clearTimeout);
   }, [filtered, queryClient, dbKey]);
-
-  // Apply frozen order: existing sessions in frozen order, new sessions prepended
-  const sorted = useMemo(() => {
-    if (!sessions) return [];
-    if (frozenIds.length === 0) return sortSessions(sessions);
-    const sessionMap = new Map(sessions.map(s => [s.session_id, s]));
-    const ordered: SessionInfo[] = [];
-    // First: sessions in frozen order
-    for (const id of frozenIds) {
-      const s = sessionMap.get(id);
-      if (s) ordered.push(s);
-    }
-    // Then: any new sessions not yet in the frozen list (prepend at top)
-    const frozenSet = new Set(frozenIds);
-    const newSessions = sortSessions(sessions.filter(s => !frozenSet.has(s.session_id)));
-    return [...newSessions, ...ordered];
-  }, [sessions, frozenIds]);
-
-  const filtered = sorted.filter((s) => {
-    const name = (recipientNames?.[s.recipient] || '').toLowerCase();
-    const q = searchQuery.toLowerCase();
-    const matchesSearch = name.includes(q) || s.recipient.includes(q);
-    // Active tab: only sessions with last message within 5 minutes
-    if (activeTab === 'active') return matchesSearch && isLive(s);
-    return matchesSearch;
-  });
-
-  const activeCount = sessions?.filter(s => isLive(s)).length || 0;
 
   if (isLoading) {
     return (
