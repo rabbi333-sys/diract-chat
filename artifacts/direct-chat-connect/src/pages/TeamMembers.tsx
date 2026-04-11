@@ -1351,8 +1351,8 @@ const TeamMembers = () => {
           )}
         </div>
 
-        {/* ── Database Setup ── */}
-        {isAdmin && dbConnections.length > 0 && (
+        {/* ── Database Setup — only visible while the invite form is open ── */}
+        {isAdmin && formOpen && dbConnections.length > 0 && (
           <DbSetupCard
             dbConnections={dbConnections}
             dbSetupStatus={dbSetupStatus}
