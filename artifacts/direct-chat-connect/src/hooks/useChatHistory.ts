@@ -356,8 +356,7 @@ export const useAnalytics = () => {
     refetchInterval: 5_000,
     refetchIntervalInBackground: true,
     retry: 1,
-    initialData: () => lsGet<AnalyticsData>(LS_ANALYTICS + dbKey) ?? undefined,
-    initialDataUpdatedAt: () => lsTs(LS_ANALYTICS + dbKey),
+    placeholderData: (prev: AnalyticsData | undefined) => prev ?? lsGet<AnalyticsData>(LS_ANALYTICS + dbKey) ?? undefined,
     queryFn: async (): Promise<AnalyticsData> => {
       const cached = getMsgCache(dbKey);
       if (cached) {
@@ -439,8 +438,7 @@ export const useChartData = (
     refetchIntervalInBackground: true,
     retry: 1,
     enabled: !isCustom || hasCustomDates,
-    initialData: () => lsGet<ChartData[]>(chartLsKey) ?? undefined,
-    initialDataUpdatedAt: () => lsTs(chartLsKey),
+    placeholderData: (prev: ChartData[] | undefined) => prev ?? lsGet<ChartData[]>(chartLsKey) ?? undefined,
     queryFn: async (): Promise<ChartData[]> => {
       const effectiveRange = isCustom ? 'daily' : timeRange;
       const { legacy, main } = getActiveConn();
@@ -613,8 +611,7 @@ export const useSessions = (filterDate?: Date | null) => {
     refetchInterval: 5_000,
     refetchIntervalInBackground: true,
     retry: 1,
-    initialData: () => lsGet<SessionInfo[]>(sessLsKey) ?? undefined,
-    initialDataUpdatedAt: () => lsTs(sessLsKey),
+    placeholderData: (prev: SessionInfo[] | undefined) => prev ?? lsGet<SessionInfo[]>(sessLsKey) ?? undefined,
     queryFn: async () => {
       const { legacy, main } = getActiveConn();
 
