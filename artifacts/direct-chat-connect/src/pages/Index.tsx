@@ -263,7 +263,32 @@ const Index = () => {
           Chat <span className="text-primary">Monitor</span>
         </h1>
         <div className="flex items-center gap-2">
-          {activeNav !== 'Orders' && (
+          {activeNav === 'Orders' ? (
+            <div className="flex items-center bg-muted/70 rounded-xl p-1 border border-border/60 gap-0.5 shadow-sm">
+              <button
+                onClick={() => setOrdersView('list')}
+                className={cn(
+                  "flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg transition-all duration-200",
+                  ordersView === 'list'
+                    ? "bg-primary text-white shadow-md"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+              >
+                <List size={13} /> Orders
+              </button>
+              <button
+                onClick={() => setOrdersView('analytics')}
+                className={cn(
+                  "flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg transition-all duration-200",
+                  ordersView === 'analytics'
+                    ? "bg-primary text-white shadow-md"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+              >
+                <BarChart3 size={13} /> Analytics
+              </button>
+            </div>
+          ) : (
             <>
               <button
                 onClick={toggleGlobalAi}
@@ -477,8 +502,8 @@ const Index = () => {
                   </div>
                 </div>
 
-                {/* Tab toggle — prominent pill */}
-                <div className="flex items-center bg-muted/70 rounded-xl p-1 border border-border/60 gap-0.5 shadow-sm">
+                {/* Tab toggle — desktop only (mobile uses header) */}
+                <div className="hidden md:flex items-center bg-muted/70 rounded-xl p-1 border border-border/60 gap-0.5 shadow-sm">
                   <button
                     onClick={() => setOrdersView('list')}
                     className={cn(
