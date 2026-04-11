@@ -36,7 +36,7 @@ export function useGlobalAiControl() {
     refetchInterval: 15_000,
   });
 
-  const globalOn = !(stateQuery.data ?? false);
+  const globalOn = stateQuery.data ?? false;
 
   const toggleMutation = useMutation({
     mutationFn: async (turnOn: boolean) => {
@@ -54,7 +54,7 @@ export function useGlobalAiControl() {
     },
     onSuccess: (_, turnOn) => {
       queryClient.invalidateQueries({ queryKey: ['ai-control'] });
-      toast.success(turnOn ? '✓ AI stopped' : '✓ AI is now active');
+      toast.success(turnOn ? '✓ AI is now active' : '✓ AI stopped');
       // Delay refetch so optimistic update isn't overwritten by replication lag
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ['ai-control-global'] });
@@ -64,7 +64,7 @@ export function useGlobalAiControl() {
 
   return {
     globalOn,
-    toggle: () => toggleMutation.mutate(globalOn),
+    toggle: () => toggleMutation.mutate(!globalOn),
     isPending: toggleMutation.isPending || stateQuery.isLoading,
   };
 }
