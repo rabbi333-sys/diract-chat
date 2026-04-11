@@ -1351,6 +1351,15 @@ const TeamMembers = () => {
           )}
         </div>
 
+        {/* ── Database Setup ── */}
+        {isAdmin && dbConnections.length > 0 && (
+          <DbSetupCard
+            dbConnections={dbConnections}
+            dbSetupStatus={dbSetupStatus}
+            activeDbId={activeDbId}
+          />
+        )}
+
       </div>
     </div>
   );
