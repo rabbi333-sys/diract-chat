@@ -215,26 +215,27 @@ const Conversation = () => {
   };
 
   // Deduplicate: remove local optimistic messages already present in DB response
-  // (agent messages matched by text — safety net in case DB refetches before revertOptimistic)
   const dbAgentTexts = new Set(
     (messages || []).filter(m => m.sender === 'Agent').map(m => m.message_text)
   );
-  const dedupedLocal = localMessages.filter(m => !dbAgentTexts.has(m.message_text));
 
-  // When agent sends voice/image/video, local keeps the blob URL for playback.
-  // The DB stores a placeholder text like [voice message]/[image]/[video].
-  // Hide DB placeholder entries that are superseded by local blob messages.
-  const MEDIA_PLACEHOLDERS = new Set(['[voice message]', '[image]', '[video]', '[audio]']);
-  const localBlobCount = localMessages.filter(m => m.message_text.startsWith('blob:')).length;
-  let blobSlotsLeft = localBlobCount;
-  const filteredDbMessages = (messages || []).filter(m => {
-    if (m.sender !== 'Agent') return true;
-    if (!MEDIA_PLACEHOLDERS.has(m.message_text.trim())) return true;
-    if (blobSlotsLeft > 0) { blobSlotsLeft--; return false; }
+  // Count how many DB agent messages are data URLs (persisted media).
+  // For each one, suppress the corresponding local blob-prefixed optimistic message.
+  const dbImageCount = (messages || []).filter(m => m.sender === 'Agent' && m.message_text.startsWith('data:image/')).length;
+  const dbVideoCount = (messages || []).filter(m => m.sender === 'Agent' && m.message_text.startsWith('data:video/')).length;
+  const dbAudioCount = (messages || []).filter(m => m.sender === 'Agent' && (m.message_text.startsWith('data:audio/') || m.message_text.startsWith('data:application/'))).length;
+  let imgSlots = dbImageCount, vidSlots = dbVideoCount, audSlots = dbAudioCount;
+
+  const dedupedLocal = localMessages.filter(m => {
+    if (dbAgentTexts.has(m.message_text)) return false;
+    // Suppress local blob-image when DB already has the persisted data URL version
+    if (m.message_text.startsWith('blob-image:') && imgSlots > 0) { imgSlots--; return false; }
+    if (m.message_text.startsWith('blob-video:') && vidSlots > 0) { vidSlots--; return false; }
+    if ((m.message_text.startsWith('blob-audio:') || m.message_text.startsWith('blob:')) && audSlots > 0) { audSlots--; return false; }
     return true;
   });
 
-  const allMessages = [...filteredDbMessages, ...dedupedLocal];
+  const allMessages = [...(messages || []), ...dedupedLocal];
 
   useEffect(() => {
     scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
