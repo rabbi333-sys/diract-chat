@@ -531,13 +531,26 @@ const OrderAnalytics = () => {
           </div>
         </div>
 
-        {/* Avg Order Value */}
+        {/* Pending */}
         <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl p-4">
-          <p className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide mb-2">Avg. Order</p>
-          <p className="text-[28px] font-black leading-none text-[#0F1111] dark:text-foreground tracking-tight">৳{avgOrder.toLocaleString()}</p>
+          <p className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide mb-2">Pending</p>
+          <div className="flex items-end justify-between gap-2">
+            <p className="text-[28px] font-black leading-none tracking-tight" style={{ color: '#FF9900' }}>
+              {summary.statuses.pending.count.toLocaleString()}
+            </p>
+            {summary.statuses.pending.change !== 0 && (
+              <span className={cn(
+                'flex items-center gap-0.5 text-[11px] font-bold mb-0.5',
+                summary.statuses.pending.change >= 0 ? 'text-[#007600] dark:text-emerald-400' : 'text-[#CC0C39] dark:text-red-400'
+              )}>
+                {summary.statuses.pending.change >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
+                {Math.abs(summary.statuses.pending.change)}%
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#EAEDED] dark:border-border/40">
-            <Sparkles size={11} className="text-[#565959] dark:text-muted-foreground" />
-            <span className="text-[10px] text-[#565959] dark:text-muted-foreground">Per order avg</span>
+            <Clock size={11} className="text-[#565959] dark:text-muted-foreground" />
+            <span className="text-[10px] text-[#565959] dark:text-muted-foreground">Awaiting action</span>
           </div>
         </div>
 
