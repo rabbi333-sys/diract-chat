@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import {
   Package, Clock, CheckCircle, XCircle, Truck, Hash,
   Phone, MapPin, User, Copy, Calendar, Tag, PackageCheck, Loader2,
-  FileText, CreditCard, Send, Eye, Zap, X
+  FileText, CreditCard, Send, Eye, Zap, X, PhoneCall,
 } from 'lucide-react';
 
 const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; icon: any; border: string }> = {
@@ -172,7 +172,7 @@ const OrderDetailSheet = ({ orderId, onClose }: Props) => {
               <Section icon={User} title="Customer Info">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <InfoRow icon={User} label="Name" value={order.customer_name} />
-                  <InfoRow icon={Phone} label="Phone" value={order.customer_phone} onCopy={copyText} />
+                  <InfoRow icon={Phone} label="Phone" value={order.customer_phone} onCopy={copyText} onCall={phone => { window.location.href = `tel:${phone}`; }} />
                 </div>
                 <InfoRow icon={MapPin} label="Address" value={order.customer_address} />
               </Section>
@@ -296,8 +296,9 @@ const Section = ({ icon: Icon, title, children }: { icon: any; title: string; ch
   </div>
 );
 
-const InfoRow = ({ icon: Icon, label, value, onCopy }: {
-  icon: any; label: string; value: string | null | undefined; onCopy?: (t: string) => void;
+const InfoRow = ({ icon: Icon, label, value, onCopy, onCall }: {
+  icon: any; label: string; value: string | null | undefined;
+  onCopy?: (t: string) => void; onCall?: (t: string) => void;
 }) => (
   <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/20 border border-border/50">
     <Icon size={13} className="text-muted-foreground flex-shrink-0" />
@@ -305,6 +306,17 @@ const InfoRow = ({ icon: Icon, label, value, onCopy }: {
       <span className="text-[10px] text-muted-foreground block">{label}</span>
       <span className="text-sm font-medium text-foreground truncate block">{value || '—'}</span>
     </div>
+    {onCall && value && (
+      <a
+        href={`tel:${value}`}
+        onClick={e => { e.stopPropagation(); onCall(value); }}
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white transition-colors text-[11px] font-semibold shadow-sm"
+        title={`Call ${value}`}
+      >
+        <PhoneCall size={11} />
+        <span>Call</span>
+      </a>
+    )}
     {onCopy && value && (
       <button onClick={() => onCopy(value)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
         <Copy size={11} />
