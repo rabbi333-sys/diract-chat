@@ -1,14 +1,24 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { format, isToday, isYesterday } from 'date-fns';
+import { format, isToday, isYesterday, startOfWeek, startOfMonth, isAfter } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
   Package, Clock, CheckCircle, XCircle, Truck, PackageCheck,
-  Download, Search, Trash2, Webhook, X,
+  Download, Trash2, CalendarDays,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrderDetailSheet from './OrderDetailSheet';
+
+type DateFilter = 'all' | 'today' | 'yesterday' | 'week' | 'month';
+
+const DATE_FILTER_OPTIONS: { value: DateFilter; label: string }[] = [
+  { value: 'all',       label: 'All' },
+  { value: 'today',     label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'week',      label: 'This Week' },
+  { value: 'month',     label: 'This Month' },
+];
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
@@ -169,7 +179,7 @@ const OrdersPanel = () => {
   );
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
 
   const deleteMutation = useMutation({
     mutationFn: async ({ id, source }: { id: string; source?: string }) => {
@@ -190,16 +200,17 @@ const OrdersPanel = () => {
   });
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return orders;
-    const q = search.toLowerCase();
-    return orders.filter(o =>
-      (o.product_name ?? '').toLowerCase().includes(q) ||
-      (o.customer_name ?? '').toLowerCase().includes(q) ||
-      (o.customer_phone ?? '').toLowerCase().includes(q) ||
-      (o.merchant_order_id ?? '').toLowerCase().includes(q) ||
-      (o.sku ?? '').toLowerCase().includes(q)
-    );
-  }, [orders, search]);
+    if (dateFilter === 'all') return orders;
+    const now = new Date();
+    return orders.filter(o => {
+      const d = new Date(o.created_at);
+      if (dateFilter === 'today')     return isToday(d);
+      if (dateFilter === 'yesterday') return isYesterday(d);
+      if (dateFilter === 'week')      return isAfter(d, startOfWeek(now, { weekStartsOn: 0 }));
+      if (dateFilter === 'month')     return isAfter(d, startOfMonth(now));
+      return true;
+    });
+  }, [orders, dateFilter]);
 
   const newLocalCount = localOrders.length;
 
@@ -207,25 +218,26 @@ const OrdersPanel = () => {
     <div className="flex flex-col h-full gap-3">
 
       {/* ── Toolbar ─────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2.5 flex-shrink-0">
-        {/* Search */}
-        <div className="relative flex-1">
-          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search orders, customers, phone..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-8 py-2.5 text-[13px] rounded-xl border border-border/60 bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all placeholder:text-muted-foreground/40"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground transition-colors"
-            >
-              <X size={13} />
-            </button>
-          )}
+      <div className="flex items-center gap-2.5 flex-shrink-0 flex-wrap">
+        {/* Date filter pills */}
+        <div className="flex items-center gap-1.5 flex-1">
+          <CalendarDays size={14} className="text-muted-foreground/60 flex-shrink-0" />
+          <div className="flex items-center gap-1 bg-muted/50 rounded-xl p-1 border border-border/40">
+            {DATE_FILTER_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setDateFilter(opt.value)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all whitespace-nowrap',
+                  dateFilter === opt.value
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background/80'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Live badge */}
@@ -273,11 +285,11 @@ const OrdersPanel = () => {
         ) : !filtered.length ? (
           <div className="flex flex-col items-center justify-center h-full py-20 text-center gap-3">
             <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center">
-              <Search size={22} className="text-muted-foreground/30" />
+              <CalendarDays size={22} className="text-muted-foreground/30" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-foreground">No results</p>
-              <p className="text-xs text-muted-foreground mt-1">Try a different search term</p>
+              <p className="text-sm font-semibold text-foreground">No orders found</p>
+              <p className="text-xs text-muted-foreground mt-1">No orders for this period — try a different date filter</p>
             </div>
           </div>
         ) : (
