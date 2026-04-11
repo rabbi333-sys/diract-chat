@@ -213,325 +213,267 @@ const OrderAnalytics = () => {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-2.5">
-          {[...Array(6)].map((_, i) => <div key={i} className="h-24 rounded-2xl bg-muted/40 animate-pulse" />)}
+      <div className="space-y-3 p-1">
+        <div className="h-10 w-64 rounded bg-muted/40 animate-pulse" />
+        <div className="grid grid-cols-2 gap-3">
+          {[...Array(4)].map((_, i) => <div key={i} className="h-[90px] rounded-xl bg-muted/40 animate-pulse" />)}
         </div>
-        <div className="h-72 rounded-2xl bg-muted/40 animate-pulse" />
-        <div className="h-64 rounded-2xl bg-muted/40 animate-pulse" />
+        <div className="h-64 rounded-xl bg-muted/40 animate-pulse" />
+        <div className="h-48 rounded-xl bg-muted/40 animate-pulse" />
       </div>
     );
   }
 
   const viewLabel = viewMode === 'daily' ? 'Day' : viewMode === 'weekly' ? 'Week' : 'Month';
+  const avgOrder = summary.total > 0 ? Math.round(summary.revenue / summary.total) : 0;
 
   return (
-    <div ref={pageRef} className="space-y-4">
+    <div ref={pageRef} className="space-y-3">
 
-      {/* ── Top controls bar ─────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        {/* Period toggle — pill style */}
-        <div className="flex items-center bg-muted/50 rounded-xl p-1 gap-0.5 border border-border/40">
-          {(['daily', 'weekly', 'monthly'] as ViewMode[]).map(m => (
+      {/* ── Amazon-style top toolbar ───────────────────────── */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center rounded-md border border-[#D5D9D9] dark:border-border overflow-hidden text-[12px] font-medium">
+          {(['daily', 'weekly', 'monthly'] as ViewMode[]).map((m, idx) => (
             <button key={m} onClick={() => setViewMode(m)}
               className={cn(
-                'text-[11.5px] font-semibold px-3.5 py-1.5 rounded-lg transition-all duration-200',
+                'px-3.5 py-1.5 transition-colors',
+                idx !== 0 && 'border-l border-[#D5D9D9] dark:border-border',
                 viewMode === m
-                  ? 'bg-white dark:bg-zinc-800 text-foreground shadow-sm ring-1 ring-border/30'
-                  : 'text-muted-foreground hover:text-foreground'
+                  ? 'bg-[#FFE9C0] dark:bg-amber-900/30 text-[#C45500] dark:text-amber-400 font-semibold'
+                  : 'bg-white dark:bg-card text-[#0F1111] dark:text-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/40'
               )}
-            >
-              {m.charAt(0).toUpperCase() + m.slice(1)}
-            </button>
+            >{m.charAt(0).toUpperCase() + m.slice(1)}</button>
           ))}
         </div>
-
         <div className="flex items-center gap-2">
           <button onClick={() => refetch()} disabled={isFetching}
-            className="flex items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl bg-muted/40 border border-border/40 transition-all"
+            className="flex items-center gap-1.5 text-[11.5px] font-medium text-[#007185] dark:text-blue-400 hover:text-[#C45500] dark:hover:text-amber-400 px-3 py-1.5 rounded border border-[#D5D9D9] dark:border-border bg-white dark:bg-card transition-colors"
           >
             <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} /> Refresh
           </button>
           <button
             onClick={() => generateAnalyticsPDF(summary, viewMode, chartData, filteredOrders, setIsDownloading)}
             disabled={isDownloading}
-            className="flex items-center gap-1.5 text-[11.5px] font-semibold text-white bg-primary hover:bg-primary/90 px-4 py-1.5 rounded-xl transition-all shadow-sm disabled:opacity-60"
+            className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#0F1111] dark:text-foreground px-4 py-1.5 rounded border border-[#FFA41C] bg-gradient-to-b from-[#FFD78C] to-[#F5A623] dark:from-amber-500 dark:to-amber-600 hover:from-[#F5C26B] hover:to-[#E8951E] transition-all disabled:opacity-60 shadow-sm"
           >
             {isDownloading ? <><Loader2 size={12} className="animate-spin" /> Generating…</> : <><Download size={12} /> Export PDF</>}
           </button>
         </div>
       </div>
 
-      {/* ── Hero KPI row ──────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Revenue card */}
-        <div className="relative rounded-2xl overflow-hidden p-4 flex flex-col gap-2 min-h-[110px]"
-          style={{ background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)' }}>
-          {/* Decorative circle */}
-          <div className="absolute -right-4 -top-4 w-24 h-24 rounded-full bg-white/10 pointer-events-none" />
-          <div className="absolute -right-1 bottom-2 w-14 h-14 rounded-full bg-white/5 pointer-events-none" />
-          <div className="flex items-center justify-between relative z-10">
-            <div className="flex items-center gap-1.5">
-              <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
-                <TrendingUp size={13} className="text-white" />
-              </div>
-              <span className="text-[10px] font-bold text-white/70 uppercase tracking-widest">Revenue</span>
-            </div>
-            <span className={cn(
-              'flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full',
-              summary.revenueChange >= 0 ? 'bg-emerald-400/25 text-emerald-200' : 'bg-red-400/25 text-red-200'
-            )}>
-              {summary.revenueChange >= 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
-              {Math.abs(summary.revenueChange)}%
-            </span>
+      {/* ── 4-metric KPI row ───────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-2.5">
+        {/* Revenue */}
+        <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl p-4">
+          <p className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide mb-2">Revenue</p>
+          <div className="flex items-end justify-between gap-2">
+            <p className="text-[28px] font-black leading-none text-[#C45500] dark:text-amber-500 tracking-tight">
+              ৳{summary.revenue.toLocaleString()}
+            </p>
+            {summary.revenueChange !== 0 && (
+              <span className={cn(
+                'flex items-center gap-0.5 text-[11px] font-bold mb-0.5',
+                summary.revenueChange >= 0 ? 'text-[#007600] dark:text-emerald-400' : 'text-[#CC0C39] dark:text-red-400'
+              )}>
+                {summary.revenueChange >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
+                {Math.abs(summary.revenueChange)}%
+              </span>
+            )}
           </div>
-          <div className="relative z-10 mt-1">
-            <p className="text-[26px] font-black text-white leading-none tracking-tight">৳{summary.revenue.toLocaleString()}</p>
-            <p className="text-[10px] text-white/55 mt-1.5">Total in period</p>
+          <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#EAEDED] dark:border-border/40">
+            <TrendingUp size={11} className="text-[#565959] dark:text-muted-foreground" />
+            <span className="text-[10px] text-[#565959] dark:text-muted-foreground">Total in period</span>
           </div>
         </div>
 
-        {/* Orders card */}
-        <div className="relative rounded-2xl overflow-hidden p-4 flex flex-col gap-2 min-h-[110px]"
-          style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' }}>
-          <div className="absolute -right-4 -top-4 w-24 h-24 rounded-full bg-white/5 pointer-events-none" />
-          <div className="absolute -right-1 bottom-2 w-14 h-14 rounded-full bg-white/[0.03] pointer-events-none" />
-          <div className="flex items-center justify-between relative z-10">
-            <div className="flex items-center gap-1.5">
-              <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
-                <ShoppingBag size={13} className="text-white" />
-              </div>
-              <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Orders</span>
-            </div>
-            <span className={cn(
-              'flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full',
-              summary.totalChange >= 0 ? 'bg-emerald-400/20 text-emerald-300' : 'bg-red-400/20 text-red-300'
-            )}>
-              {summary.totalChange >= 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
-              {Math.abs(summary.totalChange)}%
+        {/* Orders */}
+        <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl p-4">
+          <p className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide mb-2">Orders</p>
+          <div className="flex items-end justify-between gap-2">
+            <p className="text-[28px] font-black leading-none text-[#0F1111] dark:text-foreground tracking-tight">
+              {summary.total.toLocaleString()}
+            </p>
+            {summary.totalChange !== 0 && (
+              <span className={cn(
+                'flex items-center gap-0.5 text-[11px] font-bold mb-0.5',
+                summary.totalChange >= 0 ? 'text-[#007600] dark:text-emerald-400' : 'text-[#CC0C39] dark:text-red-400'
+              )}>
+                {summary.totalChange >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
+                {Math.abs(summary.totalChange)}%
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#EAEDED] dark:border-border/40">
+            <ShoppingBag size={11} className="text-[#565959] dark:text-muted-foreground" />
+            <span className="text-[10px] text-[#565959] dark:text-muted-foreground">Total in period</span>
+          </div>
+        </div>
+
+        {/* Avg Order Value */}
+        <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl p-4">
+          <p className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide mb-2">Avg. Order</p>
+          <p className="text-[28px] font-black leading-none text-[#0F1111] dark:text-foreground tracking-tight">৳{avgOrder.toLocaleString()}</p>
+          <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#EAEDED] dark:border-border/40">
+            <Sparkles size={11} className="text-[#565959] dark:text-muted-foreground" />
+            <span className="text-[10px] text-[#565959] dark:text-muted-foreground">Per order avg</span>
+          </div>
+        </div>
+
+        {/* Delivered */}
+        <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl p-4">
+          <p className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide mb-2">Delivered</p>
+          <div className="flex items-end justify-between gap-2">
+            <p className="text-[28px] font-black leading-none text-[#007600] dark:text-emerald-500 tracking-tight">
+              {summary.statuses.delivered.count.toLocaleString()}
+            </p>
+            <span className="text-[11px] font-bold text-[#565959] dark:text-muted-foreground mb-0.5">
+              {summary.total > 0 ? Math.round((summary.statuses.delivered.count / summary.total) * 100) : 0}%
             </span>
           </div>
-          <div className="relative z-10 mt-1">
-            <p className="text-[26px] font-black text-white leading-none tracking-tight">{summary.total.toLocaleString()}</p>
-            <p className="text-[10px] text-white/40 mt-1.5">Total in period</p>
+          <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#EAEDED] dark:border-border/40">
+            <PackageCheck size={11} className="text-[#565959] dark:text-muted-foreground" />
+            <span className="text-[10px] text-[#565959] dark:text-muted-foreground">Success rate</span>
           </div>
         </div>
       </div>
 
-      {/* ── Status cards ────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-2">
-        {(Object.entries(STATUS_META) as [string, typeof STATUS_META[string]][]).map(([key, meta]) => {
-          const { count, change } = summary.statuses[key as keyof typeof summary.statuses];
-          const pct = summary.total > 0 ? Math.round((count / summary.total) * 100) : 0;
-          const Icon = meta.icon;
-          return (
-            <div key={key} className={cn('rounded-xl border p-3 flex flex-col gap-2 transition-all hover:shadow-sm', meta.bg, meta.border)}>
-              <div className="flex items-center justify-between">
-                <Icon size={13} className={meta.color} />
-                {change !== 0 && <ChangePill value={change} tiny />}
-              </div>
-              <div>
-                <p className={cn('text-xl font-bold leading-none', meta.color)}>{count}</p>
-                <span className="text-[10px] text-muted-foreground font-medium mt-1 block">{meta.label}</span>
-              </div>
-              <div className="w-full h-1 rounded-full bg-black/8 dark:bg-white/10 overflow-hidden">
-                <div className="h-full rounded-full transition-all duration-700"
-                  style={{ width: pct > 0 ? `${pct}%` : '4px', backgroundColor: meta.dot }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* ── Orders bar chart ────────────────────────────────── */}
+      {/* ── Revenue chart ──────────────────────────────────── */}
       {chartData.length > 0 && (
-        <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
-          {/* Chart header */}
-          <div className="px-5 pt-5 pb-4">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-7 h-7 rounded-lg bg-violet-500/10 flex items-center justify-center">
-                    <BarChartIcon size={13} className="text-violet-500" />
-                  </div>
-                  <h3 className="text-[13px] font-bold text-foreground">Orders by {viewLabel}</h3>
-                </div>
-                <p className="text-[10.5px] text-muted-foreground ml-9">
-                  {summary.total} total orders in this period
-                </p>
-              </div>
-              {/* Inline stat chips */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <StatChip color="#3b82f6" label="Total" value={summary.total} />
-                <StatChip color="#10b981" label="Delivered" value={summary.statuses.delivered.count} />
-                <StatChip color="#ef4444" label="Cancelled" value={summary.statuses.cancelled.count} />
-                <StatChip color="#f59e0b" label="Pending" value={summary.statuses.pending.count} />
-              </div>
+        <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl overflow-hidden">
+          <div className="px-4 pt-4 pb-3 border-b border-[#EAEDED] dark:border-border/40 flex items-center justify-between">
+            <div>
+              <h3 className="text-[13px] font-bold text-[#0F1111] dark:text-foreground">Sales Revenue</h3>
+              <p className="text-[10.5px] text-[#565959] dark:text-muted-foreground mt-0.5">
+                ৳{summary.revenue.toLocaleString()} · {viewMode} view
+              </p>
             </div>
+            <ChangePill value={summary.revenueChange} />
           </div>
-
-          {/* Chart body */}
-          <div className="px-2 pb-5">
-            <ResponsiveContainer width="100%" height={230}>
-              <BarChart data={chartData} barGap={3} barCategoryGap="32%"
-                margin={{ top: 4, right: 12, left: -18, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="totalGrad2" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="100%" stopColor="#2563eb" stopOpacity={0.85} />
-                  </linearGradient>
-                  <linearGradient id="delivGrad2" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#34d399" />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0.85} />
-                  </linearGradient>
-                  <linearGradient id="cancGrad2" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f87171" />
-                    <stop offset="100%" stopColor="#ef4444" stopOpacity={0.85} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 6" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-                <XAxis dataKey="label"
-                  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }}
-                  axisLine={false} tickLine={false} dy={7}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                  axisLine={false} tickLine={false} allowDecimals={false}
-                />
-                <Tooltip content={<BarTooltip />}
-                  cursor={{ fill: 'hsl(var(--muted))', fillOpacity: 0.45, radius: 6 }} />
-                <Bar dataKey="total" name="Total" fill="url(#totalGrad2)" radius={[5,5,0,0]} maxBarSize={36} />
-                <Bar dataKey="delivered" name="Delivered" fill="url(#delivGrad2)" radius={[5,5,0,0]} maxBarSize={36} />
-                <Bar dataKey="cancelled" name="Cancelled" fill="url(#cancGrad2)" radius={[5,5,0,0]} maxBarSize={36} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* ── Revenue area chart ──────────────────────────────── */}
-      {chartData.length > 0 && (
-        <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
-          <div className="px-5 pt-5 pb-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <TrendingUp size={13} className="text-primary" />
-                  </div>
-                  <h3 className="text-[13px] font-bold text-foreground">Revenue Trend</h3>
-                </div>
-                <p className="text-[10.5px] text-muted-foreground ml-9">
-                  ৳{summary.revenue.toLocaleString()} total · {viewMode} breakdown
-                </p>
-              </div>
-              <ChangePill value={summary.revenueChange} />
-            </div>
-          </div>
-          <div className="px-2 pb-5">
-            <ResponsiveContainer width="100%" height={200}>
+          <div className="px-2 py-4">
+            <ResponsiveContainer width="100%" height={195}>
               <AreaChart data={chartData} margin={{ top: 4, right: 12, left: -18, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="revGrad2" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.25} />
-                    <stop offset="80%" stopColor="#3b82f6" stopOpacity={0.04} />
-                    <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                  <linearGradient id="amzRevGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#FF9900" stopOpacity={0.22} />
+                    <stop offset="85%" stopColor="#FF9900" stopOpacity={0.03} />
+                    <stop offset="100%" stopColor="#FF9900" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 6" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-                <XAxis dataKey="label"
-                  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }}
-                  axisLine={false} tickLine={false} dy={7}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                  axisLine={false} tickLine={false}
-                  tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}`}
-                />
-                <Tooltip content={<RevenueTooltip />}
-                  cursor={{ stroke: '#3b82f6', strokeWidth: 1, strokeDasharray: '4 2' }} />
+                <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border))" strokeOpacity={0.25} vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#767676' }} axisLine={false} tickLine={false} dy={7} />
+                <YAxis tick={{ fontSize: 10, fill: '#767676' }} axisLine={false} tickLine={false}
+                  tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}`} />
+                <Tooltip content={<RevenueTooltip />} cursor={{ stroke: '#FF9900', strokeWidth: 1, strokeDasharray: '4 2' }} />
                 <Area type="monotone" dataKey="revenue" name="Revenue (৳)"
-                  stroke="#3b82f6" strokeWidth={2.5}
-                  fill="url(#revGrad2)" dot={false}
-                  activeDot={{ r: 5, strokeWidth: 2.5, stroke: '#3b82f6', fill: 'hsl(var(--background))' }}
-                />
+                  stroke="#FF9900" strokeWidth={2.5} fill="url(#amzRevGrad)" dot={false}
+                  activeDot={{ r: 5, strokeWidth: 2, stroke: '#FF9900', fill: '#fff' }} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
       )}
 
-      {/* ── Status distribution pie ─────────────────────────── */}
-      {statusPieData.length > 0 && (
-        <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
-          <div className="px-5 pt-5 pb-4">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                <PieChartIcon size={13} className="text-amber-500" />
-              </div>
-              <h3 className="text-[13px] font-bold text-foreground">Status Distribution</h3>
+      {/* ── Orders bar chart ──────────────────────────────── */}
+      {chartData.length > 0 && (
+        <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl overflow-hidden">
+          <div className="px-4 pt-4 pb-3 border-b border-[#EAEDED] dark:border-border/40 flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="text-[13px] font-bold text-[#0F1111] dark:text-foreground">Orders by {viewLabel}</h3>
+              <p className="text-[10.5px] text-[#565959] dark:text-muted-foreground mt-0.5">{summary.total} total orders</p>
             </div>
-            <p className="text-[10.5px] text-muted-foreground ml-9">
-              {statusPieData.length} active status types · {summary.total} orders total
-            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {[
+                { color: '#007185', label: 'Total', value: summary.total },
+                { color: '#007600', label: 'Delivered', value: summary.statuses.delivered.count },
+                { color: '#CC0C39', label: 'Cancelled', value: summary.statuses.cancelled.count },
+              ].map(c => (
+                <div key={c.label} className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#0F1111] dark:text-foreground">
+                  <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: c.color }} />
+                  {c.label} <span className="font-bold">{c.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="px-4 pb-5">
-            <div className="flex items-center gap-4">
-              {/* Pie */}
-              <div className="flex-shrink-0">
-                <ResponsiveContainer width={180} height={180}>
-                  <PieChart>
-                    <defs>
-                      {statusPieData.map((entry, i) => (
-                        <radialGradient key={i} id={`pg${i}`} cx="50%" cy="50%" r="50%">
-                          <stop offset="0%" stopColor={entry.color} stopOpacity={1} />
-                          <stop offset="100%" stopColor={entry.color} stopOpacity={0.8} />
-                        </radialGradient>
-                      ))}
-                    </defs>
-                    <Pie data={statusPieData} cx="50%" cy="50%"
-                      innerRadius={50} outerRadius={78}
-                      dataKey="value" strokeWidth={3} stroke="hsl(var(--background))"
-                      paddingAngle={3}>
-                      {statusPieData.map((_, i) => <Cell key={i} fill={`url(#pg${i})`} />)}
-                    </Pie>
-                    <Tooltip content={<CustomTooltip />} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              {/* Custom legend */}
-              <div className="flex-1 space-y-2">
-                {statusPieData.map((entry) => {
-                  const pct = summary.total > 0 ? Math.round((entry.value / summary.total) * 100) : 0;
-                  return (
-                    <div key={entry.name} className="flex items-center gap-2.5">
-                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: entry.dot }} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-0.5">
-                          <span className="text-[11px] font-semibold text-foreground">{entry.name}</span>
-                          <span className="text-[10px] font-bold text-muted-foreground">{entry.value} <span className="text-muted-foreground/60">({pct}%)</span></span>
-                        </div>
-                        <div className="w-full h-1 rounded-full bg-muted/50 overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: entry.dot, opacity: 0.8 }} />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+          <div className="px-2 py-4">
+            <ResponsiveContainer width="100%" height={210}>
+              <BarChart data={chartData} barGap={2} barCategoryGap="35%" margin={{ top: 4, right: 12, left: -18, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="amzTotalGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#00A8E1" />
+                    <stop offset="100%" stopColor="#007185" stopOpacity={0.9} />
+                  </linearGradient>
+                  <linearGradient id="amzDelivGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#3CBA6B" />
+                    <stop offset="100%" stopColor="#007600" stopOpacity={0.9} />
+                  </linearGradient>
+                  <linearGradient id="amzCancGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#F75D4E" />
+                    <stop offset="100%" stopColor="#CC0C39" stopOpacity={0.9} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border))" strokeOpacity={0.25} vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#767676' }} axisLine={false} tickLine={false} dy={7} />
+                <YAxis tick={{ fontSize: 10, fill: '#767676' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip content={<BarTooltip />} cursor={{ fill: '#F0F2F2', fillOpacity: 0.6, radius: 4 }} />
+                <Bar dataKey="total" name="Total" fill="url(#amzTotalGrad)" radius={[4,4,0,0]} maxBarSize={32} />
+                <Bar dataKey="delivered" name="Delivered" fill="url(#amzDelivGrad)" radius={[4,4,0,0]} maxBarSize={32} />
+                <Bar dataKey="cancelled" name="Cancelled" fill="url(#amzCancGrad)" radius={[4,4,0,0]} maxBarSize={32} />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
       )}
 
+      {/* ── Order status breakdown table ──────────────────── */}
+      <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl overflow-hidden">
+        <div className="px-4 pt-4 pb-3 border-b border-[#EAEDED] dark:border-border/40">
+          <h3 className="text-[13px] font-bold text-[#0F1111] dark:text-foreground">Order Status Breakdown</h3>
+          <p className="text-[10.5px] text-[#565959] dark:text-muted-foreground mt-0.5">{summary.total} total orders across all statuses</p>
+        </div>
+        <div className="divide-y divide-[#EAEDED] dark:divide-border/30">
+          {(Object.entries(STATUS_META) as [string, typeof STATUS_META[string]][]).map(([key, meta]) => {
+            const { count, change } = summary.statuses[key as keyof typeof summary.statuses];
+            const pct = summary.total > 0 ? Math.round((count / summary.total) * 100) : 0;
+            const Icon = meta.icon;
+            return (
+              <div key={key} className="flex items-center gap-3 px-4 py-3 hover:bg-[#F7F8F8] dark:hover:bg-muted/20 transition-colors">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: meta.dot + '18' }}>
+                  <Icon size={13} className={meta.color} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[12px] font-semibold text-[#0F1111] dark:text-foreground">{meta.label}</span>
+                    <div className="flex items-center gap-2">
+                      {change !== 0 && (
+                        <span className={cn('text-[10px] font-bold',
+                          change >= 0 ? 'text-[#007600] dark:text-emerald-400' : 'text-[#CC0C39] dark:text-red-400')}>
+                          {change >= 0 ? '↑' : '↓'}{Math.abs(change)}%
+                        </span>
+                      )}
+                      <span className="text-[12px] font-bold text-[#0F1111] dark:text-foreground w-7 text-right">{count}</span>
+                      <span className="text-[10px] text-[#565959] dark:text-muted-foreground w-7 text-right">{pct}%</span>
+                    </div>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-[#EAEDED] dark:bg-muted/40 overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700"
+                      style={{ width: pct > 0 ? `${pct}%` : '3px', backgroundColor: meta.dot }} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Empty state */}
       {filteredOrders.length === 0 && !isLoading && (
-        <div className="flex flex-col items-center justify-center py-16 text-center rounded-2xl border border-dashed border-border/60">
-          <div className="w-14 h-14 rounded-2xl bg-muted/40 flex items-center justify-center mb-4">
-            <Package size={24} className="text-muted-foreground/40" />
+        <div className="flex flex-col items-center justify-center py-16 text-center rounded-xl border border-dashed border-[#D5D9D9] dark:border-border bg-white dark:bg-card">
+          <div className="w-14 h-14 rounded-xl bg-[#F7F8F8] dark:bg-muted/30 flex items-center justify-center mb-4">
+            <Package size={24} className="text-[#C8CDD1] dark:text-muted-foreground/40" />
           </div>
-          <p className="text-sm font-semibold text-muted-foreground">No orders yet</p>
-          <p className="text-[11px] text-muted-foreground/60 mt-1">Orders will appear here once n8n starts sending data</p>
+          <p className="text-[13px] font-semibold text-[#0F1111] dark:text-foreground">No orders yet</p>
+          <p className="text-[11px] text-[#565959] dark:text-muted-foreground mt-1">Orders will appear here once n8n starts sending data</p>
         </div>
       )}
     </div>
