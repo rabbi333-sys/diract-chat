@@ -5,7 +5,7 @@ import { format, isToday, isYesterday, startOfWeek, startOfMonth, isAfter } from
 import { cn } from '@/lib/utils';
 import {
   Package, Clock, CheckCircle, XCircle, Truck, PackageCheck,
-  Download, Trash2, CalendarDays,
+  Download, Trash2, CalendarDays, ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrderDetailSheet from './OrderDetailSheet';
@@ -20,18 +20,14 @@ const DATE_FILTER_OPTIONS: { value: DateFilter; label: string }[] = [
   { value: 'month',     label: 'This Month' },
 ];
 
-// ─── Status config ────────────────────────────────────────────────────────────
-
-const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; dot: string; icon: any }> = {
-  pending:    { label: 'Pending',    bg: 'bg-amber-50 dark:bg-amber-900/30',    text: 'text-amber-700 dark:text-amber-300',   dot: 'bg-amber-400',   icon: Clock },
-  confirmed:  { label: 'Confirmed',  bg: 'bg-blue-50 dark:bg-blue-900/30',      text: 'text-blue-700 dark:text-blue-300',     dot: 'bg-blue-500',    icon: CheckCircle },
-  processing: { label: 'Processing', bg: 'bg-violet-50 dark:bg-violet-900/30',  text: 'text-violet-700 dark:text-violet-300', dot: 'bg-violet-500',  icon: Package },
-  shipped:    { label: 'Shipped',    bg: 'bg-cyan-50 dark:bg-cyan-900/30',      text: 'text-cyan-700 dark:text-cyan-300',     dot: 'bg-cyan-500',    icon: Truck },
-  delivered:  { label: 'Delivered',  bg: 'bg-emerald-50 dark:bg-emerald-900/30',text: 'text-emerald-700 dark:text-emerald-300',dot: 'bg-emerald-500', icon: PackageCheck },
-  cancelled:  { label: 'Cancelled',  bg: 'bg-red-50 dark:bg-red-900/30',        text: 'text-red-600 dark:text-red-400',       dot: 'bg-red-500',     icon: XCircle },
+const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border: string; dot: string; icon: any }> = {
+  pending:    { label: 'Pending',    bg: 'bg-amber-50 dark:bg-amber-900/20',    text: 'text-amber-700 dark:text-amber-300',     border: 'border-amber-200 dark:border-amber-700/50',   dot: '#F59E0B', icon: Clock },
+  confirmed:  { label: 'Confirmed',  bg: 'bg-blue-50 dark:bg-blue-900/20',      text: 'text-blue-700 dark:text-blue-300',       border: 'border-blue-200 dark:border-blue-700/50',     dot: '#3B82F6', icon: CheckCircle },
+  processing: { label: 'Processing', bg: 'bg-violet-50 dark:bg-violet-900/20',  text: 'text-violet-700 dark:text-violet-300',   border: 'border-violet-200 dark:border-violet-700/50', dot: '#8B5CF6', icon: Package },
+  shipped:    { label: 'Shipped',    bg: 'bg-cyan-50 dark:bg-cyan-900/20',      text: 'text-cyan-700 dark:text-cyan-300',       border: 'border-cyan-200 dark:border-cyan-700/50',     dot: '#06B6D4', icon: Truck },
+  delivered:  { label: 'Delivered',  bg: 'bg-emerald-50 dark:bg-emerald-900/20',text: 'text-emerald-700 dark:text-emerald-300', border: 'border-emerald-200 dark:border-emerald-700/50',dot: '#10B981', icon: PackageCheck },
+  cancelled:  { label: 'Cancelled',  bg: 'bg-red-50 dark:bg-red-900/20',        text: 'text-red-600 dark:text-red-400',         border: 'border-red-200 dark:border-red-700/50',       dot: '#EF4444', icon: XCircle },
 };
-
-// ─── Order interface ──────────────────────────────────────────────────────────
 
 interface Order {
   id: string;
@@ -50,8 +46,6 @@ interface Order {
   created_at: string;
   _source?: 'local' | 'supabase';
 }
-
-// ─── Data hooks ───────────────────────────────────────────────────────────────
 
 const useLocalOrders = () =>
   useQuery({
@@ -100,22 +94,17 @@ export const useOrders = () => {
   return { data: mergeOrders(local, remote), isLoading: false };
 };
 
-// ─── CSV Export ───────────────────────────────────────────────────────────────
-
 function exportToCSV(orders: Order[]) {
   if (!orders.length) { toast.error('No data to export'); return; }
-
   const headers = [
     'merchant_order_id', 'date', 'address', 'name', 'phone',
     'product_name', 'sku', 'quantity', 'per_product_price', 'total_price', 'amount_to_collect',
   ];
-
   const escape = (v: any) => {
     const s = String(v ?? '');
     return s.includes(',') || s.includes('"') || s.includes('\n')
       ? `"${s.replace(/"/g, '""')}"` : s;
   };
-
   const rows = orders.map(o => [
     o.merchant_order_id ?? '',
     format(new Date(o.created_at), 'dd/MM/yyyy HH:mm'),
@@ -129,7 +118,6 @@ function exportToCSV(orders: Order[]) {
     o.total_price ?? '',
     o.amount_to_collect ?? '',
   ].map(escape));
-
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
@@ -138,8 +126,6 @@ function exportToCSV(orders: Order[]) {
   link.click();
   toast.success(`${orders.length} orders exported`);
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function smartDate(dateStr: string): string {
   const d = new Date(dateStr);
@@ -157,17 +143,14 @@ function initials(name?: string): string {
 }
 
 const AVATAR_COLORS = [
-  'bg-blue-500', 'bg-violet-500', 'bg-emerald-500',
-  'bg-amber-500', 'bg-cyan-500', 'bg-pink-500', 'bg-indigo-500',
+  '#3B82F6', '#8B5CF6', '#10B981',
+  '#F59E0B', '#06B6D4', '#EC4899', '#6366F1',
 ];
-
 function avatarColor(id: string) {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % AVATAR_COLORS.length;
   return AVATAR_COLORS[h];
 }
-
-// ─── Main Component ───────────────────────────────────────────────────────────
 
 const OrdersPanel = () => {
   const queryClient = useQueryClient();
@@ -215,119 +198,129 @@ const OrdersPanel = () => {
   const newLocalCount = localOrders.length;
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div className="flex flex-col h-full gap-0">
 
-      {/* ── Toolbar ─────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2.5 flex-shrink-0 flex-wrap">
-        {/* Date filter pills */}
-        <div className="flex items-center gap-1.5 flex-1">
-          <CalendarDays size={14} className="text-muted-foreground/60 flex-shrink-0" />
-          <div className="flex items-center gap-1 bg-muted/50 rounded-xl p-1 border border-border/40">
-            {DATE_FILTER_OPTIONS.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setDateFilter(opt.value)}
-                className={cn(
-                  'px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all whitespace-nowrap',
-                  dateFilter === opt.value
-                    ? 'bg-primary text-white shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-background/80'
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
+      {/* ── Amazon-style toolbar ─────────────────────────────── */}
+      <div className="flex-shrink-0 px-0 pt-0 pb-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          {/* Left: date filter + live badge */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <CalendarDays size={14} className="text-muted-foreground/50 flex-shrink-0" />
+            <div className="flex items-center rounded-lg border border-[#D5D9D9] dark:border-border overflow-hidden">
+              {DATE_FILTER_OPTIONS.map((opt, idx) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setDateFilter(opt.value)}
+                  className={cn(
+                    'px-3 py-1.5 text-[12px] font-medium transition-colors whitespace-nowrap',
+                    idx !== 0 && 'border-l border-[#D5D9D9] dark:border-border',
+                    dateFilter === opt.value
+                      ? 'bg-primary text-white font-semibold'
+                      : 'bg-white dark:bg-card text-[#0F1111] dark:text-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/30'
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {newLocalCount > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1.5 rounded-lg border border-amber-200 dark:border-amber-700/40 font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                {newLocalCount} live
+              </div>
+            )}
+          </div>
+
+          {/* Right: count + export */}
+          <div className="flex items-center gap-2.5">
+            {orders.length > 0 && (
+              <span className="text-[12px] text-[#565959] dark:text-muted-foreground font-medium hidden sm:block">
+                {filtered.length === orders.length
+                  ? `${orders.length} orders`
+                  : `${filtered.length} / ${orders.length}`}
+              </span>
+            )}
+            <button
+              onClick={() => exportToCSV(filtered)}
+              disabled={!filtered.length}
+              className={cn(
+                "flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold border transition-all",
+                filtered.length
+                  ? "bg-primary border-primary text-white hover:bg-primary/90 shadow-sm"
+                  : "bg-white dark:bg-card border-[#D5D9D9] dark:border-border text-[#9CA3AF] cursor-not-allowed"
+              )}
+            >
+              <Download size={13} /> Export CSV
+            </button>
           </div>
         </div>
-
-        {/* Live badge */}
-        {newLocalCount > 0 && (
-          <div className="flex items-center gap-1.5 text-[11px] text-amber-600 bg-amber-500/10 px-3 py-2.5 rounded-xl border border-amber-500/20 flex-shrink-0 font-semibold">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-            {newLocalCount} live
-          </div>
-        )}
-
-        {/* Result count */}
-        {orders.length > 0 && (
-          <span className="text-[11px] text-muted-foreground font-medium flex-shrink-0 hidden sm:block">
-            {filtered.length === orders.length ? `${orders.length} orders` : `${filtered.length} / ${orders.length}`}
-          </span>
-        )}
-
-        {/* CSV button */}
-        <button
-          onClick={() => exportToCSV(filtered)}
-          disabled={!filtered.length}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold transition-all flex-shrink-0",
-            filtered.length
-              ? "bg-primary text-white hover:bg-primary/90 shadow-sm hover:shadow-md"
-              : "bg-muted text-muted-foreground cursor-not-allowed"
-          )}
-        >
-          <Download size={13} /> Export CSV
-        </button>
       </div>
 
-      {/* ── Table / Empty states ─────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto scrollbar-hide min-h-0 rounded-2xl border border-border/60 bg-card">
+      {/* ── Table card ───────────────────────────────────────── */}
+      <div className="flex-1 overflow-auto min-h-0 rounded-xl border border-[#D5D9D9] dark:border-border bg-white dark:bg-card">
         {!orders.length ? (
           <div className="flex flex-col items-center justify-center h-full py-20 text-center gap-3">
-            <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center">
-              <Package size={28} className="text-muted-foreground/30" />
+            <div className="w-16 h-16 rounded-2xl bg-[#F7F8F8] dark:bg-muted/30 flex items-center justify-center">
+              <Package size={28} className="text-[#C8CDD1] dark:text-muted-foreground/30" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-foreground">No orders yet</p>
-              <p className="text-xs text-muted-foreground mt-1">Orders from n8n will appear here automatically</p>
+              <p className="text-[13px] font-semibold text-[#0F1111] dark:text-foreground">No orders yet</p>
+              <p className="text-[11px] text-[#565959] dark:text-muted-foreground mt-1">Orders from n8n will appear here automatically</p>
             </div>
           </div>
         ) : !filtered.length ? (
           <div className="flex flex-col items-center justify-center h-full py-20 text-center gap-3">
-            <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center">
-              <CalendarDays size={22} className="text-muted-foreground/30" />
+            <div className="w-14 h-14 rounded-2xl bg-[#F7F8F8] dark:bg-muted/30 flex items-center justify-center">
+              <CalendarDays size={22} className="text-[#C8CDD1] dark:text-muted-foreground/30" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-foreground">No orders found</p>
-              <p className="text-xs text-muted-foreground mt-1">No orders for this period — try a different date filter</p>
+              <p className="text-[13px] font-semibold text-[#0F1111] dark:text-foreground">No orders in this period</p>
+              <p className="text-[11px] text-[#565959] dark:text-muted-foreground mt-1">Try a different date filter</p>
             </div>
           </div>
         ) : (
-          <table className="w-full border-collapse">
+          <table className="w-full border-collapse text-[13px]">
+            {/* Sticky header — Amazon gray */}
             <thead className="sticky top-0 z-10">
-              <tr className="bg-muted/60 backdrop-blur border-b border-border/60">
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-5 py-3.5 w-[130px]">Order</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5 hidden sm:table-cell">Product</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5">Customer</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5 hidden md:table-cell">Phone</th>
-                <th className="text-right text-[11px] font-semibold text-muted-foreground px-4 py-3.5">Total</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5">Status</th>
-                <th className="text-left text-[11px] font-semibold text-muted-foreground px-4 py-3.5 hidden sm:table-cell">Date</th>
-                <th className="w-12 px-4 py-3.5" />
+              <tr className="bg-[#F3F4F5] dark:bg-muted/60 border-b border-[#D5D9D9] dark:border-border">
+                <th className="text-left text-[11px] font-semibold text-[#565959] dark:text-muted-foreground px-4 py-3 w-[130px]">Order</th>
+                <th className="text-left text-[11px] font-semibold text-[#565959] dark:text-muted-foreground px-4 py-3 hidden sm:table-cell">Product</th>
+                <th className="text-left text-[11px] font-semibold text-[#565959] dark:text-muted-foreground px-4 py-3">Customer</th>
+                <th className="text-left text-[11px] font-semibold text-[#565959] dark:text-muted-foreground px-4 py-3 hidden md:table-cell">Phone</th>
+                <th className="text-right text-[11px] font-semibold text-[#565959] dark:text-muted-foreground px-4 py-3">Total</th>
+                <th className="text-left text-[11px] font-semibold text-[#565959] dark:text-muted-foreground px-4 py-3">Status</th>
+                <th className="text-left text-[11px] font-semibold text-[#565959] dark:text-muted-foreground px-4 py-3 hidden sm:table-cell">Date</th>
+                <th className="w-10 px-3 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-border/40">
-              {filtered.map((order) => {
+            <tbody className="divide-y divide-[#EAEDED] dark:divide-border/30">
+              {filtered.map((order, idx) => {
                 const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.pending;
                 const total = Number(order.total_price) || Number(order.amount_to_collect) || 0;
                 const orderId = order.merchant_order_id || order.id.slice(0, 8).toUpperCase();
                 const initStr = initials(order.customer_name);
-                const avatarBg = avatarColor(order.id);
+                const avColor = avatarColor(order.id);
 
                 return (
                   <tr
                     key={order.id}
                     onClick={() => setSelectedOrderId(order.id)}
-                    className="cursor-pointer group transition-colors hover:bg-muted/30"
+                    className={cn(
+                      'cursor-pointer group transition-colors',
+                      idx % 2 === 0
+                        ? 'bg-white dark:bg-card hover:bg-[#F7FAFA] dark:hover:bg-muted/20'
+                        : 'bg-[#FAFAFA] dark:bg-muted/10 hover:bg-[#F0F4F4] dark:hover:bg-muted/25'
+                    )}
                   >
                     {/* Order ID */}
-                    <td className="px-5 py-4 whitespace-nowrap">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[13px] font-bold text-foreground">
+                        <span className="font-mono text-[12.5px] font-bold text-[#007185] dark:text-primary">
                           {orderId}
                         </span>
                         {order._source === 'local' && (
-                          <span className="text-[8px] font-bold text-amber-600 bg-amber-400/15 px-1.5 py-0.5 rounded-full border border-amber-400/30 leading-none">
+                          <span className="text-[8px] font-bold text-amber-600 bg-amber-400/15 px-1.5 py-0.5 rounded border border-amber-300/40 leading-none">
                             LIVE
                           </span>
                         )}
@@ -335,78 +328,79 @@ const OrdersPanel = () => {
                     </td>
 
                     {/* Product */}
-                    <td className="px-4 py-4 hidden sm:table-cell">
-                      <span className="text-[12px] text-foreground truncate max-w-[140px] block">
+                    <td className="px-4 py-3.5 hidden sm:table-cell max-w-[150px]">
+                      <p className="text-[12.5px] text-[#0F1111] dark:text-foreground truncate font-medium">
                         {order.product_name || '—'}
-                      </span>
+                      </p>
                       {order.sku && (
-                        <span className="text-[10px] text-muted-foreground/70">
-                          {order.sku}
-                        </span>
+                        <p className="text-[10.5px] text-[#767676] dark:text-muted-foreground mt-0.5">{order.sku}</p>
                       )}
                     </td>
 
                     {/* Customer */}
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2.5">
-                        <div className={cn(
-                          'w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0',
-                          avatarBg
-                        )}>
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                          style={{ backgroundColor: avColor }}
+                        >
                           {initStr}
                         </div>
-                        <span className="text-[13px] text-foreground font-medium truncate max-w-[110px]">
+                        <span className="text-[12.5px] text-[#0F1111] dark:text-foreground font-medium truncate max-w-[100px]">
                           {order.customer_name || '—'}
                         </span>
                       </div>
                     </td>
 
                     {/* Phone */}
-                    <td className="px-4 py-4 whitespace-nowrap hidden md:table-cell">
-                      <span className="text-[12px] text-muted-foreground tabular-nums">
+                    <td className="px-4 py-3.5 whitespace-nowrap hidden md:table-cell">
+                      <span className="text-[12px] text-[#565959] dark:text-muted-foreground tabular-nums">
                         {order.customer_phone || '—'}
                       </span>
                     </td>
 
                     {/* Total */}
-                    <td className="px-4 py-4 whitespace-nowrap text-right">
-                      <span className="text-[13px] font-bold text-foreground tabular-nums">
+                    <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                      <span className="text-[13px] font-bold text-[#0F1111] dark:text-foreground tabular-nums">
                         ৳{total.toLocaleString()}
                       </span>
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 py-4 whitespace-nowrap">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       <span className={cn(
-                        "inline-flex items-center gap-1.5 text-[11.5px] font-medium px-2.5 py-1 rounded-full",
-                        cfg.bg, cfg.text,
+                        'inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border',
+                        cfg.bg, cfg.text, cfg.border,
                       )}>
-                        <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', cfg.dot)} />
+                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
                         {cfg.label}
                       </span>
                     </td>
 
                     {/* Date */}
-                    <td className="px-4 py-4 whitespace-nowrap hidden sm:table-cell">
-                      <span className="text-[12px] text-muted-foreground">
+                    <td className="px-4 py-3.5 whitespace-nowrap hidden sm:table-cell">
+                      <span className="text-[11.5px] text-[#767676] dark:text-muted-foreground">
                         {smartDate(order.created_at)}
                       </span>
                     </td>
 
-                    {/* Delete */}
-                    <td className="px-4 py-4 text-right">
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          if (window.confirm('Delete this order?')) {
-                            deleteMutation.mutate({ id: order.id, source: order._source });
-                          }
-                        }}
-                        disabled={deleteMutation.isPending}
-                        className="opacity-0 group-hover:opacity-100 transition-all text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 p-1.5 rounded-lg disabled:opacity-20"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                    {/* Actions */}
+                    <td className="px-3 py-3.5 text-right">
+                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            if (window.confirm('Delete this order?')) {
+                              deleteMutation.mutate({ id: order.id, source: order._source });
+                            }
+                          }}
+                          disabled={deleteMutation.isPending}
+                          className="p-1.5 rounded text-[#767676] dark:text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-20"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                        <ChevronRight size={12} className="text-[#007185] dark:text-primary" />
+                      </div>
                     </td>
                   </tr>
                 );
@@ -416,7 +410,6 @@ const OrdersPanel = () => {
         )}
       </div>
 
-      {/* Order Detail Sheet */}
       <OrderDetailSheet
         orderId={selectedOrderId}
         onClose={() => setSelectedOrderId(null)}
