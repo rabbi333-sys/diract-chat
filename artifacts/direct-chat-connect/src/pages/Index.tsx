@@ -263,21 +263,25 @@ const Index = () => {
           Chat <span className="text-primary">Monitor</span>
         </h1>
         <div className="flex items-center gap-2">
-          <button
-            onClick={toggleGlobalAi}
-            disabled={globalAiPending}
-            data-testid="button-global-ai-toggle"
-            className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-bold transition-all duration-200 select-none disabled:opacity-60',
-              globalOn
-                ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25'
-                : 'text-red-600 dark:text-red-400 bg-red-500/10 border border-red-400/30 hover:bg-red-500/20'
-            )}
-          >
-            {globalAiPending ? <Loader2 size={12} className="animate-spin" /> : globalOn ? <Power size={12} /> : <Play size={12} />}
-            {globalOn ? 'Shutdown' : 'Start'}
-          </button>
-          <ThemeToggle />
+          {activeNav !== 'Orders' && (
+            <>
+              <button
+                onClick={toggleGlobalAi}
+                disabled={globalAiPending}
+                data-testid="button-global-ai-toggle"
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-bold transition-all duration-200 select-none disabled:opacity-60',
+                  globalOn
+                    ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25'
+                    : 'text-red-600 dark:text-red-400 bg-red-500/10 border border-red-400/30 hover:bg-red-500/20'
+                )}
+              >
+                {globalAiPending ? <Loader2 size={12} className="animate-spin" /> : globalOn ? <Power size={12} /> : <Play size={12} />}
+                {globalOn ? 'Shutdown' : 'Start'}
+              </button>
+              <ThemeToggle />
+            </>
+          )}
         </div>
       </div>
 
