@@ -134,6 +134,7 @@ const Conversation = () => {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const hasInitialScrolled = useRef(false);
 
   const queryClient = useQueryClient();
@@ -223,17 +224,26 @@ const Conversation = () => {
 
   const allMessages = [...(messages || []), ...dedupedLocal];
 
-  useEffect(() => {
-    if (!scrollEndRef.current) return;
-    if (!hasInitialScrolled.current && allMessages.length > 0) {
-      // First time messages load — jump instantly to bottom, no animation
-      hasInitialScrolled.current = true;
-      scrollEndRef.current.scrollIntoView({ behavior: 'instant' });
-    } else if (hasInitialScrolled.current) {
-      // Subsequent new messages — smooth scroll
-      scrollEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = useCallback((instant = false) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (instant) {
+      el.scrollTop = el.scrollHeight;
+      // Second pass after a tick in case images haven't loaded yet
+      setTimeout(() => { el.scrollTop = el.scrollHeight; }, 80);
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
-  }, [allMessages.length]);
+  }, []);
+
+  useEffect(() => {
+    if (!hasInitialScrolled.current && allMessages.length > 0) {
+      hasInitialScrolled.current = true;
+      scrollToBottom(true);
+    } else if (hasInitialScrolled.current) {
+      scrollToBottom(false);
+    }
+  }, [allMessages.length, scrollToBottom]);
 
   // ── Optimistic add ──────────────────────────────────────────────────────────
   const addOptimistic = (id: number, text: string, replyTo?: ChatMessageType | null) => {
@@ -556,7 +566,7 @@ const Conversation = () => {
       </header>
 
       {/* ── Messages ─────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
         <div className="px-2 md:px-3 py-3 space-y-0 max-w-3xl mx-auto">
           {allMessages.length > 0 && (
             <div className="flex items-center gap-3 py-2 mb-1">
