@@ -971,94 +971,134 @@ const TeamMembers = () => {
   const activeCount = invites.filter((i) => i.status === 'accepted').length;
   const pendingCount = invites.filter((i) => i.status === 'pending').length;
 
-  return (
-    <div className="min-h-screen bg-muted/20">
+  const ROLE_CONFIG = {
+    admin: { label: 'Admin', color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', avatarBg: 'from-blue-500 to-blue-600' },
+    'sub-admin': { label: 'Sub-Admin', color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20', avatarBg: 'from-violet-500 to-purple-600' },
+    viewer: { label: 'Viewer', color: 'text-slate-600 dark:text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20', avatarBg: 'from-slate-400 to-slate-500' },
+  } as const;
 
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-background/90 backdrop-blur-md border-b border-border/50">
-        <div className="max-w-2xl mx-auto px-4 h-13 flex items-center justify-between">
-          <div className="w-20" />
-          <span className="text-[11px] font-bold text-muted-foreground tracking-widest uppercase">Team Members</span>
-          <div className="w-20" />
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
+
+      {/* ── Hero Header ── */}
+      <div className="relative overflow-hidden border-b border-border/50 bg-gradient-to-r from-primary/5 via-background to-blue-500/5">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,hsl(var(--primary)/0.08),transparent_60%)]" />
+        <div className="relative max-w-2xl mx-auto px-5 pt-6 pb-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2.5 mb-1">
+                <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                  <Users size={16} className="text-primary" />
+                </div>
+                <h1 className="text-lg font-bold text-foreground">Team Members</h1>
+              </div>
+              <p className="text-xs text-muted-foreground ml-0.5">
+                {invites.length === 0
+                  ? 'Invite your team to collaborate on this dashboard'
+                  : `${invites.length} member${invites.length !== 1 ? 's' : ''} · ${activeCount} active${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`}
+              </p>
+            </div>
+            <button
+              onClick={() => setFormOpen((v) => !v)}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-200 flex-shrink-0 shadow-sm',
+                formOpen
+                  ? 'bg-muted text-muted-foreground border border-border hover:bg-muted/80'
+                  : 'bg-primary text-primary-foreground hover:bg-primary/90 hover:shadow-md active:scale-[0.97]'
+              )}
+            >
+              {formOpen ? (
+                <><span className="text-base leading-none">×</span> Cancel</>
+              ) : (
+                <><UserPlus size={15} /> Invite Member</>
+              )}
+            </button>
+          </div>
+
+          {/* Stat pills */}
+          {invites.length > 0 && (
+            <div className="flex items-center gap-2 mt-4">
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                {activeCount} Active
+              </span>
+              {pendingCount > 0 && (
+                <span className="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  {pendingCount} Pending
+                </span>
+              )}
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+                <Users size={10} />
+                {invites.length} Total
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Content */}
-      <div className="max-w-2xl mx-auto px-4 py-5 space-y-3">
+      {/* ── Content ── */}
+      <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
 
-        {/* Top bar: counts + invite button */}
-        <div className="flex items-center justify-between px-0.5">
-          <div className="flex items-center gap-2">
-            {activeCount > 0 && (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
-                {activeCount} active
-              </span>
-            )}
-            {pendingCount > 0 && (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
-                {pendingCount} pending
-              </span>
-            )}
-            {activeCount === 0 && pendingCount === 0 && (
-              <span className="text-xs text-muted-foreground">No members yet</span>
-            )}
-          </div>
-          <button
-            onClick={() => setFormOpen((v) => !v)}
-            className={cn(
-              'flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold transition-all',
-              formOpen
-                ? 'bg-muted text-muted-foreground'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
-            )}
-          >
-            <UserPlus size={12} />
-            {formOpen ? 'Cancel' : 'Invite member'}
-          </button>
-        </div>
-
-        {/* Invite Form — collapsible */}
+        {/* ── Invite Form ── */}
         {formOpen && (
-          <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="rounded-2xl border border-primary/20 bg-card shadow-lg shadow-primary/5 overflow-hidden">
+            <div className="px-5 py-4 bg-gradient-to-r from-primary/5 to-transparent border-b border-border/50 flex items-center gap-2.5">
+              <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center">
+                <UserPlus size={13} className="text-primary" />
+              </div>
+              <p className="text-sm font-bold text-foreground">New Invite</p>
+            </div>
             <div className="p-5 space-y-4">
 
-              {/* Name + Role side by side */}
+              {/* Name + Role */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Name <span className="text-muted-foreground/40">(optional)</span></label>
+                  <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Name <span className="normal-case font-normal">(optional)</span></label>
                   <input
                     type="text"
                     value={inviteName}
                     onChange={(e) => setInviteName(e.target.value)}
-                    placeholder="e.g. Rahim..."
-                    className="w-full h-9 rounded-xl border border-border/60 bg-muted/30 px-3 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-colors"
+                    placeholder="e.g. Rahim"
+                    className="w-full h-10 rounded-xl border border-border/60 bg-muted/30 px-3.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50 transition-all"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Role</label>
+                  <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Role</label>
                   <div className="relative">
                     <select
                       value={inviteRole}
                       onChange={(e) => setInviteRole(e.target.value)}
-                      className="w-full appearance-none h-9 rounded-xl border border-border/60 bg-muted/30 px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/40 transition-colors"
+                      className="w-full appearance-none h-10 rounded-xl border border-border/60 bg-muted/30 px-3.5 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50 transition-all"
                     >
                       <option value="viewer">Viewer</option>
                       <option value="admin">Admin</option>
-                      <option value="sub-admin">Sub-Admin (Own DB)</option>
+                      <option value="sub-admin">Sub-Admin</option>
                     </select>
-                    <ChevronDown size={12} className="absolute right-2.5 top-3 text-muted-foreground pointer-events-none" />
+                    <ChevronDown size={12} className="absolute right-3 top-3.5 text-muted-foreground pointer-events-none" />
                   </div>
                 </div>
               </div>
 
-              {/* Permissions */}
+              {/* Role info banners */}
+              {inviteRole === 'admin' && (
+                <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-blue-500/5 border border-blue-500/20">
+                  <ShieldCheck size={15} className="text-blue-500 flex-shrink-0" />
+                  <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">Full access</span> — admin members can see and manage all sections.</p>
+                </div>
+              )}
+              {inviteRole === 'sub-admin' && (
+                <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-violet-500/5 border border-violet-500/20">
+                  <Database size={15} className="text-violet-500 flex-shrink-0" />
+                  <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">Own database</span> — this member connects their own Supabase after joining.</p>
+                </div>
+              )}
+
+              {/* Permissions (viewer only) */}
               {inviteRole === 'viewer' && (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-muted-foreground">Page access</label>
-                    <span className="text-[10px] text-muted-foreground/40">· Settings is admin-only</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Page Access</label>
+                  <div className="grid grid-cols-2 gap-2">
                     {PERMISSION_OPTIONS.map((opt) => {
                       const active = invitePerms.includes(opt.key);
                       return (
@@ -1067,17 +1107,17 @@ const TeamMembers = () => {
                           type="button"
                           onClick={() => togglePerm(opt.key)}
                           className={cn(
-                            'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-all text-left',
+                            'flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-sm font-medium transition-all text-left',
                             active
-                              ? 'bg-primary/10 border-primary/30 text-primary'
-                              : 'bg-muted/20 border-border/50 text-muted-foreground hover:border-border hover:text-foreground hover:bg-muted/40'
+                              ? 'bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20'
+                              : 'bg-muted/30 border-border/50 text-muted-foreground hover:border-border hover:bg-muted/60 hover:text-foreground'
                           )}
                         >
                           <span className={cn(
-                            'w-3.5 h-3.5 rounded flex items-center justify-center flex-shrink-0 border transition-colors',
-                            active ? 'bg-primary border-primary' : 'border-border/60'
+                            'w-4 h-4 rounded-md flex items-center justify-center flex-shrink-0 border-2 transition-all',
+                            active ? 'bg-white/20 border-white/40' : 'border-border/60'
                           )}>
-                            {active && <Check size={8} className="text-primary-foreground" />}
+                            {active && <Check size={9} className="text-primary-foreground" />}
                           </span>
                           {opt.label}
                         </button>
@@ -1087,53 +1127,36 @@ const TeamMembers = () => {
                 </div>
               )}
 
-              {inviteRole === 'admin' && (
-                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/15">
-                  <ShieldCheck size={13} className="text-primary flex-shrink-0" />
-                  <p className="text-[11px] text-muted-foreground">Admin members have full access to all sections.</p>
-                </div>
-              )}
-
-              {inviteRole === 'sub-admin' && (
-                <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-violet-500/5 border border-violet-500/20">
-                  <Database size={13} className="text-violet-600 dark:text-violet-400 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-[11px] font-semibold text-violet-700 dark:text-violet-400 mb-0.5">Sub-Admin — Own Database</p>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      This member will connect their <strong>own database</strong> after accepting. Completely separate from yours.
-                    </p>
-                  </div>
-                </div>
-              )}
-
+              {/* Generate button */}
               <button
                 onClick={handleGenerateInvite}
                 disabled={isGeneratingInvite}
-                className="w-full h-9 rounded-xl bg-primary text-primary-foreground text-sm font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 active:scale-[0.98] transition-all disabled:opacity-50 shadow-sm"
+                className="w-full h-11 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 shadow-md shadow-primary/20"
               >
                 {isGeneratingInvite ? (
-                  <><Loader2 size={14} className="animate-spin" /> Generating…</>
+                  <><Loader2 size={15} className="animate-spin" /> Generating…</>
                 ) : (
-                  <><Link2 size={14} /> Generate Invite Link</>
+                  <><Link2 size={15} /> Generate Invite Link</>
                 )}
               </button>
 
+              {/* Generated link */}
               {lastInviteLink && (
-                <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3 space-y-2">
-                  <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                <div className="rounded-xl bg-emerald-500/8 border border-emerald-500/25 p-3.5 space-y-2.5">
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
                     Link ready — share with your team member
                   </p>
-                  <div className="flex items-center gap-2 bg-background/80 rounded-lg border border-border/50 px-3 py-2">
-                    <p className="text-[10px] text-muted-foreground font-mono flex-1 truncate">{lastInviteLink}</p>
+                  <div className="flex items-center gap-2 bg-background rounded-xl border border-border/60 px-3.5 py-2.5">
+                    <p className="text-[11px] text-muted-foreground font-mono flex-1 truncate">{lastInviteLink}</p>
                     <button
                       onClick={async () => {
                         try { await navigator.clipboard.writeText(lastInviteLink); toast.success('Copied!'); }
                         catch { toast.error('Could not copy'); }
                       }}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-primary-foreground text-[10px] font-semibold hover:bg-primary/90 transition-colors flex-shrink-0"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-[11px] font-bold hover:bg-emerald-600 transition-colors flex-shrink-0 shadow-sm"
                     >
-                      <Copy size={9} /> Copy
+                      <ClipboardCopy size={10} /> Copy
                     </button>
                   </div>
                 </div>
@@ -1142,26 +1165,41 @@ const TeamMembers = () => {
           </div>
         )}
 
-        {/* Members List */}
+        {/* ── Members List ── */}
         <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between">
-            <p className="text-sm font-semibold">Members</p>
+
+          {/* List header */}
+          <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between bg-muted/20">
+            <div className="flex items-center gap-2">
+              <Users size={14} className="text-muted-foreground" />
+              <p className="text-sm font-bold text-foreground">Members</p>
+            </div>
             {invites.length > 0 && (
-              <span className="text-[10px] text-muted-foreground">{invites.length} total</span>
+              <span className="text-[11px] font-semibold text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
+                {invites.length} total
+              </span>
             )}
           </div>
 
           {invitesLoading ? (
-            <div className="flex items-center justify-center py-10">
-              <Loader2 size={16} className="animate-spin text-muted-foreground" />
+            <div className="flex flex-col items-center justify-center py-14 gap-3">
+              <Loader2 size={22} className="animate-spin text-primary/60" />
+              <p className="text-xs text-muted-foreground">Loading members…</p>
             </div>
           ) : invites.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center px-6">
-              <div className="w-11 h-11 rounded-2xl bg-muted flex items-center justify-center mb-3">
-                <Users size={18} className="text-muted-foreground/40" />
+            <div className="flex flex-col items-center justify-center py-16 text-center px-8">
+              <div className="relative mb-4">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/10 to-blue-500/10 border border-primary/15 flex items-center justify-center">
+                  <Users size={26} className="text-primary/50" />
+                </div>
+                <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
+                  <Plus size={12} className="text-primary/70" />
+                </div>
               </div>
-              <p className="text-sm font-medium text-foreground mb-1">No members yet</p>
-              <p className="text-xs text-muted-foreground">Generate an invite link above to add team members</p>
+              <p className="text-sm font-bold text-foreground mb-1.5">No members yet</p>
+              <p className="text-xs text-muted-foreground max-w-[200px] leading-relaxed">
+                Click <span className="font-semibold text-primary">Invite Member</span> above to generate a link and share it with your team.
+              </p>
             </div>
           ) : (
             <div className="divide-y divide-border/40">
@@ -1174,144 +1212,141 @@ const TeamMembers = () => {
                   : invite.email && invite.email.trim()
                     ? getInitials(invite.email.split('@')[0])
                     : invite.role === 'admin' ? 'AD' : invite.role === 'sub-admin' ? 'SA' : 'VW';
+                const roleConf = ROLE_CONFIG[invite.role as keyof typeof ROLE_CONFIG] ?? ROLE_CONFIG.viewer;
                 return (
                   <div key={invite.id}>
-                    <div className="flex items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors">
+                    <div className="flex items-center gap-3.5 px-5 py-4 hover:bg-muted/20 transition-colors group">
                       {/* Avatar */}
-                      <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-[10px] font-bold text-primary flex-shrink-0 border border-primary/10">
+                      <div className={cn(
+                        'w-10 h-10 rounded-2xl bg-gradient-to-br flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0 shadow-sm',
+                        roleConf.avatarBg
+                      )}>
                         {avatarLabel}
                       </div>
 
                       {/* Info */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-foreground truncate">{label}</p>
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="text-sm font-semibold text-foreground truncate">{label}</p>
                           <span className={cn(
-                            'text-[9px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0',
-                            invite.role === 'admin'
-                              ? 'bg-primary/10 text-primary'
-                              : invite.role === 'sub-admin'
-                                ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400'
-                                : 'bg-muted text-muted-foreground'
+                            'text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 border',
+                            roleConf.color, roleConf.bg, roleConf.border
                           )}>
-                            {invite.role === 'sub-admin' ? 'OWN DB' : invite.role.toUpperCase()}
+                            {invite.role === 'sub-admin' ? 'OWN DB' : roleConf.label.toUpperCase()}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <StatusPill status={invite.status} />
                           {isPending && hasSubmission && (
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
-                              Credentials submitted — awaiting approval
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold bg-amber-500/8 px-2 py-0.5 rounded-full border border-amber-500/20">
+                              Awaiting approval
                             </span>
                           )}
                           {isPending && !hasSubmission && (
                             <span className="text-[10px] text-muted-foreground/60">
-                              Waiting for member to fill form
+                              Waiting for member to sign up
                             </span>
                           )}
                           {!isPending && invite.status !== 'revoked' && invite.status !== 'rejected' && invite.role === 'sub-admin' && (
-                            <span className="text-[10px] text-violet-600/60 dark:text-violet-400/60 truncate flex items-center gap-1">
-                              <Database size={9} /> Connects own database
+                            <span className="text-[10px] text-violet-600/70 dark:text-violet-400/70 flex items-center gap-1">
+                              <Database size={9} /> Own database
                             </span>
                           )}
                           {!isPending && invite.status !== 'revoked' && invite.status !== 'rejected' && invite.role !== 'sub-admin' && invite.permissions?.length > 0 && (
-                            <span className="text-[10px] text-muted-foreground/50 truncate">
+                            <span className="text-[10px] text-muted-foreground/50">
                               {invite.permissions.slice(0, 3).join(', ')}{invite.permissions.length > 3 ? ` +${invite.permissions.length - 3}` : ''}
                             </span>
                           )}
                         </div>
                       </div>
 
-                      {/* Right side: time info + remove button + ⋯ menu */}
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {/* Right actions */}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {/* Last seen */}
                         {invite.status === 'accepted' ? (() => {
                           const seen = lastSeenDisplay(invite.last_login_at);
                           return (
-                            <span className={`text-[10px] hidden sm:flex items-center gap-1 ${seen.isOnline ? 'text-emerald-500 font-semibold' : invite.last_login_at ? 'text-muted-foreground/50' : 'text-muted-foreground/30'}`}>
+                            <span className={cn(
+                              'text-[10px] hidden sm:flex items-center gap-1.5 font-medium',
+                              seen.isOnline ? 'text-emerald-500' : 'text-muted-foreground/50'
+                            )}>
                               {seen.isOnline
-                                ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-                                : <Clock size={9} />
-                              }
+                                ? <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                : <Clock size={9} />}
                               {seen.label}
                             </span>
                           );
                         })() : (
-                          <span className="text-[10px] text-muted-foreground/40 hidden sm:flex items-center gap-0.5">
+                          <span className="text-[10px] text-muted-foreground/40 hidden sm:flex items-center gap-1">
                             <Clock size={9} /> {timeAgo(invite.created_at)}
                           </span>
                         )}
 
-                        {/* Direct Remove Access button — visible for active members */}
+                        {/* Accept/Reject for pending with submission */}
+                        {isPending && hasSubmission && (
+                          <div className="hidden sm:flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleAccept(invite.id)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-500 text-white hover:bg-emerald-600 transition-all shadow-sm"
+                            >
+                              <UserCheck size={11} /> Accept
+                            </button>
+                            <button
+                              onClick={() => handleReject(invite.id)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white border border-red-500/20 transition-all"
+                            >
+                              <UserX size={11} /> Reject
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Remove access for active members */}
                         {invite.status === 'accepted' && (
                           <button
                             onClick={() => handleRevoke(invite.id)}
-                            className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white border border-red-500/20 hover:border-red-500 transition-all"
-                            title="Remove dashboard access"
+                            className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-red-500/8 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white border border-red-500/20 hover:border-red-500 transition-all opacity-0 group-hover:opacity-100"
                           >
-                            <ShieldOff size={11} />
-                            Remove access
+                            <ShieldOff size={11} /> Remove
                           </button>
                         )}
 
+                        {/* ⋯ menu */}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <button
-                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                              title="Actions"
-                            >
-                              <MoreHorizontal size={14} />
+                            <button className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                              <MoreHorizontal size={15} />
                             </button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-44 text-sm">
+                          <DropdownMenuContent align="end" className="w-48 text-sm">
                             {isPending && (
-                              <DropdownMenuItem
-                                onClick={() => copyLink(invite.token, invite.email || undefined)}
-                                className="gap-2 cursor-pointer"
-                              >
-                                <Copy size={13} className="text-muted-foreground" />
-                                Copy invite link
+                              <DropdownMenuItem onClick={() => copyLink(invite.token, invite.email || undefined)} className="gap-2 cursor-pointer">
+                                <Copy size={13} className="text-muted-foreground" /> Copy invite link
                               </DropdownMenuItem>
                             )}
                             {isPending && hasSubmission && (
                               <>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => handleAccept(invite.id)}
-                                  className="gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 focus:text-emerald-600 dark:focus:text-emerald-400"
-                                >
-                                  <UserCheck size={13} />
-                                  Accept member
+                                <DropdownMenuItem onClick={() => handleAccept(invite.id)} className="gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 focus:text-emerald-600 dark:focus:text-emerald-400">
+                                  <UserCheck size={13} /> Accept member
                                 </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => handleReject(invite.id)}
-                                  className="gap-2 cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
-                                >
-                                  <UserX size={13} />
-                                  Reject request
+                                <DropdownMenuItem onClick={() => handleReject(invite.id)} className="gap-2 cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400">
+                                  <UserX size={13} /> Reject request
                                 </DropdownMenuItem>
                               </>
                             )}
                             {invite.status === 'accepted' && (
                               <>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => handleRevoke(invite.id)}
-                                  className="gap-2 cursor-pointer text-amber-600 dark:text-amber-400 focus:text-amber-600 dark:focus:text-amber-400"
-                                >
-                                  <ShieldOff size={13} />
-                                  Revoke access
+                                <DropdownMenuItem onClick={() => handleRevoke(invite.id)} className="gap-2 cursor-pointer text-amber-600 dark:text-amber-400 focus:text-amber-600 dark:focus:text-amber-400">
+                                  <ShieldOff size={13} /> Revoke access
                                 </DropdownMenuItem>
                               </>
                             )}
                             {(invite.status === 'revoked' || invite.status === 'rejected') && (
                               <>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => handleDelete(invite.id)}
-                                  className="gap-2 cursor-pointer text-destructive focus:text-destructive"
-                                >
-                                  <Trash2 size={13} />
-                                  Remove member
+                                <DropdownMenuItem onClick={() => handleDelete(invite.id)} className="gap-2 cursor-pointer text-destructive focus:text-destructive">
+                                  <Trash2 size={13} /> Remove member
                                 </DropdownMenuItem>
                               </>
                             )}
@@ -1320,10 +1355,13 @@ const TeamMembers = () => {
                       </div>
                     </div>
 
-                    {/* Submission detail row */}
+                    {/* Submission detail panel */}
                     {hasSubmission && isPending && (
-                      <div className="px-5 pb-3 -mt-1 ml-11">
-                        <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/15 px-3 py-2 text-[11px] text-muted-foreground space-y-0.5">
+                      <div className="px-5 pb-4 -mt-1 ml-14">
+                        <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 px-4 py-3 text-xs text-muted-foreground space-y-1">
+                          <p className="text-[11px] font-bold text-amber-700 dark:text-amber-400 mb-1.5 flex items-center gap-1.5">
+                            <Zap size={10} /> Credentials submitted
+                          </p>
                           {invite.submitted_name && (
                             <p><span className="font-semibold text-foreground">Name:</span> {invite.submitted_name}</p>
                           )}
@@ -1333,7 +1371,7 @@ const TeamMembers = () => {
                           {invite.submitted_at && (
                             <p><span className="font-semibold text-foreground">Submitted:</span> {timeAgo(invite.submitted_at)}</p>
                           )}
-                          <p className="text-emerald-600 dark:text-emerald-400 font-semibold pt-0.5">✓ Click Accept above to let them sign in</p>
+                          <p className="text-emerald-600 dark:text-emerald-400 font-semibold pt-1">✓ Click Accept to let them sign in</p>
                         </div>
                       </div>
                     )}
@@ -1344,7 +1382,7 @@ const TeamMembers = () => {
           )}
         </div>
 
-        {/* ── Database Setup — only visible while the invite form is open ── */}
+        {/* DB Setup Card */}
         {isAdmin && formOpen && dbConnections.length > 0 && (
           <DbSetupCard
             dbConnections={dbConnections}
