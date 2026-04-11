@@ -9,28 +9,6 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
-runButton = "Project"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
-
-[[workflows.workflow]]
-name = "Start application"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "webview"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "PORT=19714 pnpm --filter @workspace/direct-chat-connect run dev"
-waitForPort = 19714
 
 [agent]
 stack = "PNPM_WORKSPACE"
@@ -55,3 +33,7 @@ externalPort = 80
 [[ports]]
 localPort = 19714
 externalPort = 3000
+
+[[ports]]
+localPort = 19715
+externalPort = 3003
