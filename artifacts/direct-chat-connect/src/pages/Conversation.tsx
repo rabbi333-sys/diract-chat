@@ -325,11 +325,12 @@ const Conversation = () => {
         await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
       }
       markSent(id);
-      // Refetch DB — the data URL is now persisted
-      await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
-      // Remove local blob; the DB data URL version now shows in its place
+      // Remove local blob BEFORE refetching so the optimistic and the DB
+      // version never appear at the same time (fixes double-video bug).
       revertOptimistic(id);
       URL.revokeObjectURL(rawUrl);
+      // Refetch DB — the data URL version now shows in its place
+      await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
     } catch (err: unknown) {
       revertOptimistic(id);
       URL.revokeObjectURL(rawUrl);
