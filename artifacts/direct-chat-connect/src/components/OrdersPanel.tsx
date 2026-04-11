@@ -1,16 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { format, isToday, isYesterday, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+import { format, isToday, isYesterday, startOfWeek, startOfMonth, isAfter, parseISO, startOfDay, endOfDay } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
   Package, Clock, CheckCircle, XCircle, Truck, PackageCheck,
-  Download, Trash2, CalendarDays, ChevronRight,
+  Download, Trash2, CalendarDays, ChevronRight, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrderDetailSheet from './OrderDetailSheet';
 
-type DateFilter = 'all' | 'today' | 'yesterday' | 'week' | 'month';
+type DateFilter = 'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom';
 
 const DATE_FILTER_OPTIONS: { value: DateFilter; label: string }[] = [
   { value: 'all',       label: 'All' },
@@ -163,6 +163,20 @@ const OrdersPanel = () => {
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowDatePicker(false);
+      }
+    };
+    if (showDatePicker) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showDatePicker]);
 
   const deleteMutation = useMutation({
     mutationFn: async ({ id, source }: { id: string; source?: string }) => {
@@ -191,9 +205,16 @@ const OrdersPanel = () => {
       if (dateFilter === 'yesterday') return isYesterday(d);
       if (dateFilter === 'week')      return isAfter(d, startOfWeek(now, { weekStartsOn: 0 }));
       if (dateFilter === 'month')     return isAfter(d, startOfMonth(now));
+      if (dateFilter === 'custom') {
+        const from = customFrom ? startOfDay(parseISO(customFrom)) : null;
+        const to   = customTo   ? endOfDay(parseISO(customTo))     : null;
+        if (from && d < from) return false;
+        if (to   && d > to)   return false;
+        return true;
+      }
       return true;
     });
-  }, [orders, dateFilter]);
+  }, [orders, dateFilter, customFrom, customTo]);
 
   const newLocalCount = localOrders.length;
 
@@ -203,9 +224,114 @@ const OrdersPanel = () => {
       {/* ── Amazon-style toolbar ─────────────────────────────── */}
       <div className="flex-shrink-0 px-0 pt-0 pb-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          {/* Left: date filter + live badge */}
+          {/* Left: date filter + custom picker + live badge */}
           <div className="flex items-center gap-2 flex-wrap">
-            <CalendarDays size={14} className="text-muted-foreground/50 flex-shrink-0" />
+            {/* Calendar icon — opens custom range picker */}
+            <div className="relative" ref={pickerRef}>
+              <button
+                onClick={() => setShowDatePicker(v => !v)}
+                title="Custom date range"
+                className={cn(
+                  'p-1.5 rounded-lg border transition-colors',
+                  dateFilter === 'custom' || showDatePicker
+                    ? 'bg-primary border-primary text-white'
+                    : 'bg-white dark:bg-card border-[#D5D9D9] dark:border-border text-[#565959] dark:text-muted-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/30'
+                )}
+              >
+                <CalendarDays size={14} />
+              </button>
+
+              {/* Date picker popover */}
+              {showDatePicker && (
+                <div className="absolute top-full left-0 mt-1.5 z-50 bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl shadow-xl p-4 min-w-[280px]">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-[12px] font-bold text-[#0F1111] dark:text-foreground">Custom Date Range</p>
+                    <button onClick={() => setShowDatePicker(false)}
+                      className="p-0.5 rounded text-[#767676] dark:text-muted-foreground hover:text-[#0F1111] dark:hover:text-foreground">
+                      <X size={13} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide block mb-1">From</label>
+                      <input
+                        type="date"
+                        value={customFrom}
+                        max={customTo || undefined}
+                        onChange={e => setCustomFrom(e.target.value)}
+                        className="w-full px-3 py-2 text-[12.5px] rounded-lg border border-[#D5D9D9] dark:border-border bg-white dark:bg-muted/20 text-[#0F1111] dark:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10.5px] font-semibold text-[#565959] dark:text-muted-foreground uppercase tracking-wide block mb-1">To</label>
+                      <input
+                        type="date"
+                        value={customTo}
+                        min={customFrom || undefined}
+                        onChange={e => setCustomTo(e.target.value)}
+                        className="w-full px-3 py-2 text-[12.5px] rounded-lg border border-[#D5D9D9] dark:border-border bg-white dark:bg-muted/20 text-[#0F1111] dark:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Quick presets */}
+                  <div className="mt-3 pt-3 border-t border-[#EAEDED] dark:border-border/40">
+                    <p className="text-[10px] font-semibold text-[#767676] dark:text-muted-foreground uppercase tracking-wide mb-2">Quick select</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { label: 'Last 7 days',  days: 7 },
+                        { label: 'Last 30 days', days: 30 },
+                        { label: 'Last 90 days', days: 90 },
+                        { label: 'This year',    days: 365 },
+                      ].map(({ label, days }) => (
+                        <button key={label}
+                          onClick={() => {
+                            const to = new Date();
+                            const from = new Date();
+                            from.setDate(from.getDate() - days);
+                            setCustomFrom(format(from, 'yyyy-MM-dd'));
+                            setCustomTo(format(to, 'yyyy-MM-dd'));
+                          }}
+                          className="text-[11px] font-medium text-[#007185] dark:text-primary bg-[#F0F7FF] dark:bg-primary/10 hover:bg-[#E0F0FF] dark:hover:bg-primary/20 px-2.5 py-1.5 rounded-lg border border-[#C8E0F0] dark:border-primary/20 transition-colors text-left"
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Apply / Clear */}
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      onClick={() => {
+                        setDateFilter('custom');
+                        setShowDatePicker(false);
+                      }}
+                      disabled={!customFrom && !customTo}
+                      className="flex-1 py-2 rounded-lg text-[12px] font-semibold bg-primary text-white hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Apply Range
+                    </button>
+                    {dateFilter === 'custom' && (
+                      <button
+                        onClick={() => {
+                          setCustomFrom('');
+                          setCustomTo('');
+                          setDateFilter('all');
+                          setShowDatePicker(false);
+                        }}
+                        className="px-3 py-2 rounded-lg text-[12px] font-medium text-[#565959] dark:text-muted-foreground border border-[#D5D9D9] dark:border-border hover:bg-[#F7F8F8] dark:hover:bg-muted/30 transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Preset filter tabs */}
             <div className="flex items-center rounded-lg border border-[#D5D9D9] dark:border-border overflow-hidden">
               {DATE_FILTER_OPTIONS.map((opt, idx) => (
                 <button
@@ -223,6 +349,16 @@ const OrdersPanel = () => {
                 </button>
               ))}
             </div>
+
+            {/* Custom range active badge */}
+            {dateFilter === 'custom' && (customFrom || customTo) && (
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-primary bg-[#F0F7FF] dark:bg-primary/10 px-2.5 py-1.5 rounded-lg border border-[#C8E0F0] dark:border-primary/20">
+                <CalendarDays size={11} />
+                {customFrom ? format(parseISO(customFrom), 'dd MMM') : '∞'}
+                {' → '}
+                {customTo ? format(parseISO(customTo), 'dd MMM yy') : '∞'}
+              </div>
+            )}
 
             {newLocalCount > 0 && (
               <div className="flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1.5 rounded-lg border border-amber-200 dark:border-amber-700/40 font-semibold">
