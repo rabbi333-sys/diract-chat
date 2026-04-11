@@ -285,7 +285,7 @@ const Index = () => {
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 )}
               >
-                <BarChart3 size={13} /> Analytics
+                <BarChart3 size={13} /> Report
               </button>
             </div>
           ) : (
@@ -507,7 +507,7 @@ const Index = () => {
                         : "text-muted-foreground hover:text-foreground hover:bg-muted"
                     )}
                   >
-                    <BarChart3 size={14} /> Analytics
+                    <BarChart3 size={14} /> Report
                   </button>
                 </div>
               </div>

@@ -5,7 +5,7 @@ import { format, isToday, isYesterday, startOfWeek, startOfMonth, isAfter, parse
 import { cn } from '@/lib/utils';
 import {
   Package, Clock, CheckCircle, XCircle, Truck, PackageCheck,
-  Download, Trash2, CalendarDays, X, MoreHorizontal, FileText,
+  Download, Trash2, CalendarDays, X, MoreHorizontal, FileText, Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrderDetailSheet from './OrderDetailSheet';
@@ -291,6 +291,7 @@ const OrdersPanel = () => {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const pickerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -334,24 +335,34 @@ const OrdersPanel = () => {
   });
 
   const filtered = useMemo(() => {
-    if (dateFilter === 'all') return orders;
     const now = new Date();
+    const q = searchQuery.trim().toLowerCase();
     return orders.filter(o => {
-      const d = new Date(o.created_at);
-      if (dateFilter === 'today')     return isToday(d);
-      if (dateFilter === 'yesterday') return isYesterday(d);
-      if (dateFilter === 'week')      return isAfter(d, startOfWeek(now, { weekStartsOn: 0 }));
-      if (dateFilter === 'month')     return isAfter(d, startOfMonth(now));
-      if (dateFilter === 'custom') {
-        const from = customFrom ? startOfDay(parseISO(customFrom)) : null;
-        const to   = customTo   ? endOfDay(parseISO(customTo))     : null;
-        if (from && d < from) return false;
-        if (to   && d > to)   return false;
-        return true;
+      // Date filter
+      if (dateFilter !== 'all') {
+        const d = new Date(o.created_at);
+        if (dateFilter === 'today'     && !isToday(d))     return false;
+        if (dateFilter === 'yesterday' && !isYesterday(d)) return false;
+        if (dateFilter === 'week'      && !isAfter(d, startOfWeek(now, { weekStartsOn: 0 }))) return false;
+        if (dateFilter === 'month'     && !isAfter(d, startOfMonth(now))) return false;
+        if (dateFilter === 'custom') {
+          const from = customFrom ? startOfDay(parseISO(customFrom)) : null;
+          const to   = customTo   ? endOfDay(parseISO(customTo))     : null;
+          if (from && d < from) return false;
+          if (to   && d > to)   return false;
+        }
+      }
+      // Search filter
+      if (q) {
+        const haystack = [
+          o.order_id, o.customer_name, o.customer_phone,
+          o.product_name, o.product_sku, o.status,
+        ].join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
       }
       return true;
     });
-  }, [orders, dateFilter, customFrom, customTo]);
+  }, [orders, dateFilter, customFrom, customTo, searchQuery]);
 
   const newLocalCount = localOrders.length;
 
@@ -505,8 +516,27 @@ const OrdersPanel = () => {
             )}
           </div>
 
-          {/* Right: count + export */}
+          {/* Right: search + count + export */}
           <div className="flex items-center gap-2.5">
+            {/* Search bar */}
+            <div className="relative hidden sm:block">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9CA3AF] dark:text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search orders…"
+                className="pl-8 pr-3 py-1.5 text-[12px] rounded-lg border border-[#D5D9D9] dark:border-border bg-white dark:bg-card text-[#0F1111] dark:text-foreground placeholder:text-[#9CA3AF] dark:placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all w-40"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[#9CA3AF] hover:text-[#0F1111] dark:hover:text-foreground"
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
             {orders.length > 0 && (
               <span className="text-[12px] text-[#565959] dark:text-muted-foreground font-medium hidden sm:block">
                 {filtered.length === orders.length
