@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useChatHistory, useRecipientNames, useAutoResolveNames, fetchNameFromMeta, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
+import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fetchNameFromMeta, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage } from '@/components/ChatMessage';
 import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw } from 'lucide-react';
@@ -97,6 +97,8 @@ const Conversation = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const { data: messages, isLoading, error } = useChatHistory(sessionId);
+  const { data: sessions } = useSessions();
+  const isSessionActive = sessions?.find(s => s.session_id === sessionId)?.is_active ?? false;
   const { data: recipientNames } = useRecipientNames();
   const { data: platformConns = [] } = usePlatformConnections();
   const { displayName: agentName } = useTeamRole();
@@ -489,7 +491,7 @@ const Conversation = () => {
             <div className={cn('w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shadow bg-gradient-to-br', grad)}>
               {initials}
             </div>
-            <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-background" />
+            <span className={cn('absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-background', isSessionActive ? 'bg-emerald-500' : 'bg-zinc-400')} />
           </div>
 
           {/* Name + status */}
@@ -507,8 +509,8 @@ const Conversation = () => {
                 </button>
               )}
             </div>
-            <p className="text-[11px] text-emerald-500 font-medium leading-none mt-0.5">
-              {fetchingName ? 'Fetching name…' : 'Active now'}
+            <p className={cn('text-[11px] font-medium leading-none mt-0.5', isSessionActive ? 'text-emerald-500' : 'text-muted-foreground/50')}>
+              {fetchingName ? 'Fetching name…' : isSessionActive ? 'Active now' : 'Offline'}
             </p>
           </div>
 
