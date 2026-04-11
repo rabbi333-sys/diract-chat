@@ -16,6 +16,7 @@ import { FailedPanel } from '@/components/FailedPanel';
 import { PlatformSettings } from '@/components/PlatformSettings';
 import { N8nPromptSettings } from '@/components/N8nPromptSettings';
 import OrdersPanel from '@/components/OrdersPanel';
+import TeamMembers from '@/pages/TeamMembers';
 import OrderAnalytics from '@/components/OrderAnalytics';
 import WebhookSettings from '@/components/WebhookSettings';
 import { useGlobalAiControl } from '@/hooks/useAiControl';
@@ -136,11 +137,6 @@ const Index = () => {
   }, [roleLoading, isAdmin, permissions.join(',')]);
 
   const handleNavClick = (label: string, badgeKey?: 'handoff' | 'failed' | 'orders') => {
-    if (label === 'Team Members') {
-      navigate('/team-members');
-      setSidebarOpen(false);
-      return;
-    }
     setActiveNav(label);
     setSidebarOpen(false);
     if (badgeKey) clearCount(badgeKey);
@@ -741,6 +737,13 @@ const Index = () => {
                 )}
               </div>
             )}
+          </main>
+        )}
+
+        {/* Team Members Page */}
+        {activeNav === 'Team Members' && isAdmin && (
+          <main className="flex-1 overflow-auto">
+            <TeamMembers />
           </main>
         )}
 

@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useTeamRole } from '@/hooks/useTeamRole';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
-  ArrowLeft, Check, UserPlus, Copy, Trash2, ChevronDown,
+  Check, UserPlus, Copy, Trash2, ChevronDown,
   ShieldCheck, Loader2, Link2, Users, Database, Clock,
   MoreHorizontal, UserCheck, UserX, ShieldOff,
   ClipboardCopy, Plus, Zap, ChevronRight,
@@ -682,7 +681,6 @@ const StatusPill = ({ status }: { status: string }) => {
 };
 
 const TeamMembers = () => {
-  const navigate = useNavigate();
   const { user, isAdmin, loading: pageLoading } = useTeamRole();
 
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -979,12 +977,7 @@ const TeamMembers = () => {
       {/* Header */}
       <div className="sticky top-0 z-10 bg-background/90 backdrop-blur-md border-b border-border/50">
         <div className="max-w-2xl mx-auto px-4 h-13 flex items-center justify-between">
-          <button
-            onClick={() => navigate('/')}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors font-medium py-3"
-          >
-            <ArrowLeft size={14} /> Dashboard
-          </button>
+          <div className="w-20" />
           <span className="text-[11px] font-bold text-muted-foreground tracking-widest uppercase">Team Members</span>
           <div className="w-20" />
         </div>
