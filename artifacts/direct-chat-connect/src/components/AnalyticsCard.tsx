@@ -1,12 +1,15 @@
-import { useAnalytics } from '@/hooks/useChatHistory';
+import { useAnalytics, useSessions } from '@/hooks/useChatHistory';
 import { MessageSquare, Users, Bot, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export const AnalyticsCard = () => {
-  const { data: analytics, isLoading } = useAnalytics();
+  const { data: analytics, isLoading: analyticsLoading } = useAnalytics();
+  const { data: sessions, isLoading: sessionsLoading } = useSessions();
+
+  const isLoading = analyticsLoading && sessionsLoading;
 
   // Only show skeleton on truly first load (no data at all, not even placeholderData)
-  if (isLoading && !analytics) {
+  if (isLoading && !analytics && !sessions) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[...Array(4)].map((_, i) => (
@@ -16,11 +19,18 @@ export const AnalyticsCard = () => {
     );
   }
 
+  // Total Sessions + Total Messages: prefer the sessions cache (always available,
+  // already pre-loaded by the Messages tab) over the analytics fetch which may lag.
+  const totalSessions = (sessions?.length ?? 0) || (analytics?.total_sessions ?? 0);
+  const totalMessages = sessions
+    ? sessions.reduce((sum, s) => sum + (s.message_count || 0), 0)
+    : (analytics?.total_messages ?? 0);
+
   const stats = [
-    { label: 'Total Sessions',    value: analytics?.total_sessions  || 0, icon: Users,          color: 'text-stat-blue',   bg: 'bg-stat-blue/10' },
-    { label: 'Total Messages',    value: analytics?.total_messages  || 0, icon: MessageSquare,  color: 'text-stat-green',  bg: 'bg-stat-green/10' },
-    { label: 'Customer Messages', value: analytics?.human_messages  || 0, icon: User,           color: 'text-stat-orange', bg: 'bg-stat-orange/10' },
-    { label: 'AI Responses',      value: analytics?.ai_messages     || 0, icon: Bot,            color: 'text-stat-purple', bg: 'bg-stat-purple/10' },
+    { label: 'Total Sessions',    value: totalSessions,                   icon: Users,         color: 'text-stat-blue',   bg: 'bg-stat-blue/10' },
+    { label: 'Total Messages',    value: totalMessages,                   icon: MessageSquare, color: 'text-stat-green',  bg: 'bg-stat-green/10' },
+    { label: 'Customer Messages', value: analytics?.human_messages ?? 0,  icon: User,          color: 'text-stat-orange', bg: 'bg-stat-orange/10' },
+    { label: 'AI Responses',      value: analytics?.ai_messages     ?? 0, icon: Bot,           color: 'text-stat-purple', bg: 'bg-stat-purple/10' },
   ];
 
   return (

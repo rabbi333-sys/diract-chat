@@ -295,9 +295,10 @@ export const useAnalytics = () => {
   const dbKey = useDbConnectionKey();
   return useQuery({
     queryKey: ['analytics', dbKey],
-    staleTime: 60_000,
+    staleTime: 5_000,
     gcTime: 15 * 60_000,
-    refetchInterval: 60_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
     placeholderData: (prev: any) => prev,
     retry: 1,
     queryFn: async (): Promise<AnalyticsData> => {
@@ -362,9 +363,10 @@ export const useChartData = (
 
   return useQuery({
     queryKey: ['chart-data', timeRange, customStart, customEnd, dbKey],
-    staleTime: 60_000,
+    staleTime: 10_000,
     gcTime: 15 * 60_000,
-    refetchInterval: 60_000,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
     placeholderData: (prev: any) => prev,
     retry: 1,
     enabled: !isCustom || hasCustomDates,
