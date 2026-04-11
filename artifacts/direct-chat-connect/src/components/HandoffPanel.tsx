@@ -11,7 +11,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { formatDistanceToNow, parseISO } from 'date-fns';
-import { getLocalNames } from '@/hooks/useChatHistory';
+import { getLocalNames, useSessions } from '@/hooks/useChatHistory';
 
 interface HandoffRequest {
   id: string;
@@ -105,6 +105,7 @@ export const HandoffPanel = () => {
   const { data: localHandoffs = [] } = useLocalHandoffs();
   const { data: supabaseHandoffs = [] } = useSupabaseHandoffs();
   const requests = mergeHandoffs(localHandoffs, supabaseHandoffs);
+  const { data: sessions = [] } = useSessions();
 
   const [filter, setFilter] = useState<'all' | 'pending' | 'resolved'>('pending');
 
@@ -216,30 +217,45 @@ export const HandoffPanel = () => {
     return req.sender_id || req.recipient || 'Unknown';
   }
 
-  // Navigate to the conversation for this handoff.
-  // For Facebook/WhatsApp, sender_id IS the session_id — use it as fallback.
-  // Pass disable_ai=1 so the Conversation page immediately turns AI off.
+  // Navigate to the conversation for this handoff via the live inbox (Messages tab).
   function openChat(req: HandoffRequest, e: React.MouseEvent) {
     e.stopPropagation();
-    // Use session_id; fall back to sender_id (they're the same on Meta platforms)
-    const navSessionId = req.session_id || req.sender_id;
+
+    // ── Resolve the best session_id ──────────────────────────────────────────
+    // Handoff `session_id` may be null or a raw sender_id that doesn't match the
+    // messages table. Look up the real session by matching recipient in the
+    // sessions cache, then fall back to the handoff fields.
+    const candidateRecipient = req.sender_id || req.recipient;
+    const matchedSession = sessions.find(
+      s => s.recipient === candidateRecipient ||
+           s.session_id === req.session_id ||
+           s.session_id === req.sender_id
+    );
+    const navSessionId = matchedSession?.session_id
+      || req.session_id
+      || req.sender_id;
+
     if (!navSessionId) {
       toast.error('No session ID on this handoff — cannot open conversation');
       return;
     }
-    // Pre-seed the React Query cache so Conversation page mounts with AI=OFF
-    // This prevents the initial stale-time window from reading an old DB value
+
+    // ── Pre-seed AI=OFF in cache before navigation ────────────────────────────
     queryClient.cancelQueries({ queryKey: ['ai-control', navSessionId] });
     queryClient.setQueryData(['ai-control', navSessionId], false);
 
-    // Auto-resolve the handoff request when opening the chat
+    // ── Auto-resolve the handoff request ─────────────────────────────────────
     if (req.status === 'pending') {
       resolveMutation.mutate({ id: req.id, status: 'resolved', source: req._source });
     }
-    const recipientParam = req.sender_id || req.recipient;
-    const qs = new URLSearchParams({ disable_ai: '1' });
+
+    // ── Navigate to root with params — Index.tsx will switch to Messages tab ─
+    // and immediately open the conversation. This keeps the user in the main
+    // layout (live inbox) instead of the standalone /conversation/ page.
+    const recipientParam = matchedSession?.recipient || candidateRecipient;
+    const qs = new URLSearchParams({ openSession: navSessionId, disable_ai: '1' });
     if (recipientParam) qs.set('recipient', recipientParam);
-    navigate(`/conversation/${navSessionId}?${qs.toString()}`);
+    navigate(`/?${qs.toString()}`);
   }
 
   return (

@@ -78,6 +78,26 @@ const Index = () => {
   const { enabled: notifEnabled, soundEnabled, toggleEnabled: toggleNotif, toggleSound, counts, clearCount } = useNotifications();
   const { globalOn, toggle: toggleGlobalAi, isPending: globalAiPending } = useGlobalAiControl();
 
+  // ── Handle handoff "Open Chat" → live inbox navigation ──────────────────────
+  // HandoffPanel navigates to /?openSession=<id>&recipient=<rec>&disable_ai=1
+  // We switch to Messages tab then immediately open the conversation so the user
+  // lands in the main layout (not the isolated standalone page).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const openSession = params.get('openSession');
+    if (!openSession) return;
+    // Switch to Messages tab
+    setActiveNav('Messages');
+    // Clean the URL immediately so back-navigation doesn't re-trigger this
+    window.history.replaceState({}, '', '/');
+    // Navigate to the conversation
+    const qs = new URLSearchParams({ disable_ai: params.get('disable_ai') || '1' });
+    const recipient = params.get('recipient');
+    if (recipient) qs.set('recipient', recipient);
+    navigate(`/conversation/${openSession}?${qs.toString()}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount
+
   useEffect(() => {
     if (settingsSection !== 'ai-control') return;
     // Use our built-in API server endpoint — no Edge Function deployment needed
