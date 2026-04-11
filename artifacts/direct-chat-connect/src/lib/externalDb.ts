@@ -281,26 +281,20 @@ export async function queryExternalSupabase(
 
   const client = getExternalClient(url, key);
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15_000);
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let q: any = client.from(tbl).select('*').abortSignal(controller.signal);
+  let q: any = client.from(tbl).select('*');
   if (sessionId && type === 'messages') {
     q = q.eq('session_id', sessionId).order('id', { ascending: true }).limit(500);
   } else {
     q = q.order('id', { ascending: false }).limit(2000);
   }
 
-  let data: Record<string, unknown>[] | null;
-  let error: { code?: string; message?: string } | null;
-  try {
-    const result = await q;
-    data = result.data;
-    error = result.error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  let timeoutHandle: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error('QUERY_TIMEOUT')), 15_000);
+  });
+
+  const { data, error } = await Promise.race([q, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
 
   if (error) {
     const msg = String(error.message ?? '');
@@ -427,19 +421,22 @@ export async function insertMessageToExternalDb(
 // ─── Validate connection (for Settings page) ─────────────────────────────────
 
 export type ValidationResult = 'ok' | 'table-missing' | 'fail';
+export interface ValidationDetail { status: ValidationResult; errorMsg?: string }
 
-export async function validateConnection(conn: StoredConnection): Promise<ValidationResult> {
-  if (!conn) return 'fail';
+export async function validateConnection(conn: StoredConnection): Promise<ValidationDetail> {
+  if (!conn) return { status: 'fail', errorMsg: 'No connection settings found' };
 
   // ── Supabase: direct browser connection — no edge function needed ─────────
   if (conn.db_type === 'supabase') {
     try {
       await queryExternalSupabase(conn, 'sessions');
-      return 'ok';
+      return { status: 'ok' };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg === 'TABLE_NOT_FOUND' || msg.includes('TABLE_NOT_FOUND')) return 'table-missing';
-      return 'fail';
+      console.error('[Chat Monitor] Connection test error:', msg);
+      if (msg === 'TABLE_NOT_FOUND' || msg.includes('TABLE_NOT_FOUND')) return { status: 'table-missing' };
+      if (msg === 'QUERY_TIMEOUT') return { status: 'fail', errorMsg: 'Connection timed out (15s). Check your Supabase URL.' };
+      return { status: 'fail', errorMsg: msg };
     }
   }
 
@@ -460,10 +457,11 @@ export async function validateConnection(conn: StoredConnection): Promise<Valida
       body: JSON.stringify({ creds }),
     });
     const data = await res.json() as { status?: string; error?: string };
-    if (data.status === 'ok') return 'ok';
-    if (data.status === 'table-missing') return 'table-missing';
-    return 'fail';
-  } catch {
-    return 'fail';
+    if (data.status === 'ok') return { status: 'ok' };
+    if (data.status === 'table-missing') return { status: 'table-missing' };
+    return { status: 'fail', errorMsg: data.error ?? 'Server returned an error' };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { status: 'fail', errorMsg: msg };
   }
 }

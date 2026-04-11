@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { validateConnection } from '@/lib/externalDb';
+import type { ValidationDetail } from '@/lib/externalDb';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -164,11 +165,10 @@ export const SupabaseSettings = () => {
     return form.connection_string.trim() !== '';
   })();
 
-  const doValidate = async (): Promise<ValidationState> => {
+  const doValidate = async (): Promise<ValidationDetail> => {
     const conn = loadFromStorage();
-    if (!conn) return 'fail';
-    // validateConnection goes directly to Supabase (no edge function needed)
-    return await validateConnection(conn) as ValidationState;
+    if (!conn) return { status: 'fail', errorMsg: 'No saved connection found' };
+    return await validateConnection(conn);
   };
 
   // On mount: sync any already-saved connection to meta_db_connections so
@@ -184,15 +184,16 @@ export const SupabaseSettings = () => {
     setValidation('idle');
     try {
       saveToStorage(form);
-      syncToMeta(form);    // ← bridge to unified connection store
+      syncToMeta(form);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['chat-history'] });
       toast.success('Settings saved! Checking connection...');
       setValidation('loading');
-      const result = await doValidate();
-      setValidation(result);
-      if (result === 'ok') toast.success('Table found — check the Messages tab for data.');
-      else if (result === 'table-missing') toast.error('Table name not found. Please check the name.');
+      const { status, errorMsg } = await doValidate();
+      setValidation(status);
+      if (status === 'ok') toast.success('Table found — check the Messages tab for data.');
+      else if (status === 'table-missing') toast.error('Table name not found. Please check the name.');
+      else toast.error(errorMsg ? `Connection failed: ${errorMsg}` : 'Connection failed — please check your credentials.');
     } finally {
       setSaving(false);
     }
@@ -200,11 +201,11 @@ export const SupabaseSettings = () => {
 
   const handleTest = async () => {
     setValidation('loading');
-    const result = await doValidate();
-    setValidation(result);
-    if (result === 'ok') toast.success('Connection successful!');
-    else if (result === 'table-missing') toast.error('Table not found.');
-    else toast.error('Connection failed.');
+    const { status, errorMsg } = await doValidate();
+    setValidation(status);
+    if (status === 'ok') toast.success('Connection successful!');
+    else if (status === 'table-missing') toast.error('Table not found — check the table name.');
+    else toast.error(errorMsg ? `Connection failed: ${errorMsg}` : 'Connection failed — please check your credentials.');
   };
 
   const handleDelete = () => {
