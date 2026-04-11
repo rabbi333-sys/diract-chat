@@ -139,6 +139,7 @@ const OrderAnalytics = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('daily');
   const [days] = useState(90);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [orderChartType, setOrderChartType] = useState<'area' | 'bar'>('area');
   const pageRef = useRef<HTMLDivElement>(null);
 
   const { data: orders = [], isLoading, refetch, isFetching } = useQuery({
@@ -373,74 +374,122 @@ const OrderAnalytics = () => {
         </div>
       )}
 
-      {/* ── Orders bar chart ──────────────────────────────── */}
+      {/* ── Orders chart ──────────────────────────────────── */}
       {chartData.length > 0 && (
-        <div className="rounded-2xl overflow-hidden shadow-sm border border-[#D5D9D9] dark:border-border">
-          {/* Gradient header */}
-          <div className="px-5 pt-5 pb-4"
-            style={{ background: 'linear-gradient(135deg, #0c1a2e 0%, #0d2b45 60%, #103556 100%)' }}>
-            <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center"
-                    style={{ background: 'rgba(0,161,229,0.25)' }}>
-                    <BarChartIcon size={13} className="text-[#00A1E5]" />
-                  </div>
-                  <h3 className="text-[14px] font-bold text-white">Orders by {viewLabel}</h3>
-                </div>
-                <p className="text-[10.5px] text-white/45 mt-1 ml-9">{summary.total} total orders in this period</p>
-              </div>
-              <ChangePill value={summary.totalChange} />
+        <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-2xl overflow-hidden">
+          {/* Header */}
+          <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-[14px] font-bold text-[#0F1111] dark:text-foreground">Orders by {viewLabel}</h3>
+              <p className="text-[10.5px] text-[#565959] dark:text-muted-foreground mt-0.5">{summary.total} total orders in this period</p>
             </div>
-
-            {/* Stat trio */}
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { label: 'Total', value: summary.total, color: '#00A1E5', bg: 'rgba(0,161,229,0.12)', border: 'rgba(0,161,229,0.25)' },
-                { label: 'Delivered', value: summary.statuses.delivered.count, color: '#22C55E', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.25)' },
-                { label: 'Cancelled', value: summary.statuses.cancelled.count, color: '#F87171', bg: 'rgba(248,113,113,0.12)', border: 'rgba(248,113,113,0.25)' },
-              ].map(s => (
-                <div key={s.label} className="rounded-xl px-3 py-2.5 flex flex-col gap-0.5"
-                  style={{ background: s.bg, border: `1px solid ${s.border}` }}>
-                  <span className="text-[20px] font-black leading-none" style={{ color: s.color }}>{s.value}</span>
-                  <span className="text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: s.color + 'AA' }}>{s.label}</span>
-                </div>
-              ))}
+            {/* Chart type toggle */}
+            <div className="flex items-center border border-[#D5D9D9] dark:border-border rounded-lg overflow-hidden">
+              <button
+                onClick={() => setOrderChartType('area')}
+                className={cn(
+                  'p-1.5 transition-colors',
+                  orderChartType === 'area'
+                    ? 'bg-[#F0F7FF] dark:bg-primary/20 text-primary'
+                    : 'bg-white dark:bg-card text-[#565959] dark:text-muted-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/30'
+                )}
+                title="Area chart"
+              >
+                <TrendingUp size={14} />
+              </button>
+              <button
+                onClick={() => setOrderChartType('bar')}
+                className={cn(
+                  'p-1.5 border-l border-[#D5D9D9] dark:border-border transition-colors',
+                  orderChartType === 'bar'
+                    ? 'bg-[#F0F7FF] dark:bg-primary/20 text-primary'
+                    : 'bg-white dark:bg-card text-[#565959] dark:text-muted-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/30'
+                )}
+                title="Bar chart"
+              >
+                <BarChartIcon size={14} />
+              </button>
             </div>
           </div>
 
-          {/* Chart body — white bg */}
-          <div className="bg-white dark:bg-card px-3 pt-4 pb-3">
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={chartData} barGap={3} barCategoryGap="38%" margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="amzTotalGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#38BDF8" />
-                    <stop offset="100%" stopColor="#0284C7" stopOpacity={0.9} />
-                  </linearGradient>
-                  <linearGradient id="amzDelivGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#4ADE80" />
-                    <stop offset="100%" stopColor="#16A34A" stopOpacity={0.9} />
-                  </linearGradient>
-                  <linearGradient id="amzCancGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#FB923C" />
-                    <stop offset="100%" stopColor="#DC2626" stopOpacity={0.9} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 5" stroke="#E5E7EB" strokeOpacity={0.8} vertical={false} />
-                <XAxis dataKey="label"
-                  tick={{ fontSize: 10, fill: '#9CA3AF', fontWeight: 500 }}
-                  axisLine={false} tickLine={false} dy={6} />
-                <YAxis
-                  tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                  axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip content={<BarTooltip />}
-                  cursor={{ fill: '#F1F5F9', fillOpacity: 0.7, radius: 6 }} />
-                <Bar dataKey="total" name="Total" fill="url(#amzTotalGrad)" radius={[5,5,0,0]} maxBarSize={30} />
-                <Bar dataKey="delivered" name="Delivered" fill="url(#amzDelivGrad)" radius={[5,5,0,0]} maxBarSize={30} />
-                <Bar dataKey="cancelled" name="Cancelled" fill="url(#amzCancGrad)" radius={[5,5,0,0]} maxBarSize={30} />
-              </BarChart>
-            </ResponsiveContainer>
+          {/* Chart */}
+          <div className="px-3 pb-2">
+            {orderChartType === 'area' ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={chartData} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="ocTotalFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.18} />
+                      <stop offset="85%" stopColor="#3B82F6" stopOpacity={0.03} />
+                      <stop offset="100%" stopColor="#3B82F6" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="ocDelivFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#22C55E" stopOpacity={0.18} />
+                      <stop offset="85%" stopColor="#22C55E" stopOpacity={0.03} />
+                      <stop offset="100%" stopColor="#22C55E" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="ocCancFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#EF4444" stopOpacity={0.15} />
+                      <stop offset="85%" stopColor="#EF4444" stopOpacity={0.02} />
+                      <stop offset="100%" stopColor="#EF4444" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="4 4" stroke="#E5E7EB" strokeOpacity={0.7} vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} dy={6} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip content={<BarTooltip />} cursor={{ stroke: '#E5E7EB', strokeWidth: 1 }} />
+                  <Area type="monotone" dataKey="total" name="Total"
+                    stroke="#3B82F6" strokeWidth={2} fill="url(#ocTotalFill)" dot={false}
+                    activeDot={{ r: 4, strokeWidth: 2, stroke: '#3B82F6', fill: '#fff' }} />
+                  <Area type="monotone" dataKey="delivered" name="Delivered"
+                    stroke="#22C55E" strokeWidth={2} fill="url(#ocDelivFill)" dot={false}
+                    activeDot={{ r: 4, strokeWidth: 2, stroke: '#22C55E', fill: '#fff' }} />
+                  <Area type="monotone" dataKey="cancelled" name="Cancelled"
+                    stroke="#EF4444" strokeWidth={2} fill="url(#ocCancFill)" dot={false}
+                    activeDot={{ r: 4, strokeWidth: 2, stroke: '#EF4444', fill: '#fff' }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={chartData} barGap={3} barCategoryGap="38%" margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="ocTotalBar" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#60A5FA" />
+                      <stop offset="100%" stopColor="#2563EB" stopOpacity={0.9} />
+                    </linearGradient>
+                    <linearGradient id="ocDelivBar" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#4ADE80" />
+                      <stop offset="100%" stopColor="#16A34A" stopOpacity={0.9} />
+                    </linearGradient>
+                    <linearGradient id="ocCancBar" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#F87171" />
+                      <stop offset="100%" stopColor="#DC2626" stopOpacity={0.9} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="4 4" stroke="#E5E7EB" strokeOpacity={0.7} vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} dy={6} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip content={<BarTooltip />} cursor={{ fill: '#F1F5F9', fillOpacity: 0.7, radius: 4 }} />
+                  <Bar dataKey="total" name="Total" fill="url(#ocTotalBar)" radius={[5,5,0,0]} maxBarSize={30} />
+                  <Bar dataKey="delivered" name="Delivered" fill="url(#ocDelivBar)" radius={[5,5,0,0]} maxBarSize={30} />
+                  <Bar dataKey="cancelled" name="Cancelled" fill="url(#ocCancBar)" radius={[5,5,0,0]} maxBarSize={30} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Legend */}
+          <div className="flex items-center justify-center gap-5 pb-4 pt-1">
+            {[
+              { color: '#3B82F6', label: 'Total' },
+              { color: '#22C55E', label: 'Delivered' },
+              { color: '#EF4444', label: 'Cancelled' },
+            ].map(l => (
+              <div key={l.label} className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: l.color }} />
+                <span className="text-[11px] font-medium text-[#565959] dark:text-muted-foreground">{l.label}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
