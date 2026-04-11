@@ -5,7 +5,7 @@ import { format, isToday, isYesterday, startOfWeek, startOfMonth, isAfter, parse
 import { cn } from '@/lib/utils';
 import {
   Package, Clock, CheckCircle, XCircle, Truck, PackageCheck,
-  Download, Trash2, CalendarDays, ChevronRight, X,
+  Download, Trash2, CalendarDays, X, MoreHorizontal, FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrderDetailSheet from './OrderDetailSheet';
@@ -152,6 +152,130 @@ function avatarColor(id: string) {
   return AVATAR_COLORS[h];
 }
 
+async function generateInvoice(order: Order) {
+  try {
+    const { jsPDF } = await import('jspdf');
+    const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+    const W = 210; const M = 14; const CW = W - M * 2;
+
+    type RGB = [number, number, number];
+    const C: Record<string, RGB> = {
+      navy:   [22, 50, 120], primary: [37, 99, 235], dark: [15, 17, 17],
+      muted:  [86, 89, 89],  border: [213, 217, 217], bg: [248, 249, 250],
+      white:  [255, 255, 255], green: [0, 118, 0], rowAlt: [248, 250, 252],
+    };
+    const fill  = (c: RGB) => pdf.setFillColor(...c);
+    const stroke= (c: RGB) => pdf.setDrawColor(...c);
+    const color = (c: RGB) => pdf.setTextColor(...c);
+    const bold  = (s: number) => { pdf.setFont('helvetica', 'bold');   pdf.setFontSize(s); };
+    const norm  = (s: number) => { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(s); };
+
+    const orderId = order.merchant_order_id || order.id.slice(0, 8).toUpperCase();
+    const invoiceNo = `INV-${orderId}`;
+    const total  = Number(order.total_price) || Number(order.amount_to_collect) || 0;
+    const qty    = Number(order.quantity) || 1;
+    const unit   = Number(order.unit_price) || total;
+
+    // ── Header band ──────────────────────────────────────────
+    fill(C.navy); pdf.rect(0, 0, W, 35, 'F');
+    fill(C.primary); pdf.rect(0, 0, 5, 35, 'F');
+    fill(C.white); pdf.circle(M + 9, 17.5, 7.5, 'F');
+    color(C.primary); bold(11); pdf.text('CM', M + 9, 21, { align: 'center' });
+    color(C.white); bold(18); pdf.text('Chat Monitor', M + 22, 13);
+    norm(8.5); pdf.text('Order Invoice', M + 22, 21);
+    pdf.setTextColor(180, 200, 255); norm(7.5);
+    pdf.text(`Generated: ${format(new Date(), 'dd MMM yyyy, HH:mm')}`, M + 22, 28);
+
+    // Invoice # + status badge — top-right
+    color(C.white); bold(10); pdf.text(invoiceNo, W - M, 14, { align: 'right' });
+    const statusLabel = (order.status || 'pending').charAt(0).toUpperCase() + order.status.slice(1);
+    const statusColors: Record<string, RGB> = { delivered: C.green, cancelled: [204,12,57], pending: [180,90,0] };
+    const sColor: RGB = statusColors[order.status] ?? C.primary;
+    fill(sColor); pdf.roundedRect(W - M - 28, 18, 28, 8, 2, 2, 'F');
+    color(C.white); bold(7); pdf.text(statusLabel.toUpperCase(), W - M - 14, 23, { align: 'center' });
+
+    let y = 46;
+
+    // ── Two-column: customer + order details ─────────────────
+    const COL1 = M; const COL2 = W / 2 + 4;
+    // Customer Info box
+    fill(C.bg); stroke(C.border); pdf.setLineWidth(0.3);
+    pdf.roundedRect(COL1, y, CW / 2 - 3, 42, 2, 2, 'FD');
+    color(C.muted); norm(7); pdf.text('BILL TO', COL1 + 4, y + 7);
+    color(C.dark); bold(10); pdf.text(order.customer_name || '—', COL1 + 4, y + 15);
+    norm(8.5);
+    if (order.customer_phone)   { color(C.muted); pdf.text('Phone:', COL1 + 4, y + 23); color(C.dark); pdf.text(order.customer_phone, COL1 + 20, y + 23); }
+    if (order.customer_address) { color(C.muted); pdf.text('Addr:',  COL1 + 4, y + 30); color(C.dark); const addr = pdf.splitTextToSize(order.customer_address, 48); pdf.text(addr[0] || '', COL1 + 18, y + 30); }
+    // Order Info box
+    fill(C.bg); stroke(C.border);
+    pdf.roundedRect(COL2, y, CW / 2 - 3, 42, 2, 2, 'FD');
+    color(C.muted); norm(7); pdf.text('ORDER INFO', COL2 + 4, y + 7);
+    const infoRows = [
+      ['Order ID', orderId], ['Date', format(parseISO(order.created_at), 'dd MMM yyyy')],
+      ['Payment', order.payment_status || 'N/A'], ['Invoice', invoiceNo],
+    ];
+    infoRows.forEach((r, i) => {
+      const iy = y + 15 + i * 7;
+      color(C.muted); norm(8); pdf.text(r[0] + ':', COL2 + 4, iy);
+      color(C.dark); bold(8); pdf.text(r[1], COL2 + 4 + 26, iy);
+    });
+    y += 50;
+
+    // ── Line items table ──────────────────────────────────────
+    color(C.dark); bold(11); pdf.text('Items', M, y);
+    fill(C.primary); pdf.rect(M, y + 2, 16, 0.8, 'F');
+    y += 8;
+    const COLS = [90, 25, 30, 37];
+    const HEADS = ['DESCRIPTION', 'QTY', 'UNIT PRICE', 'TOTAL'];
+    fill(C.navy); pdf.rect(M, y, CW, 8, 'F');
+    color(C.white); bold(7.5); let cx = M + 3;
+    HEADS.forEach((h, i) => { pdf.text(h, cx, y + 5.5); cx += COLS[i]; });
+    y += 8;
+
+    fill(C.rowAlt); pdf.rect(M, y, CW, 10, 'F');
+    stroke(C.border); pdf.setLineWidth(0.15); pdf.line(M, y + 10, M + CW, y + 10);
+    cx = M + 3;
+    color(C.dark); bold(9); pdf.text(order.product_name || 'Product', cx, y + 6.5); cx += COLS[0];
+    norm(9); pdf.text(qty.toString(), cx, y + 6.5); cx += COLS[1];
+    pdf.text(`Tk. ${unit.toLocaleString()}`, cx, y + 6.5); cx += COLS[2];
+    bold(9); color(C.primary); pdf.text(`Tk. ${total.toLocaleString()}`, cx, y + 6.5);
+    if (order.sku) { color(C.muted); norm(7); pdf.text(`SKU: ${order.sku}`, M + 3, y + 9); }
+    y += 18;
+
+    // ── Totals block ──────────────────────────────────────────
+    const TX = W - M - 70;
+    fill(C.bg); stroke(C.border); pdf.roundedRect(TX, y, 70, 36, 2, 2, 'FD');
+    color(C.muted); norm(8); pdf.text('Subtotal', TX + 4, y + 9); color(C.dark); pdf.text(`Tk. ${total.toLocaleString()}`, TX + 70 - 4, y + 9, { align: 'right' });
+    stroke(C.border); pdf.line(TX + 4, y + 13, TX + 66, y + 13);
+    if (order.amount_to_collect && order.amount_to_collect !== total) {
+      color(C.muted); norm(8); pdf.text('To Collect', TX + 4, y + 19); color(C.dark); pdf.text(`Tk. ${Number(order.amount_to_collect).toLocaleString()}`, TX + 70 - 4, y + 19, { align: 'right' });
+      stroke(C.border); pdf.line(TX + 4, y + 23, TX + 66, y + 23);
+      fill(C.primary); pdf.roundedRect(TX + 2, y + 26, 66, 8, 1.5, 1.5, 'F');
+      color(C.white); bold(9); pdf.text('GRAND TOTAL', TX + 6, y + 31);
+      pdf.text(`Tk. ${total.toLocaleString()}`, TX + 68, y + 31, { align: 'right' });
+    } else {
+      fill(C.primary); pdf.roundedRect(TX + 2, y + 17, 66, 8, 1.5, 1.5, 'F');
+      color(C.white); bold(9); pdf.text('GRAND TOTAL', TX + 6, y + 22);
+      pdf.text(`Tk. ${total.toLocaleString()}`, TX + 68, y + 22, { align: 'right' });
+    }
+    y += 44;
+
+    // ── Footer ─────────────────────────────────────────────────
+    const PH = 297;
+    fill(C.bg); pdf.rect(0, PH - 14, W, 14, 'F');
+    stroke(C.border); pdf.setLineWidth(0.3); pdf.line(M, PH - 14, W - M, PH - 14);
+    color(C.muted); norm(7);
+    pdf.text('Chat Monitor  ·  Invoice  ·  Thank you for your business!', M, PH - 6);
+    pdf.text(invoiceNo, W - M, PH - 6, { align: 'right' });
+
+    pdf.save(`invoice-${orderId}-${format(new Date(), 'ddMMyyyy')}.pdf`);
+    toast.success('Invoice downloaded');
+  } catch (e) {
+    console.error(e);
+    toast.error('Failed to generate invoice');
+  }
+}
+
 const OrdersPanel = () => {
   const queryClient = useQueryClient();
   const { data: localOrders = [] } = useLocalOrders();
@@ -166,7 +290,9 @@ const OrdersPanel = () => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -177,6 +303,17 @@ const OrdersPanel = () => {
     if (showDatePicker) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showDatePicker]);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openMenuId]);
 
   const deleteMutation = useMutation({
     mutationFn: async ({ id, source }: { id: string; source?: string }) => {
@@ -520,22 +657,57 @@ const OrdersPanel = () => {
                       </span>
                     </td>
 
-                    {/* Actions */}
-                    <td className="px-3 py-3.5 text-right">
-                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    {/* Actions — 3-dot kebab menu */}
+                    <td className="px-3 py-3.5 text-right" onClick={e => e.stopPropagation()}>
+                      <div className="relative flex items-center justify-end">
                         <button
                           onClick={e => {
                             e.stopPropagation();
-                            if (window.confirm('Delete this order?')) {
-                              deleteMutation.mutate({ id: order.id, source: order._source });
-                            }
+                            setOpenMenuId(openMenuId === order.id ? null : order.id);
                           }}
-                          disabled={deleteMutation.isPending}
-                          className="p-1.5 rounded text-[#767676] dark:text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-20"
+                          className={cn(
+                            'p-1.5 rounded-md transition-colors',
+                            openMenuId === order.id
+                              ? 'bg-[#F0F4F4] dark:bg-muted/40 text-[#0F1111] dark:text-foreground'
+                              : 'opacity-0 group-hover:opacity-100 text-[#565959] dark:text-muted-foreground hover:bg-[#F0F4F4] dark:hover:bg-muted/40 hover:text-[#0F1111] dark:hover:text-foreground'
+                          )}
                         >
-                          <Trash2 size={12} />
+                          <MoreHorizontal size={15} />
                         </button>
-                        <ChevronRight size={12} className="text-[#007185] dark:text-primary" />
+
+                        {openMenuId === order.id && (
+                          <div
+                            ref={menuRef}
+                            className="absolute top-full right-0 mt-1 z-50 bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl shadow-xl py-1 min-w-[168px]"
+                          >
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                setOpenMenuId(null);
+                                generateInvoice(order);
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] text-[#0F1111] dark:text-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/40 transition-colors"
+                            >
+                              <FileText size={13} className="text-[#007185] dark:text-blue-400 flex-shrink-0" />
+                              <span>Generate Invoice</span>
+                            </button>
+                            <div className="mx-3 my-1 border-t border-[#EAEDED] dark:border-border/40" />
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                setOpenMenuId(null);
+                                if (window.confirm('Delete this order? This cannot be undone.')) {
+                                  deleteMutation.mutate({ id: order.id, source: order._source });
+                                }
+                              }}
+                              disabled={deleteMutation.isPending}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-40"
+                            >
+                              <Trash2 size={13} className="flex-shrink-0" />
+                              <span>Delete Order</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </td>
                   </tr>
