@@ -30,6 +30,11 @@ function parseSegments(text: string): Segment[] {
   // Plain blob: URLs = optimistic voice recordings (legacy / stopAndSendVoice)
   if (trimmed.startsWith('blob:')) return [{ type: 'audio', url: trimmed }];
 
+  // Base64 data URLs (persisted media from file uploads)
+  if (trimmed.startsWith('data:image/')) return [{ type: 'image', url: trimmed }];
+  if (trimmed.startsWith('data:video/')) return [{ type: 'video', url: trimmed }];
+  if (trimmed.startsWith('data:audio/')) return [{ type: 'audio', url: trimmed }];
+
   // Meta placeholder strings
   if (/^\[voice message\]$/i.test(trimmed)) return [{ type: 'voice-placeholder' }];
   if (/^\[image\]$/i.test(trimmed))         return [{ type: 'image-placeholder' }];

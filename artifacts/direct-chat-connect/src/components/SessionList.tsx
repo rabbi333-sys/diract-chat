@@ -365,7 +365,14 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
 
         {/* Sub row — last message preview */}
         <p className="text-[11px] text-muted-foreground/60 truncate mt-0.5 leading-snug max-w-[200px]">
-          {session.last_message_text || (recipientName ? session.recipient : 'No messages yet')}
+          {(() => {
+            const t = session.last_message_text || '';
+            if (t.startsWith('data:image/') || t === '[image]') return '📷 Photo';
+            if (t.startsWith('data:video/') || t === '[video]') return '🎥 Video';
+            if (t.startsWith('data:audio/') || t === '[voice message]' || t === '[audio]') return '🎤 Voice message';
+            if (t) return t;
+            return recipientName ? session.recipient : 'No messages yet';
+          })()}
         </p>
       </div>
 

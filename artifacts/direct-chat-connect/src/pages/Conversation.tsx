@@ -88,6 +88,15 @@ async function fbUploadFile(conn: PlatformConnection, file: File, mediaType: 'im
   return data.attachment_id as string;
 }
 
+function fileToDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
 // ─── Pending message tracker (for optimistic revert) ─────────────────────────
 let _msgCounter = Date.now();
 const nextId = () => ++_msgCounter;
@@ -312,12 +321,11 @@ const Conversation = () => {
     setUploadingId(id);
 
     try {
-      // Fire DB write immediately (parallel with upload — no await)
-      const mediaLabel = isImage ? '[image]' : isVideo ? '[video]' : '[audio]';
+      const dataUrl = await fileToDataUrl(file);
       insertMessageToExternalDb(getStoredConnection(), {
         session_id: sessionId || '',
         sender: 'Agent',
-        message_text: mediaLabel,
+        message_text: dataUrl,
         timestamp: new Date().toISOString(),
         recipient,
       });
@@ -388,11 +396,11 @@ const Conversation = () => {
 
     (async () => {
       try {
-        // Fire DB write immediately (parallel with upload — no await)
+        const audioDataUrl = await fileToDataUrl(blob);
         insertMessageToExternalDb(getStoredConnection(), {
           session_id: sessionId || '',
           sender: 'Agent',
-          message_text: '[voice message]',
+          message_text: audioDataUrl,
           timestamp: new Date().toISOString(),
           recipient,
         });
