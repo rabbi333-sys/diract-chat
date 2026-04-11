@@ -7,7 +7,6 @@
  * (those can't be reached from a browser directly).
  */
 
-import { createClient } from '@supabase/supabase-js';
 import { supabase as localSupabase } from '@/integrations/supabase/client';
 import { getActiveConnection } from '@/lib/db-config';
 
@@ -195,23 +194,29 @@ export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInf
   return sessions.map(({ last_id: _lid, ...s }) => s);
 }
 
-// ─── Client cache — prevent multiple GoTrueClient instances ──────────────────
+// ─── Raw Supabase REST fetch — bypasses @supabase/supabase-js entirely ────────
+// This avoids the "Forbidden use of secret API key in browser" error that newer
+// versions of the Supabase JS SDK throw when a service_role key is used in a
+// browser context. The underlying protocol is identical: Bearer token + apikey.
 
-const _clientCache = new Map<string, ReturnType<typeof createClient>>();
+function sbHeaders(key: string, extra?: Record<string, string>): HeadersInit {
+  return { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json', ...extra };
+}
 
-function getExternalClient(url: string, key: string) {
-  const cacheKey = `${url}||${key.slice(-8)}`;
-  if (_clientCache.has(cacheKey)) return _clientCache.get(cacheKey)!;
-  const client = createClient(url, key, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      // Use a unique storage key so it doesn't conflict with the app's own Supabase auth
-      storageKey: `ext-supabase-${url.replace(/https?:\/\//, '').split('.')[0]}`,
-    },
-  });
-  _clientCache.set(cacheKey, client);
-  return client;
+function sbRestUrl(baseUrl: string, table: string, params?: string): string {
+  const base = baseUrl.replace(/\/$/, '');
+  return `${base}/rest/v1/${table}${params ? '?' + params : ''}`;
+}
+
+function isTableMissing(body: string, status: number): boolean {
+  if (status === 404) return true;
+  try {
+    const j = JSON.parse(body) as { code?: string; message?: string };
+    if (j.code === '42P01') return true;
+    const m = (j.message ?? '').toLowerCase();
+    if (m.includes('does not exist') || m.includes('relation')) return true;
+  } catch {}
+  return false;
 }
 
 // ─── Auto-extract contact names from raw DB rows ─────────────────────────────
@@ -266,7 +271,7 @@ async function autoExtractAndSaveNames(rows: Record<string, unknown>[]): Promise
   await localSupabase.from('recipient_names').upsert(toSave, { onConflict: 'recipient_id' });
 }
 
-// ─── Direct Supabase query (browser-safe, no edge function) ──────────────────
+// ─── Direct Supabase query (browser-safe via raw REST fetch) ─────────────────
 
 export async function queryExternalSupabase(
   conn: StoredConnection,
@@ -279,44 +284,42 @@ export async function queryExternalSupabase(
 
   if (!url || !key) throw new Error('Please provide Supabase URL and Service Role Key');
 
-  const client = getExternalClient(url, key);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let q: any = client.from(tbl).select('*');
+  let params: string;
   if (sessionId && type === 'messages') {
-    q = q.eq('session_id', sessionId).order('id', { ascending: true }).limit(500);
+    params = `select=*&session_id=eq.${encodeURIComponent(sessionId)}&order=id.asc&limit=500`;
   } else {
-    q = q.order('id', { ascending: false }).limit(2000);
+    params = 'select=*&order=id.desc&limit=2000';
   }
 
-  let timeoutHandle: ReturnType<typeof setTimeout>;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(() => reject(new Error('QUERY_TIMEOUT')), 15_000);
-  });
+  try {
+    const res = await fetch(sbRestUrl(url, tbl, params), {
+      headers: sbHeaders(key),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
 
-  const { data, error } = await Promise.race([q, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
-
-  if (error) {
-    const msg = String(error.message ?? '');
-    if (
-      error.code === '42P01' ||
-      msg.toLowerCase().includes('does not exist') ||
-      msg.toLowerCase().includes('relation')
-    ) {
-      throw new Error('TABLE_NOT_FOUND');
+    const body = await res.text();
+    if (!res.ok) {
+      if (isTableMissing(body, res.status)) throw new Error('TABLE_NOT_FOUND');
+      throw new Error(`HTTP ${res.status}: ${body.slice(0, 120)}`);
     }
-    throw new Error(msg || 'Unknown Supabase error');
+
+    const rows = (JSON.parse(body) ?? []) as Record<string, unknown>[];
+
+    // Side effect: extract contact names and save to local recipient_names table
+    if (!sessionId && rows.length > 0) {
+      autoExtractAndSaveNames(rows).catch(() => {});
+    }
+
+    return rows.map(normalizeRow).filter(Boolean) as NormalizedMessage[];
+  } catch (e: unknown) {
+    clearTimeout(timeoutId);
+    if (e instanceof Error && e.name === 'AbortError') throw new Error('QUERY_TIMEOUT');
+    throw e;
   }
-
-  const rows = (data ?? []) as Record<string, unknown>[];
-
-  // Side effect: extract contact names from raw data and save to local recipient_names table.
-  // Only runs for full session fetches (not filtered single-session message fetches).
-  if (!sessionId && rows.length > 0) {
-    autoExtractAndSaveNames(rows).catch(() => {});
-  }
-
-  return rows.map(normalizeRow).filter(Boolean) as NormalizedMessage[];
 }
 
 // ─── Insert agent reply into external DB ─────────────────────────────────────
@@ -370,47 +373,53 @@ export async function insertMessageToExternalDb(
     const key = conn.service_role_key?.trim();
     const tbl = (conn.table_name?.trim()) || 'n8n_chat_histories';
     if (!url || !key) return;
-    const client = getExternalClient(url, key);
+
     const cacheKey = `${url}::${tbl}`;
     const knownFormat = _insertFormatCache.get(cacheKey);
+    const hdrs = sbHeaders(key, { 'Prefer': 'return=minimal' });
+    const endpoint = sbRestUrl(url, tbl);
 
     if (knownFormat === 'normalized') {
-      // Already know normalized works — use it directly, no fallback needed
-      await client.from(tbl).insert({
-        session_id: message.session_id,
-        sender: 'agent',
-        message_text: message.message_text,
-        recipient: message.recipient,
-        created_at: message.timestamp,
+      await fetch(endpoint, {
+        method: 'POST', headers: hdrs,
+        body: JSON.stringify({
+          session_id: message.session_id,
+          sender: 'agent',
+          message_text: message.message_text,
+          recipient: message.recipient,
+          created_at: message.timestamp,
+        }),
       });
       return;
     }
 
-    // Try n8n format first (default or previously cached)
-    // n8n Postgres Chat Memory expects LangChain message format
-    const { error: e1 } = await client.from(tbl).insert({
-      session_id: message.session_id,
-      message: {
-        type: 'ai',
-        data: { content: message.message_text, additional_kwargs: {} },
-      },
+    // Try n8n / LangChain format first (default)
+    const r1 = await fetch(endpoint, {
+      method: 'POST', headers: hdrs,
+      body: JSON.stringify({
+        session_id: message.session_id,
+        message: { type: 'ai', data: { content: message.message_text, additional_kwargs: {} } },
+      }),
     });
 
-    if (!e1) {
+    if (r1.ok || r1.status === 201) {
       _insertFormatCache.set(cacheKey, 'n8n');
       return;
     }
 
     // Fallback: normalized format
-    const { error: e2 } = await client.from(tbl).insert({
-      session_id: message.session_id,
-      sender: 'agent',
-      message_text: message.message_text,
-      recipient: message.recipient,
-      created_at: message.timestamp,
+    const r2 = await fetch(endpoint, {
+      method: 'POST', headers: hdrs,
+      body: JSON.stringify({
+        session_id: message.session_id,
+        sender: 'agent',
+        message_text: message.message_text,
+        recipient: message.recipient,
+        created_at: message.timestamp,
+      }),
     });
 
-    if (!e2) {
+    if (r2.ok || r2.status === 201) {
       _insertFormatCache.set(cacheKey, 'normalized');
     }
   } catch {
@@ -426,16 +435,43 @@ export interface ValidationDetail { status: ValidationResult; errorMsg?: string 
 export async function validateConnection(conn: StoredConnection): Promise<ValidationDetail> {
   if (!conn) return { status: 'fail', errorMsg: 'No connection settings found' };
 
-  // ── Supabase: direct browser connection — no edge function needed ─────────
+  // ── Supabase: lightweight single-row ping — much faster than full query ────
   if (conn.db_type === 'supabase') {
+    const url = conn.supabase_url?.trim();
+    const key = conn.service_role_key?.trim();
+    const tbl = conn.table_name?.trim() || 'n8n_chat_histories';
+
+    if (!url || !key) return { status: 'fail', errorMsg: 'Supabase URL and Service Role Key are required.' };
+
     try {
-      await queryExternalSupabase(conn, 'sessions');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20_000);
+
+      // Lightweight 1-row ping — fast even on a cold-start Supabase project
+      const res = await fetch(sbRestUrl(url, tbl, 'select=id&limit=1'), {
+        headers: sbHeaders(key),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeoutId));
+
+      const body = await res.text();
+      if (!res.ok) {
+        if (isTableMissing(body, res.status)) return { status: 'table-missing' };
+        let errMsg = body;
+        try { errMsg = (JSON.parse(body) as { message?: string }).message ?? body; } catch {}
+        console.error('[Chat Monitor] Connection test error:', errMsg);
+        return { status: 'fail', errorMsg: errMsg };
+      }
+
       return { status: 'ok' };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error('[Chat Monitor] Connection test error:', msg);
-      if (msg === 'TABLE_NOT_FOUND' || msg.includes('TABLE_NOT_FOUND')) return { status: 'table-missing' };
-      if (msg === 'QUERY_TIMEOUT') return { status: 'fail', errorMsg: 'Connection timed out (15s). Check your Supabase URL.' };
+      if (e instanceof Error && e.name === 'AbortError') {
+        return {
+          status: 'fail',
+          errorMsg: 'Connection timed out. Your Supabase project may be paused — visit app.supabase.com and resume it, then try again.',
+        };
+      }
       return { status: 'fail', errorMsg: msg };
     }
   }

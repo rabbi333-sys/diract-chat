@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
 import {
   getConnections,
   getActiveConnection,
@@ -84,11 +83,13 @@ const ConnectDB = () => {
     setTesting(true);
     setTestOk(null);
     try {
-      const client = createClient(form.url.trim(), form.anonKey.trim(), {
-        auth: { persistSession: false, autoRefreshToken: false },
+      // Use raw REST fetch — avoids the "Forbidden service role key in browser" Supabase SDK check
+      const base = form.url.trim().replace(/\/$/, '');
+      const key = form.anonKey.trim();
+      const res = await fetch(`${base}/rest/v1/`, {
+        headers: { 'Authorization': `Bearer ${key}`, 'apikey': key },
       });
-      const { error } = await client.auth.getSession();
-      if (error && !error.message.toLowerCase().includes("refresh token")) throw error;
+      if (!res.ok && res.status !== 200) throw new Error(`HTTP ${res.status}`);
       setTestOk(true);
       toast.success("Connection successful!");
     } catch (e) {

@@ -149,6 +149,7 @@ export const SupabaseSettings = () => {
   );
   const [showPassword, setShowPassword] = useState(false);
   const [validation, setValidation] = useState<ValidationState>('idle');
+  const [validationMsg, setValidationMsg] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
   const set = <K extends keyof StoredConnection>(k: K, v: StoredConnection[K]) => {
@@ -182,6 +183,7 @@ export const SupabaseSettings = () => {
   const handleSave = async () => {
     setSaving(true);
     setValidation('idle');
+    setValidationMsg('');
     try {
       saveToStorage(form);
       syncToMeta(form);
@@ -191,6 +193,7 @@ export const SupabaseSettings = () => {
       setValidation('loading');
       const { status, errorMsg } = await doValidate();
       setValidation(status);
+      setValidationMsg(errorMsg ?? '');
       if (status === 'ok') toast.success('Table found — check the Messages tab for data.');
       else if (status === 'table-missing') toast.error('Table name not found. Please check the name.');
       else toast.error(errorMsg ? `Connection failed: ${errorMsg}` : 'Connection failed — please check your credentials.');
@@ -201,8 +204,10 @@ export const SupabaseSettings = () => {
 
   const handleTest = async () => {
     setValidation('loading');
+    setValidationMsg('');
     const { status, errorMsg } = await doValidate();
     setValidation(status);
+    setValidationMsg(errorMsg ?? '');
     if (status === 'ok') toast.success('Connection successful!');
     else if (status === 'table-missing') toast.error('Table not found — check the table name.');
     else toast.error(errorMsg ? `Connection failed: ${errorMsg}` : 'Connection failed — please check your credentials.');
@@ -453,8 +458,16 @@ export const SupabaseSettings = () => {
         </div>
       )}
       {validation === 'fail' && (
-        <div className="flex items-center gap-2 text-xs text-destructive">
-          <WifiOff size={14} /> Connection failed — please check your credentials
+        <div className="flex items-start gap-2.5 p-3.5 rounded-xl border border-destructive/40 bg-destructive/10">
+          <WifiOff size={15} className="mt-0.5 flex-shrink-0 text-destructive" />
+          <div className="text-xs">
+            <p className="font-semibold text-destructive">Connection failed</p>
+            {validationMsg ? (
+              <p className="mt-0.5 text-destructive/80">{validationMsg}</p>
+            ) : (
+              <p className="mt-0.5 text-destructive/80">Please check your Supabase URL and Service Role Key.</p>
+            )}
+          </div>
         </div>
       )}
 
