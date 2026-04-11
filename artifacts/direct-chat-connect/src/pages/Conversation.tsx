@@ -218,22 +218,7 @@ const Conversation = () => {
   const dbAgentTexts = new Set(
     (messages || []).filter(m => m.sender === 'Agent').map(m => m.message_text)
   );
-
-  // Count how many DB agent messages are data URLs (persisted media).
-  // For each one, suppress the corresponding local blob-prefixed optimistic message.
-  const dbImageCount = (messages || []).filter(m => m.sender === 'Agent' && m.message_text.startsWith('data:image/')).length;
-  const dbVideoCount = (messages || []).filter(m => m.sender === 'Agent' && m.message_text.startsWith('data:video/')).length;
-  const dbAudioCount = (messages || []).filter(m => m.sender === 'Agent' && (m.message_text.startsWith('data:audio/') || m.message_text.startsWith('data:application/'))).length;
-  let imgSlots = dbImageCount, vidSlots = dbVideoCount, audSlots = dbAudioCount;
-
-  const dedupedLocal = localMessages.filter(m => {
-    if (dbAgentTexts.has(m.message_text)) return false;
-    // Suppress local blob-image when DB already has the persisted data URL version
-    if (m.message_text.startsWith('blob-image:') && imgSlots > 0) { imgSlots--; return false; }
-    if (m.message_text.startsWith('blob-video:') && vidSlots > 0) { vidSlots--; return false; }
-    if ((m.message_text.startsWith('blob-audio:') || m.message_text.startsWith('blob:')) && audSlots > 0) { audSlots--; return false; }
-    return true;
-  });
+  const dedupedLocal = localMessages.filter(m => !dbAgentTexts.has(m.message_text));
 
   const allMessages = [...(messages || []), ...dedupedLocal];
 
@@ -323,7 +308,8 @@ const Conversation = () => {
 
     try {
       const dataUrl = await fileToDataUrl(file);
-      insertMessageToExternalDb(getStoredConnection(), {
+      // Await DB write so the data URL is committed before we refetch
+      await insertMessageToExternalDb(getStoredConnection(), {
         session_id: sessionId || '',
         sender: 'Agent',
         message_text: dataUrl,
@@ -339,8 +325,11 @@ const Conversation = () => {
         await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
       }
       markSent(id);
-      // Keep local blob URL — don't revert so image/video preview stays visible
+      // Refetch DB — the data URL is now persisted
       await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+      // Remove local blob; the DB data URL version now shows in its place
+      revertOptimistic(id);
+      URL.revokeObjectURL(rawUrl);
     } catch (err: unknown) {
       revertOptimistic(id);
       URL.revokeObjectURL(rawUrl);
@@ -398,7 +387,8 @@ const Conversation = () => {
     (async () => {
       try {
         const audioDataUrl = await fileToDataUrl(blob);
-        insertMessageToExternalDb(getStoredConnection(), {
+        // Await DB write so data URL is committed before refetch
+        await insertMessageToExternalDb(getStoredConnection(), {
           session_id: sessionId || '',
           sender: 'Agent',
           message_text: audioDataUrl,
@@ -411,8 +401,10 @@ const Conversation = () => {
           const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
           await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
           markSent(id);
-          // Keep local blob URL — don't revert so the audio player stays visible
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+          // Remove local blob; DB data URL now shows in its place
+          revertOptimistic(id);
+          URL.revokeObjectURL(localUrl);
         } else if (fbConn) {
           toast.error('Facebook does not support voice send. Use WhatsApp instead.');
           revertOptimistic(id);
