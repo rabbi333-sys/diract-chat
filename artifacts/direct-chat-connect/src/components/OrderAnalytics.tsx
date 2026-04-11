@@ -727,28 +727,32 @@ const OrderAnalytics = () => {
             const pct = summary.total > 0 ? Math.round((count / summary.total) * 100) : 0;
             const Icon = meta.icon;
             return (
-              <div key={key} className="flex items-center gap-3 px-4 py-3 hover:bg-[#F7F8F8] dark:hover:bg-muted/20 transition-colors">
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: meta.dot + '18' }}>
-                  <Icon size={13} className={meta.color} />
+              <div key={key} className="flex items-center gap-3.5 px-4 py-4 hover:bg-[#F7F8F8] dark:hover:bg-muted/20 transition-colors">
+                <div
+                  className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 border"
+                  style={{ backgroundColor: meta.dot + '1A', borderColor: meta.dot + '40' }}
+                >
+                  <Icon size={15} className={meta.color} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[12px] font-semibold text-[#0F1111] dark:text-foreground">{meta.label}</span>
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[13px] font-semibold text-[#0F1111] dark:text-foreground">{meta.label}</span>
+                    <div className="flex items-center gap-3">
                       {change !== 0 && (
-                        <span className={cn('text-[10px] font-bold',
+                        <span className={cn('text-[11px] font-bold flex items-center gap-0.5',
                           change >= 0 ? 'text-[#007600] dark:text-emerald-400' : 'text-[#CC0C39] dark:text-red-400')}>
-                          {change >= 0 ? '↑' : '↓'}{Math.abs(change)}%
+                          {change >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}{Math.abs(change)}%
                         </span>
                       )}
-                      <span className="text-[12px] font-bold text-[#0F1111] dark:text-foreground w-7 text-right">{count}</span>
-                      <span className="text-[10px] text-[#565959] dark:text-muted-foreground w-7 text-right">{pct}%</span>
+                      <span className="text-[13px] font-bold text-[#0F1111] dark:text-foreground w-6 text-right">{count}</span>
+                      <span className="text-[11px] text-[#565959] dark:text-muted-foreground w-8 text-right">{pct}%</span>
                     </div>
                   </div>
-                  <div className="w-full h-1.5 rounded-full bg-[#EAEDED] dark:bg-muted/40 overflow-hidden">
-                    <div className="h-full rounded-full transition-all duration-700"
-                      style={{ width: pct > 0 ? `${pct}%` : '3px', backgroundColor: meta.dot }} />
+                  <div className="w-full h-2.5 rounded-full bg-[#EAEDED] dark:bg-muted/40 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700"
+                      style={{ width: pct > 0 ? `${pct}%` : '4px', backgroundColor: meta.dot }}
+                    />
                   </div>
                 </div>
               </div>
