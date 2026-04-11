@@ -482,28 +482,11 @@ const Index = () => {
         {/* Orders Page */}
         {activeNav === 'Orders' && canView('Orders') && (
           <main className="flex-1 flex flex-col overflow-hidden">
-            {/* ── Sticky top bar ── */}
-            <div className="flex-shrink-0 border-b border-border/60 bg-background/95 backdrop-blur-sm sticky top-0 z-20 px-4 md:px-6 py-0">
-              <div className="flex items-center justify-between h-14">
-                {/* Page title */}
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center">
-                    {ordersView === 'list'
-                      ? <List size={16} className="text-primary" />
-                      : <BarChart3 size={16} className="text-primary" />}
-                  </div>
-                  <div>
-                    <h1 className="text-[15px] font-bold text-foreground leading-tight">
-                      {ordersView === 'list' ? 'Orders' : 'Analytics'}
-                    </h1>
-                    <p className="text-[10px] text-muted-foreground leading-tight">
-                      {ordersView === 'list' ? 'Manage all your orders' : 'Performance insights'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Tab toggle — desktop only (mobile uses header) */}
-                <div className="hidden md:flex items-center bg-muted/70 rounded-xl p-1 border border-border/60 gap-0.5 shadow-sm">
+            {/* ── Sticky top bar — desktop only (tabs only, no title) ── */}
+            <div className="hidden md:flex flex-shrink-0 border-b border-border/60 bg-background/95 backdrop-blur-sm sticky top-0 z-20 px-4 md:px-6 py-0">
+              <div className="flex items-center justify-end h-14 w-full">
+                {/* Tab toggle — desktop only */}
+                <div className="flex items-center bg-muted/70 rounded-xl p-1 border border-border/60 gap-0.5 shadow-sm">
                   <button
                     onClick={() => setOrdersView('list')}
                     className={cn(

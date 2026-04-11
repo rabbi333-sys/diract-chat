@@ -264,35 +264,56 @@ const OrderAnalytics = () => {
 
       {/* ── Hero KPI row ──────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-primary/15 flex items-center justify-center">
-                <TrendingUp size={14} className="text-primary" />
+        {/* Revenue card */}
+        <div className="relative rounded-2xl overflow-hidden p-4 flex flex-col gap-2 min-h-[110px]"
+          style={{ background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)' }}>
+          {/* Decorative circle */}
+          <div className="absolute -right-4 -top-4 w-24 h-24 rounded-full bg-white/10 pointer-events-none" />
+          <div className="absolute -right-1 bottom-2 w-14 h-14 rounded-full bg-white/5 pointer-events-none" />
+          <div className="flex items-center justify-between relative z-10">
+            <div className="flex items-center gap-1.5">
+              <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
+                <TrendingUp size={13} className="text-white" />
               </div>
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Revenue</span>
+              <span className="text-[10px] font-bold text-white/70 uppercase tracking-widest">Revenue</span>
             </div>
-            <ChangePill value={summary.revenueChange} />
+            <span className={cn(
+              'flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full',
+              summary.revenueChange >= 0 ? 'bg-emerald-400/25 text-emerald-200' : 'bg-red-400/25 text-red-200'
+            )}>
+              {summary.revenueChange >= 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
+              {Math.abs(summary.revenueChange)}%
+            </span>
           </div>
-          <div>
-            <p className="text-2xl font-bold text-primary leading-none">৳{summary.revenue.toLocaleString()}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">Total in period</p>
+          <div className="relative z-10 mt-1">
+            <p className="text-[26px] font-black text-white leading-none tracking-tight">৳{summary.revenue.toLocaleString()}</p>
+            <p className="text-[10px] text-white/55 mt-1.5">Total in period</p>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border/60 bg-card p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-muted/60 flex items-center justify-center">
-                <ShoppingBag size={14} className="text-foreground" />
+        {/* Orders card */}
+        <div className="relative rounded-2xl overflow-hidden p-4 flex flex-col gap-2 min-h-[110px]"
+          style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' }}>
+          <div className="absolute -right-4 -top-4 w-24 h-24 rounded-full bg-white/5 pointer-events-none" />
+          <div className="absolute -right-1 bottom-2 w-14 h-14 rounded-full bg-white/[0.03] pointer-events-none" />
+          <div className="flex items-center justify-between relative z-10">
+            <div className="flex items-center gap-1.5">
+              <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
+                <ShoppingBag size={13} className="text-white" />
               </div>
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Orders</span>
+              <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Orders</span>
             </div>
-            <ChangePill value={summary.totalChange} />
+            <span className={cn(
+              'flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full',
+              summary.totalChange >= 0 ? 'bg-emerald-400/20 text-emerald-300' : 'bg-red-400/20 text-red-300'
+            )}>
+              {summary.totalChange >= 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
+              {Math.abs(summary.totalChange)}%
+            </span>
           </div>
-          <div>
-            <p className="text-2xl font-bold text-foreground leading-none">{summary.total.toLocaleString()}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">Total in period</p>
+          <div className="relative z-10 mt-1">
+            <p className="text-[26px] font-black text-white leading-none tracking-tight">{summary.total.toLocaleString()}</p>
+            <p className="text-[10px] text-white/40 mt-1.5">Total in period</p>
           </div>
         </div>
       </div>
