@@ -375,49 +375,70 @@ const OrderAnalytics = () => {
 
       {/* ── Orders bar chart ──────────────────────────────── */}
       {chartData.length > 0 && (
-        <div className="bg-white dark:bg-card border border-[#D5D9D9] dark:border-border rounded-xl overflow-hidden">
-          <div className="px-4 pt-4 pb-3 border-b border-[#EAEDED] dark:border-border/40 flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <h3 className="text-[13px] font-bold text-[#0F1111] dark:text-foreground">Orders by {viewLabel}</h3>
-              <p className="text-[10.5px] text-[#565959] dark:text-muted-foreground mt-0.5">{summary.total} total orders</p>
+        <div className="rounded-2xl overflow-hidden shadow-sm border border-[#D5D9D9] dark:border-border">
+          {/* Gradient header */}
+          <div className="px-5 pt-5 pb-4"
+            style={{ background: 'linear-gradient(135deg, #0c1a2e 0%, #0d2b45 60%, #103556 100%)' }}>
+            <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                    style={{ background: 'rgba(0,161,229,0.25)' }}>
+                    <BarChartIcon size={13} className="text-[#00A1E5]" />
+                  </div>
+                  <h3 className="text-[14px] font-bold text-white">Orders by {viewLabel}</h3>
+                </div>
+                <p className="text-[10.5px] text-white/45 mt-1 ml-9">{summary.total} total orders in this period</p>
+              </div>
+              <ChangePill value={summary.totalChange} />
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
+
+            {/* Stat trio */}
+            <div className="grid grid-cols-3 gap-2">
               {[
-                { color: '#007185', label: 'Total', value: summary.total },
-                { color: '#007600', label: 'Delivered', value: summary.statuses.delivered.count },
-                { color: '#CC0C39', label: 'Cancelled', value: summary.statuses.cancelled.count },
-              ].map(c => (
-                <div key={c.label} className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#0F1111] dark:text-foreground">
-                  <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: c.color }} />
-                  {c.label} <span className="font-bold">{c.value}</span>
+                { label: 'Total', value: summary.total, color: '#00A1E5', bg: 'rgba(0,161,229,0.12)', border: 'rgba(0,161,229,0.25)' },
+                { label: 'Delivered', value: summary.statuses.delivered.count, color: '#22C55E', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.25)' },
+                { label: 'Cancelled', value: summary.statuses.cancelled.count, color: '#F87171', bg: 'rgba(248,113,113,0.12)', border: 'rgba(248,113,113,0.25)' },
+              ].map(s => (
+                <div key={s.label} className="rounded-xl px-3 py-2.5 flex flex-col gap-0.5"
+                  style={{ background: s.bg, border: `1px solid ${s.border}` }}>
+                  <span className="text-[20px] font-black leading-none" style={{ color: s.color }}>{s.value}</span>
+                  <span className="text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: s.color + 'AA' }}>{s.label}</span>
                 </div>
               ))}
             </div>
           </div>
-          <div className="px-2 py-4">
-            <ResponsiveContainer width="100%" height={210}>
-              <BarChart data={chartData} barGap={2} barCategoryGap="35%" margin={{ top: 4, right: 12, left: -18, bottom: 0 }}>
+
+          {/* Chart body — white bg */}
+          <div className="bg-white dark:bg-card px-3 pt-4 pb-3">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={chartData} barGap={3} barCategoryGap="38%" margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="amzTotalGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#00A8E1" />
-                    <stop offset="100%" stopColor="#007185" stopOpacity={0.9} />
+                    <stop offset="0%" stopColor="#38BDF8" />
+                    <stop offset="100%" stopColor="#0284C7" stopOpacity={0.9} />
                   </linearGradient>
                   <linearGradient id="amzDelivGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3CBA6B" />
-                    <stop offset="100%" stopColor="#007600" stopOpacity={0.9} />
+                    <stop offset="0%" stopColor="#4ADE80" />
+                    <stop offset="100%" stopColor="#16A34A" stopOpacity={0.9} />
                   </linearGradient>
                   <linearGradient id="amzCancGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#F75D4E" />
-                    <stop offset="100%" stopColor="#CC0C39" stopOpacity={0.9} />
+                    <stop offset="0%" stopColor="#FB923C" />
+                    <stop offset="100%" stopColor="#DC2626" stopOpacity={0.9} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border))" strokeOpacity={0.25} vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#767676' }} axisLine={false} tickLine={false} dy={7} />
-                <YAxis tick={{ fontSize: 10, fill: '#767676' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip content={<BarTooltip />} cursor={{ fill: '#F0F2F2', fillOpacity: 0.6, radius: 4 }} />
-                <Bar dataKey="total" name="Total" fill="url(#amzTotalGrad)" radius={[4,4,0,0]} maxBarSize={32} />
-                <Bar dataKey="delivered" name="Delivered" fill="url(#amzDelivGrad)" radius={[4,4,0,0]} maxBarSize={32} />
-                <Bar dataKey="cancelled" name="Cancelled" fill="url(#amzCancGrad)" radius={[4,4,0,0]} maxBarSize={32} />
+                <CartesianGrid strokeDasharray="3 5" stroke="#E5E7EB" strokeOpacity={0.8} vertical={false} />
+                <XAxis dataKey="label"
+                  tick={{ fontSize: 10, fill: '#9CA3AF', fontWeight: 500 }}
+                  axisLine={false} tickLine={false} dy={6} />
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#9CA3AF' }}
+                  axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip content={<BarTooltip />}
+                  cursor={{ fill: '#F1F5F9', fillOpacity: 0.7, radius: 6 }} />
+                <Bar dataKey="total" name="Total" fill="url(#amzTotalGrad)" radius={[5,5,0,0]} maxBarSize={30} />
+                <Bar dataKey="delivered" name="Delivered" fill="url(#amzDelivGrad)" radius={[5,5,0,0]} maxBarSize={30} />
+                <Bar dataKey="cancelled" name="Cancelled" fill="url(#amzCancGrad)" radius={[5,5,0,0]} maxBarSize={30} />
               </BarChart>
             </ResponsiveContainer>
           </div>
