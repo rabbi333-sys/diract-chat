@@ -134,6 +134,7 @@ const Conversation = () => {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollEndRef = useRef<HTMLDivElement>(null);
+  const hasInitialScrolled = useRef(false);
 
   const queryClient = useQueryClient();
   const [fetchingName, setFetchingName] = useState(false);
@@ -223,7 +224,15 @@ const Conversation = () => {
   const allMessages = [...(messages || []), ...dedupedLocal];
 
   useEffect(() => {
-    scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!scrollEndRef.current) return;
+    if (!hasInitialScrolled.current && allMessages.length > 0) {
+      // First time messages load — jump instantly to bottom, no animation
+      hasInitialScrolled.current = true;
+      scrollEndRef.current.scrollIntoView({ behavior: 'instant' });
+    } else if (hasInitialScrolled.current) {
+      // Subsequent new messages — smooth scroll
+      scrollEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [allMessages.length]);
 
   // ── Optimistic add ──────────────────────────────────────────────────────────
