@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { format, subDays, subMonths, startOfWeek, endOfWeek } from 'date-fns';
+import { format, subDays, subMonths, startOfWeek, endOfWeek, eachDayOfInterval, parseISO } from 'date-fns';
 import {
   getStoredConnection,
   queryExternalSupabase,
@@ -144,6 +144,55 @@ function computeChartData(msgs: NormalizedMessage[], timeRange: 'daily' | 'weekl
     const sessions = new Set(mMsgs.map((m) => m.session_id));
     return { label: MONTH_NAMES[mo], conversations: sessions.size, messages: mMsgs.length };
   });
+}
+
+function computeCustomRangeChartData(msgs: NormalizedMessage[], startDate: string, endDate: string): ChartData[] {
+  try {
+    const start = parseISO(startDate);
+    const end   = parseISO(endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return [];
+    const days = eachDayOfInterval({ start, end });
+    // If range > 60 days, group by week; > 180 days, group by month
+    if (days.length > 180) {
+      const buckets: Record<string, { conversations: Set<string>; messages: number }> = {};
+      for (const d of days) {
+        const key = format(d, 'MMM yyyy');
+        if (!buckets[key]) buckets[key] = { conversations: new Set(), messages: 0 };
+      }
+      for (const m of msgs) {
+        if (m.timestamp === FALLBACK_TS) continue;
+        try {
+          const d = new Date(m.timestamp);
+          if (d < start || d > end) continue;
+          const key = format(d, 'MMM yyyy');
+          if (buckets[key]) { buckets[key].conversations.add(m.session_id); buckets[key].messages++; }
+        } catch { /* skip */ }
+      }
+      return Object.entries(buckets).map(([label, b]) => ({ label, conversations: b.conversations.size, messages: b.messages }));
+    }
+    if (days.length > 60) {
+      const buckets: Record<string, { conversations: Set<string>; messages: number }> = {};
+      for (const d of days) {
+        const key = format(startOfWeek(d), 'MMM d');
+        if (!buckets[key]) buckets[key] = { conversations: new Set(), messages: 0 };
+      }
+      for (const m of msgs) {
+        if (m.timestamp === FALLBACK_TS) continue;
+        try {
+          const d = new Date(m.timestamp);
+          if (d < start || d > end) continue;
+          const key = format(startOfWeek(d), 'MMM d');
+          if (buckets[key]) { buckets[key].conversations.add(m.session_id); buckets[key].messages++; }
+        } catch { /* skip */ }
+      }
+      return Object.entries(buckets).map(([label, b]) => ({ label, conversations: b.conversations.size, messages: b.messages }));
+    }
+    return days.map((d) => {
+      const dateStr = format(d, 'yyyy-MM-dd');
+      const dayMsgs = msgs.filter((m) => m.timestamp !== FALLBACK_TS && (m.timestamp || '').startsWith(dateStr));
+      return { label: format(d, days.length <= 14 ? 'MMM d' : 'MM/dd'), conversations: new Set(dayMsgs.map(m => m.session_id)).size, messages: dayMsgs.length };
+    });
+  } catch { return []; }
 }
 
 // ─── API Server helpers (for non-Supabase databases) ─────────────────────────
@@ -299,21 +348,34 @@ export const useAnalytics = () => {
 };
 
 // ─── useChartData ─────────────────────────────────────────────────────────────
-export const useChartData = (timeRange: 'daily' | 'weekly' | 'monthly') => {
+export const useChartData = (
+  timeRange: 'daily' | 'weekly' | 'monthly' | 'custom',
+  customStart?: string,
+  customEnd?: string,
+) => {
   const dbKey = useDbConnectionKey();
+  const isCustom = timeRange === 'custom';
+  const hasCustomDates = isCustom && !!customStart && !!customEnd;
+
   return useQuery({
-    queryKey: ['chart-data', timeRange, dbKey],
+    queryKey: ['chart-data', timeRange, customStart, customEnd, dbKey],
     staleTime: 60_000,
     retry: 1,
+    enabled: !isCustom || hasCustomDates,
     queryFn: async (): Promise<ChartData[]> => {
+      const effectiveRange = isCustom ? 'daily' : timeRange;
       const { legacy, main } = getActiveConn();
+
+      const compute = (msgs: NormalizedMessage[]) =>
+        isCustom && hasCustomDates
+          ? computeCustomRangeChartData(msgs, customStart!, customEnd!)
+          : computeChartData(msgs, effectiveRange as 'daily' | 'weekly' | 'monthly');
 
       // Non-Supabase via API server — fetch all messages then compute chart
       if (main && shouldUseApiServer(main)) {
         try {
           const creds = buildSessionsCreds(main);
           const { sessions } = await apiPost<{ sessions: { session_id: string; recipient: string; last_message_at: string; message_count: number }[] }>('/api/sessions/list', { creds });
-          // Build chart from session timestamps
           const fakeMsgs = sessions.map((s) => ({
             id: s.session_id,
             session_id: s.session_id,
@@ -322,9 +384,9 @@ export const useChartData = (timeRange: 'daily' | 'weekly' | 'monthly') => {
             timestamp: s.last_message_at,
             recipient: s.recipient,
           }));
-          return computeChartData(fakeMsgs, timeRange);
+          return compute(fakeMsgs);
         } catch {
-          return computeChartData([], timeRange);
+          return compute([]);
         }
       }
 
@@ -333,9 +395,9 @@ export const useChartData = (timeRange: 'daily' | 'weekly' | 'monthly') => {
         try {
           const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
           const msgs = await queryExternalSupabase(fakeConn, 'sessions');
-          return computeChartData(msgs, timeRange);
+          return compute(msgs);
         } catch {
-          return computeChartData([], timeRange);
+          return compute([]);
         }
       }
 
@@ -343,9 +405,9 @@ export const useChartData = (timeRange: 'daily' | 'weekly' | 'monthly') => {
       if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
         try {
           const msgs = await queryExternalSupabase(legacy, 'sessions');
-          return computeChartData(msgs, timeRange);
+          return compute(msgs);
         } catch {
-          return computeChartData([], timeRange);
+          return compute([]);
         }
       }
 
@@ -353,12 +415,14 @@ export const useChartData = (timeRange: 'daily' | 'weekly' | 'monthly') => {
       try {
         const { data, error } = await supabase.functions.invoke('get-chat-history', {
           method: 'POST',
-          body: { type: 'chart_data', time_range: timeRange, connection: legacy ? { ...legacy, is_active: true } : null },
+          body: { type: 'chart_data', time_range: isCustom ? 'daily' : timeRange, connection: legacy ? { ...legacy, is_active: true } : null },
         });
         if (error) throw error;
-        return data as ChartData[];
+        const msgs = (data as ChartData[]) ?? [];
+        if (isCustom) return compute([]);
+        return msgs;
       } catch {
-        return computeChartData([], timeRange);
+        return compute([]);
       }
     },
   });

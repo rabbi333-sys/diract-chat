@@ -1,16 +1,35 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useChartData } from '@/hooks/useChatHistory';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { TrendingUp, Calendar, BarChart3, Activity } from 'lucide-react';
+import { TrendingUp, Calendar, BarChart3, Activity, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
 
-type TimeRange = 'daily' | 'weekly' | 'monthly';
+type TimeRange = 'daily' | 'weekly' | 'monthly' | 'custom';
 
 export const ConversationChart = () => {
-  const [timeRange, setTimeRange] = useState<TimeRange>('daily');
-  const [chartType, setChartType] = useState<'area' | 'bar'>('area');
+  const [timeRange, setTimeRange]     = useState<TimeRange>('daily');
+  const [chartType, setChartType]     = useState<'area' | 'bar'>('area');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd,   setCustomEnd]   = useState('');
+  const [pickerOpen,  setPickerOpen]  = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
 
-  const { data: chartData, isLoading } = useChartData(timeRange);
+  // today as max for both date inputs
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+
+  // close picker when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const { data: chartData, isLoading } = useChartData(timeRange, customStart, customEnd);
 
   const tabs = [
     { key: 'daily'   as TimeRange, label: 'Daily',   icon: Calendar },
@@ -21,6 +40,10 @@ export const ConversationChart = () => {
   const totalConversations = chartData?.reduce((s, d) => s + d.conversations, 0) || 0;
   const totalMessages      = chartData?.reduce((s, d) => s + d.messages,      0) || 0;
   const avgPerDay          = chartData?.length ? Math.round(totalConversations / chartData.length) : 0;
+
+  const customLabel = customStart && customEnd
+    ? `${format(new Date(customStart + 'T00:00:00'), 'MMM d')} – ${format(new Date(customEnd + 'T00:00:00'), 'MMM d, yyyy')}`
+    : 'Custom';
 
   return (
     <div className="rounded-2xl border border-border bg-gradient-to-br from-card via-card to-muted/20 overflow-hidden">
@@ -37,22 +60,96 @@ export const ConversationChart = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-xl">
-            {tabs.map((tab) => (
+          <div className="flex items-center gap-1 flex-wrap">
+            {/* Daily / Weekly / Monthly tabs */}
+            <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-xl">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => { setTimeRange(tab.key); setPickerOpen(false); }}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200",
+                    timeRange === tab.key
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <tab.icon size={14} />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom range button + popover */}
+            <div className="relative" ref={pickerRef}>
               <button
-                key={tab.key}
-                onClick={() => setTimeRange(tab.key)}
+                onClick={() => {
+                  setTimeRange('custom');
+                  setPickerOpen((v) => !v);
+                }}
                 className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200",
-                  timeRange === tab.key
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 border",
+                  timeRange === 'custom'
+                    ? "bg-background text-foreground shadow-sm border-border"
+                    : "bg-muted/50 text-muted-foreground hover:text-foreground border-transparent"
                 )}
               >
-                <tab.icon size={14} />
-                {tab.label}
+                <Calendar size={14} />
+                {timeRange === 'custom' && customStart && customEnd ? customLabel : 'Custom'}
+                <ChevronDown size={12} className={cn("transition-transform", pickerOpen && "rotate-180")} />
               </button>
-            ))}
+
+              {pickerOpen && (
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-card border border-border rounded-xl shadow-xl p-4 w-72">
+                  <p className="text-xs font-semibold text-foreground mb-3">Select date range</p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide mb-1 block">
+                        From
+                      </label>
+                      <input
+                        type="date"
+                        value={customStart}
+                        max={customEnd || todayStr}
+                        onChange={(e) => setCustomStart(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-border bg-muted/30 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide mb-1 block">
+                        To
+                      </label>
+                      <input
+                        type="date"
+                        value={customEnd}
+                        min={customStart}
+                        max={todayStr}
+                        onChange={(e) => setCustomEnd(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-border bg-muted/30 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <button
+                      onClick={() => {
+                        setCustomStart('');
+                        setCustomEnd('');
+                      }}
+                      className="flex-1 px-3 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      disabled={!customStart || !customEnd}
+                      onClick={() => setPickerOpen(false)}
+                      className="flex-1 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -88,7 +185,16 @@ export const ConversationChart = () => {
           </div>
         </div>
 
-        {isLoading ? (
+        {/* Custom range — waiting for dates */}
+        {timeRange === 'custom' && (!customStart || !customEnd) ? (
+          <div className="h-[250px] flex items-center justify-center">
+            <div className="text-center">
+              <Calendar size={40} className="text-muted-foreground/30 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">Select a date range above</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Pick a start and end date to view data</p>
+            </div>
+          </div>
+        ) : isLoading ? (
           <div className="h-[250px] flex items-center justify-center">
             <div className="flex flex-col items-center gap-2">
               <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
