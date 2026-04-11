@@ -34,6 +34,7 @@ const emptyForm = {
   dbType: "supabase" as MainDbType,
   url: "",
   anonKey: "",
+  serviceRoleKey: "",
   host: "",
   port: "",
   dbUsername: "",
@@ -109,6 +110,7 @@ const ConnectDB = () => {
         dbType: 'supabase',
         url: form.url.trim(),
         anonKey: form.anonKey.trim(),
+        ...(form.serviceRoleKey.trim() ? { serviceRoleKey: form.serviceRoleKey.trim() } : {}),
       };
 
       const saved = saveConnection(conn);
@@ -308,6 +310,10 @@ const ConnectDB = () => {
                   <div>
                     <label className={labelCls}>Anon / Public Key <span className="text-red-400">*</span></label>
                     <input value={form.anonKey} onChange={e => setField("anonKey", e.target.value)} placeholder="eyJhbGciOiJIUzI1NiIs..." type="password" className={cn(inputCls, "font-mono placeholder:font-sans")} data-testid="input-anon-key" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Service Role Key <span className="text-muted-foreground/60 font-normal normal-case tracking-normal">(recommended — needed for full data access)</span></label>
+                    <input value={form.serviceRoleKey} onChange={e => setField("serviceRoleKey", e.target.value)} placeholder="eyJhbGciOiJIUzI1NiIs..." type="password" className={cn(inputCls, "font-mono placeholder:font-sans")} data-testid="input-service-role-key" />
                   </div>
                 </div>
               )}

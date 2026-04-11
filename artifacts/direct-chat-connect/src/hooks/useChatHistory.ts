@@ -267,8 +267,8 @@ async function fetchAllMessages(): Promise<NormalizedMessage[]> {
   }
 
   // 2. Supabase via new connection (has serviceRoleKey)
-  if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
-    const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+  if (main && main.dbType === 'supabase' && main.url && (main.serviceRoleKey || main.anonKey)) {
+    const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
     return queryExternalSupabase(fakeConn, 'sessions');
   }
 
@@ -316,9 +316,9 @@ export const useAnalytics = () => {
       }
 
       // Supabase via new connection
-      if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
+      if (main && main.dbType === 'supabase' && main.url && (main.serviceRoleKey || main.anonKey)) {
         try {
-          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
           const msgs = await queryExternalSupabase(fakeConn, 'sessions');
           return computeAnalytics(msgs);
         } catch {
@@ -399,9 +399,9 @@ export const useChartData = (
       }
 
       // Supabase via new connection
-      if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
+      if (main && main.dbType === 'supabase' && main.url && (main.serviceRoleKey || main.anonKey)) {
         try {
-          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
           const msgs = await queryExternalSupabase(fakeConn, 'sessions');
           return compute(msgs);
         } catch {
@@ -448,8 +448,8 @@ export async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
   }
 
   // Supabase via new connection
-  if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
-    const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+  if (main && main.dbType === 'supabase' && main.url && (main.serviceRoleKey || main.anonKey)) {
+    const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
     const msgs = await queryExternalSupabase(fakeConn, 'messages', sessionId);
     return msgs.filter((m) => m.session_id === sessionId) as ChatMessage[];
   }
@@ -554,9 +554,9 @@ export const useSessions = (filterDate?: Date | null) => {
       }
 
       // Supabase via new connection (serviceRoleKey)
-      if (main && main.dbType === 'supabase' && main.url && main.serviceRoleKey) {
+      if (main && main.dbType === 'supabase' && main.url && (main.serviceRoleKey || main.anonKey)) {
         try {
-          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
+          const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
           const msgs = await queryExternalSupabase(fakeConn, 'sessions');
           const filtered = filterDate
             ? msgs.filter((m) => {
