@@ -255,30 +255,49 @@ export function useRealtimeUpdates(
       const conn = active;
       if (!conn) { setMode('none'); setConnected(false); setPaused(false); return; }
 
-      const p = new URLSearchParams({ dbType: conn.dbType });
-      if (conn.connectionString) p.set('connectionString', conn.connectionString);
-      if (conn.host)             p.set('host', conn.host);
-      if (conn.port)             p.set('port', conn.port);
-      if (conn.dbUsername)       p.set('dbUsername', conn.dbUsername);
-      if (conn.dbPassword)       p.set('dbPassword', conn.dbPassword);
-      if (conn.dbName)           p.set('dbName', conn.dbName);
-
-      if (dbType === 'mongodb') {
-        // Watch all 4 collections simultaneously
-        const chatCollection = legacy?.table_name?.trim() || 'n8n_chat_histories';
-        p.set('tables', [chatCollection, 'orders', 'failed_automations', 'handoff_requests'].join(','));
-      } else {
-        // Subscribe to all relevant Redis pub/sub channels
-        p.set('channels', 'chat_new_message,new_order,new_failure,new_handoff');
-      }
-
       let es: EventSource | null = null;
       let rt: ReturnType<typeof setTimeout> | null = null;
       let dead = false;
 
-      const go = () => {
+      const go = async () => {
         if (dead) return;
-        es = new EventSource(`/api/realtime/stream?${p.toString()}`);
+
+        // Step 1: POST credentials to get a short-lived token (never put creds in URL)
+        const initBody: Record<string, string> = { dbType: conn.dbType };
+        if (conn.connectionString) initBody.connectionString = conn.connectionString;
+        if (conn.host)             initBody.host = conn.host;
+        if (conn.port)             initBody.port = conn.port;
+        if (conn.dbUsername)       initBody.dbUsername = conn.dbUsername;
+        if (conn.dbPassword)       initBody.dbPassword = conn.dbPassword;
+        if (conn.dbName)           initBody.dbName = conn.dbName;
+
+        if (dbType === 'mongodb') {
+          const chatCollection = legacy?.table_name?.trim() || 'n8n_chat_histories';
+          initBody.tables = [chatCollection, 'orders', 'failed_automations', 'handoff_requests'].join(',');
+        } else {
+          initBody.channels = 'chat_new_message,new_order,new_failure,new_handoff';
+        }
+
+        let token: string;
+        try {
+          const initRes = await fetch('/api/realtime/init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(initBody),
+          });
+          if (!initRes.ok) { if (!dead) rt = setTimeout(go, 5_000); return; }
+          const data = await initRes.json() as { token?: string };
+          if (!data.token) { if (!dead) rt = setTimeout(go, 5_000); return; }
+          token = data.token;
+        } catch {
+          if (!dead) rt = setTimeout(go, 5_000);
+          return;
+        }
+
+        if (dead) return;
+
+        // Step 2: Connect SSE using the token only — credentials stay server-side
+        es = new EventSource(`/api/realtime/stream?token=${encodeURIComponent(token)}`);
         es.onopen = () => { setConnected(true); setMode('realtime'); setPaused(false); };
         es.addEventListener('message', (e) => {
           try {
@@ -293,7 +312,7 @@ export function useRealtimeUpdates(
         });
       };
 
-      go();
+      void go();
       return () => {
         dead = true;
         setConnected(false); setMode('none'); setPaused(false);

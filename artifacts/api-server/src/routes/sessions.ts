@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import {
   getPgPool,
   getMysqlPool,
@@ -6,6 +7,7 @@ import {
   getRedisClient,
   type SessionsCreds,
 } from "../lib/connection-pool";
+import { logger } from "../lib/logger.js";
 
 export type { SessionsCreds };
 
@@ -152,6 +154,26 @@ function buildSessions(msgs: NormalizedMessage[]): SessionInfo[] {
   return sessions.map(({ last_id: _lid, ...s }) => s);
 }
 
+// ─── Table name safety ────────────────────────────────────────────────────────
+// Only allow alphanumeric characters and underscores, max 64 chars.
+// Returns null if the input fails validation (caller should reject with 400).
+// Returns the safe name if valid, or null if invalid/empty.
+
+function safeName(name: unknown): string | null {
+  if (!name || typeof name !== "string") return null;
+  if (!/^[a-zA-Z0-9_]{1,64}$/.test(name)) return null;
+  return name;
+}
+
+// Validates tableName from creds; returns the safe name or the default "sessions".
+// Throws a descriptive error string if an explicitly provided name is invalid.
+function resolveTableName(tableName: unknown, defaultName = "sessions"): string {
+  if (!tableName) return defaultName;
+  const safe = safeName(tableName);
+  if (!safe) throw new Error("INVALID_TABLE_NAME");
+  return safe;
+}
+
 // ─── Query helpers (use pooled connections) ───────────────────────────────────
 
 async function pgQueryRaw(c: SessionsCreds, sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
@@ -171,7 +193,7 @@ async function mysqlQueryRaw(c: SessionsCreds, sql: string, params: MySqlParam[]
 // ─── Fetch all messages (for session list + analytics) ────────────────────────
 
 async function fetchAllMessages(c: SessionsCreds): Promise<NormalizedMessage[]> {
-  const tbl = c.tableName || "sessions";
+  const tbl = resolveTableName(c.tableName);
 
   if (c.dbType === "postgresql" || c.dbType === "supabase") {
     const rows = await pgQueryRaw(c, `SELECT * FROM ${tbl} ORDER BY id DESC LIMIT 2000`);
@@ -228,7 +250,7 @@ async function fetchAllMessages(c: SessionsCreds): Promise<NormalizedMessage[]> 
 // ─── Fetch messages for one session (newest-first, paginated) ────────────────
 
 async function fetchSessionMessages(c: SessionsCreds, sessionId: string, limit = 30, offset = 0): Promise<NormalizedMessage[]> {
-  const tbl = c.tableName || "sessions";
+  const tbl = resolveTableName(c.tableName);
 
   if (c.dbType === "postgresql" || c.dbType === "supabase") {
     const rows = await pgQueryRaw(
@@ -282,7 +304,7 @@ async function fetchSessionMessages(c: SessionsCreds, sessionId: string, limit =
 // ─── Fetch session summaries efficiently (last message per session only) ─────
 
 async function fetchSessionSummaries(c: SessionsCreds): Promise<SessionInfo[]> {
-  const tbl = c.tableName || "sessions";
+  const tbl = resolveTableName(c.tableName);
 
   if (c.dbType === "postgresql" || c.dbType === "supabase") {
     try {
@@ -414,6 +436,24 @@ async function fetchSessionSummaries(c: SessionsCreds): Promise<SessionInfo[]> {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
+// ─── Route error helper ───────────────────────────────────────────────────────
+// Logs the real error with a request ID and returns a generic message to the client.
+
+function handleRouteError(res: Response, err: unknown, routeName: string): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg === "INVALID_TABLE_NAME") {
+    res.status(400).json({ error: "Invalid table name: only letters, numbers, and underscores are allowed (max 64 chars)" });
+    return;
+  }
+  if (msg.includes("does not exist") || msg.includes("42P01") || msg.toLowerCase().includes("no collection")) {
+    res.status(404).json({ error: "TABLE_NOT_FOUND" });
+    return;
+  }
+  const reqId = randomUUID();
+  logger.error({ err, reqId, route: routeName }, "Internal query error");
+  res.status(500).json({ error: "Internal query error", reqId });
+}
+
 // POST /api/sessions/summaries — last message per session only (fast, no 2000-row scan)
 router.post("/sessions/summaries", async (req: Request, res: Response) => {
   const { creds } = req.body as { creds: SessionsCreds };
@@ -423,8 +463,7 @@ router.post("/sessions/summaries", async (req: Request, res: Response) => {
     const sessions = await fetchSessionSummaries(creds);
     res.json({ sessions });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    handleRouteError(res, err, "sessions/summaries");
   }
 });
 
@@ -443,8 +482,7 @@ router.post("/sessions/list", async (req: Request, res: Response) => {
     const sessions = buildSessions(msgs);
     res.json({ sessions });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    handleRouteError(res, err, "sessions/list");
   }
 });
 
@@ -466,11 +504,7 @@ router.post("/sessions/messages", async (req: Request, res: Response) => {
     const messages = await fetchSessionMessages(creds, sessionId, safeLimit, safeOffset);
     res.json({ messages, hasMore: messages.length >= safeLimit });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("does not exist") || msg.includes("42P01") || msg.toLowerCase().includes("no collection")) {
-      return void res.status(404).json({ error: "TABLE_NOT_FOUND" });
-    }
-    res.status(500).json({ error: msg });
+    handleRouteError(res, err, "sessions/messages");
   }
 });
 
@@ -489,8 +523,7 @@ router.post("/sessions/analytics", async (req: Request, res: Response) => {
       ai_messages: msgs.filter((m) => m.sender === "AI").length,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    handleRouteError(res, err, "sessions/analytics");
   }
 });
 
@@ -503,7 +536,9 @@ router.post("/sessions/insert", async (req: Request, res: Response) => {
   if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds.dbType" });
   if (!message?.session_id || !message?.message_text) return void res.status(400).json({ error: "Missing message fields" });
 
-  const tbl = creds.tableName || "sessions";
+  let tbl: string;
+  try { tbl = resolveTableName(creds.tableName); }
+  catch { return void res.status(400).json({ error: "Invalid table name: only letters, numbers, and underscores are allowed (max 64 chars)" }); }
   const ts = message.timestamp || new Date().toISOString();
 
   try {
@@ -559,8 +594,7 @@ router.post("/sessions/insert", async (req: Request, res: Response) => {
 
     res.status(400).json({ error: "Unsupported dbType" });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    handleRouteError(res, err, "sessions/insert");
   }
 });
 
@@ -569,7 +603,9 @@ router.post("/sessions/validate", async (req: Request, res: Response) => {
   const { creds } = req.body as { creds: SessionsCreds };
   if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds.dbType" });
 
-  const tbl = creds.tableName || "sessions";
+  let tbl: string;
+  try { tbl = resolveTableName(creds.tableName); }
+  catch { return void res.status(400).json({ error: "Invalid table name: only letters, numbers, and underscores are allowed (max 64 chars)" }); }
 
   try {
     if (creds.dbType === "postgresql" || creds.dbType === "supabase") {
@@ -610,8 +646,9 @@ router.post("/sessions/validate", async (req: Request, res: Response) => {
 
     res.status(400).json({ error: "Unsupported dbType" });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg, status: "fail" });
+    const reqId = randomUUID();
+    logger.error({ err, reqId, route: "sessions/validate" }, "Internal query error");
+    res.status(500).json({ error: "Internal query error", reqId, status: "fail" });
   }
 });
 

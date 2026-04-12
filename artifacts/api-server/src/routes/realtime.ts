@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { MongoClient } from "mongodb";
 import Redis from "ioredis";
 import { normalizeRow } from "./sessions.js";
@@ -43,9 +44,59 @@ const CHANNEL_TO_TABLE: Record<string, string> = {
   new_handoff:      "handoff_requests",
 };
 
-router.get("/realtime/stream", async (req: Request, res: Response): Promise<void> => {
-  const q = req.query as Record<string, string>;
-  const {
+// ─── Realtime session token store ─────────────────────────────────────────────
+// Credentials are stored server-side for 60 seconds, keyed by a random UUID.
+// The SSE endpoint only accepts a token — never raw credentials in the URL.
+
+interface RealtimeTokenEntry {
+  dbType: string;
+  connectionString?: string;
+  host?: string;
+  port?: string;
+  dbUsername?: string;
+  dbPassword?: string;
+  dbName?: string;
+  tables?: string;
+  channels?: string;
+  expiresAt: number;
+}
+
+const realtimeTokenStore = new Map<string, RealtimeTokenEntry>();
+
+// Clean up expired tokens periodically (every 2 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of realtimeTokenStore) {
+    if (entry.expiresAt < now) realtimeTokenStore.delete(key);
+  }
+}, 120_000);
+
+// Allowed collection/channel name characters (alphanumeric + underscore, max 64)
+function isSafeCollectionName(name: string): boolean {
+  return /^[a-zA-Z0-9_]{1,64}$/.test(name);
+}
+
+// POST /api/realtime/init — store credentials and return a short-lived token
+router.post("/realtime/init", (req: Request, res: Response): void => {
+  const body = req.body as Record<string, string | undefined>;
+  const { dbType, connectionString, host, port, dbUsername, dbPassword, dbName, tables, channels } = body;
+
+  if (dbType !== "mongodb" && dbType !== "redis") {
+    res.status(400).json({ error: "dbType must be 'mongodb' or 'redis'" });
+    return;
+  }
+
+  // Validate MongoDB collection names if provided
+  if (tables) {
+    const collectionList = tables.split(",").map(t => t.trim()).filter(Boolean);
+    if (collectionList.some(t => !isSafeCollectionName(t))) {
+      res.status(400).json({ error: "Invalid collection name: only letters, numbers, and underscores are allowed" });
+      return;
+    }
+  }
+
+  const token = randomUUID();
+  realtimeTokenStore.set(token, {
     dbType,
     connectionString,
     host,
@@ -53,7 +104,33 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
     dbUsername,
     dbPassword,
     dbName,
-  } = q;
+    tables,
+    channels,
+    expiresAt: Date.now() + 60_000,
+  });
+
+  res.json({ token });
+});
+
+router.get("/realtime/stream", async (req: Request, res: Response): Promise<void> => {
+  const { token } = req.query as Record<string, string>;
+
+  if (!token) {
+    res.status(400).json({ error: "Missing token. Use POST /api/realtime/init first." });
+    return;
+  }
+
+  const entry = realtimeTokenStore.get(token);
+  if (!entry || entry.expiresAt < Date.now()) {
+    realtimeTokenStore.delete(token);
+    res.status(401).json({ error: "Token expired or invalid. Re-init and reconnect." });
+    return;
+  }
+
+  // Consume the token immediately — each SSE connection needs its own token
+  realtimeTokenStore.delete(token);
+
+  const { dbType, connectionString, host, port, dbUsername, dbPassword, dbName } = entry;
 
   if (dbType !== "mongodb" && dbType !== "redis") {
     res.status(400).json({ error: "dbType must be 'mongodb' or 'redis'" });
@@ -87,7 +164,7 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
   // ── MongoDB — watch multiple collections via a single change stream ──────────
   if (dbType === "mongodb") {
     // Parse comma-separated tables; default to chat histories only
-    const rawTables = (q.tables || q.tableName || "n8n_chat_histories");
+    const rawTables = (entry.tables || "n8n_chat_histories");
     const tables = rawTables.split(",").map(t => t.trim()).filter(Boolean);
 
     const uri =
@@ -147,8 +224,9 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
         }
       }
     } catch (err) {
-      logger.error({ err }, "MongoDB change stream error");
-      sendErr(err instanceof Error ? err.message : String(err));
+      const reqId = randomUUID();
+      logger.error({ err, reqId }, "MongoDB change stream error");
+      sendErr("Stream error. Check server logs for details (reqId: " + reqId + ")");
       cleanup();
       client?.close().catch(() => {/* ignore */});
     }
@@ -157,7 +235,7 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
 
   // ── Redis — subscribe to multiple pub/sub channels simultaneously ─────────────
   if (dbType === "redis") {
-    const rawChannels = q.channels || q.channel || "chat_new_message";
+    const rawChannels = entry.channels || "chat_new_message";
     const channelList = rawChannels.split(",").map(c => c.trim()).filter(Boolean);
 
     const sub = connectionString
@@ -192,8 +270,9 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
       });
 
       sub.on("error", (err: Error) => {
-        logger.error({ err }, "Redis subscriber error");
-        sendErr(err.message);
+        const reqId = randomUUID();
+        logger.error({ err, reqId }, "Redis subscriber error");
+        sendErr("Stream error. Check server logs for details (reqId: " + reqId + ")");
       });
 
       req.on("close", () => {
@@ -202,8 +281,9 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
         sub.disconnect();
       });
     } catch (err) {
-      logger.error({ err }, "Redis connection error");
-      sendErr(err instanceof Error ? err.message : String(err));
+      const reqId = randomUUID();
+      logger.error({ err, reqId }, "Redis connection error");
+      sendErr("Stream error. Check server logs for details (reqId: " + reqId + ")");
       cleanup();
       sub.disconnect();
     }
