@@ -106,6 +106,19 @@ function setMsgCache(msgs: NormalizedMessage[], key: string) {
   lsSet(LS_RAW + key, msgs.slice(0, LS_MAX_MSGS));
 }
 
+/**
+ * Prepend a single normalized message to the shared in-memory cache.
+ * Called by the Realtime subscription when a new INSERT is detected so the
+ * UI can update instantly without waiting for the next polling cycle.
+ */
+export function appendToMsgCache(msg: NormalizedMessage) {
+  if (!_msgCacheKey) return; // cache not initialised yet — skip
+  // De-duplicate by id, then prepend (newest first, matching order=id.desc)
+  _msgCache = [msg, ..._msgCache.filter((m) => String(m.id) !== String(msg.id))];
+  _msgCacheTs = Date.now(); // keep TTL alive so next queryFn reads from cache
+  lsSet(LS_RAW + _msgCacheKey, _msgCache.slice(0, LS_MAX_MSGS));
+}
+
 function getMsgCache(key: string): NormalizedMessage[] | null {
   if (_msgCacheKey === key && Date.now() - _msgCacheTs < MSG_CACHE_TTL && _msgCache.length > 0) {
     return _msgCache;

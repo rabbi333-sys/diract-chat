@@ -21,6 +21,7 @@ import OrderAnalytics from '@/components/OrderAnalytics';
 import WebhookSettings from '@/components/WebhookSettings';
 import { useGlobalAiControl } from '@/hooks/useAiControl';
 import { useAnalytics, useChartData } from '@/hooks/useChatHistory';
+import { useRealtimeUpdates } from '@/hooks/useRealtimeUpdates';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useTeamRole } from '@/hooks/useTeamRole';
@@ -86,6 +87,15 @@ const Index = () => {
   // React Query cache so Overview renders instantly when the user navigates to it.
   useAnalytics();
   useChartData('daily');
+
+  // ── Supabase Realtime — instant updates without manual refresh ────────────
+  const { connected: realtimeConnected } = useRealtimeUpdates((sessionId) => {
+    // Notify when a new message arrives on a different session than the one open
+    const currentPath = window.location.pathname;
+    if (!currentPath.includes(sessionId)) {
+      toast('New message received', { duration: 3000 });
+    }
+  });
 
   // ── Handle handoff "Open Chat" → live inbox navigation ──────────────────────
   // HandoffPanel navigates to /?openSession=<id>&recipient=<rec>&disable_ai=1
@@ -395,6 +405,9 @@ const Index = () => {
             >
               <item.icon size={18} />
               <span className="flex-1 text-left">{t(NAV_LABEL_KEYS[item.label])}</span>
+              {item.label === 'Messages' && realtimeConnected && (
+                <span title="Realtime connected" className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
+              )}
               {item.badgeKey && counts[item.badgeKey] > 0 && (
                 <span className={cn(
                   "min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 animate-pulse",

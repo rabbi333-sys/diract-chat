@@ -91,7 +91,11 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
   }
 
   // n8n / LangChain native: { message: { type, data: { content } } }
-  // Also handles older formats: { message: { type, content|output } }
+  // Supabase Realtime may deliver the JSONB `message` column as a string — parse it.
+  if (raw.message && typeof raw.message === 'string') {
+    try { raw = { ...raw, message: JSON.parse(raw.message) }; } catch { /* leave as string */ }
+  }
+
   if (raw.message && typeof raw.message === 'object') {
     const msg = raw.message as Record<string, any>;
     const type = String(msg.type ?? '').toLowerCase();
