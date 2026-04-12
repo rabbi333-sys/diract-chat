@@ -221,21 +221,11 @@ async function generateInvoice(order: Order) {
     // ─────────────────────────────────────────────────────────
     let y = 20;
 
-    // Brand name only (no icon box)
-    color(C.ink); bold(17);
-    pdf.text('Chat Monitor', ML, y);
-
     // Right side: large INVOICE label
     color(C.ink); bold(30);
     pdf.text('INVOICE', W - MR, y, { align: 'right' });
 
-    y += 9;
-
-    // Status — plain colored text (no badge box)
-    color(st.fg); bold(8);
-    pdf.text(st.label, W - MR, y, { align: 'right' });
-
-    y += 14;
+    y += 20;
 
     // Thin full-width divider
     stroke(C.border); pdf.setLineWidth(0.4);
