@@ -27,23 +27,12 @@ function getGradient(str: string): [string, string] {
   return GRADIENTS[h % GRADIENTS.length] as [string, string];
 }
 
-// ─── 5-minute live-session helper ─────────────────────────────────────────────
-const LIVE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
-
-function isLive(session: SessionInfo): boolean {
-  try {
-    return Date.now() - new Date(session.last_message_at).getTime() < LIVE_WINDOW_MS;
-  } catch {
-    return false;
-  }
-}
-
-// Sort: live first (by last_message_at desc), then offline (by last_message_at desc)
+// Sort: active first (by last_message_at desc), then offline (by last_message_at desc)
 function sortSessions(sessions: SessionInfo[]): SessionInfo[] {
   return [...sessions].sort((a, b) => {
-    const aLive = isLive(a) ? 1 : 0;
-    const bLive = isLive(b) ? 1 : 0;
-    if (aLive !== bLive) return bLive - aLive; // live first
+    const aLive = a.is_active ? 1 : 0;
+    const bLive = b.is_active ? 1 : 0;
+    if (aLive !== bLive) return bLive - aLive; // active first
     return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
   });
 }
@@ -137,11 +126,11 @@ export const SessionList = () => {
     const q = searchQuery.toLowerCase();
     const matchesSearch = name.includes(q) || s.recipient.includes(q);
     // Active tab: only sessions with last message within 5 minutes
-    if (activeTab === 'active') return matchesSearch && isLive(s);
+    if (activeTab === 'active') return matchesSearch && s.is_active;
     return matchesSearch;
   });
 
-  const activeCount = sessions?.filter(s => isLive(s)).length || 0;
+  const activeCount = sessions?.filter(s => s.is_active).length || 0;
 
   // ── Eager background pre-warm ─────────────────────────────────────────────
   // As soon as the filtered list is available, pre-fetch every session in the
@@ -346,12 +335,12 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
           {initials}
         </div>
         {/* Active/offline indicator dot */}
-        <span
-          className={cn(
-            "absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background",
-            isLive(session) ? "bg-emerald-500" : "bg-muted-foreground/30"
-          )}
-        />
+        {session.is_active && (
+          <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background bg-emerald-500 animate-pulse" />
+        )}
+        {!session.is_active && (
+          <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background bg-muted-foreground/30" />
+        )}
       </div>
 
       {/* Content */}
