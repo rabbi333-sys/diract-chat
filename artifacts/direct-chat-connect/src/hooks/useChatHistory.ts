@@ -314,9 +314,19 @@ function buildSessionsCreds(conn: MainDbConnection): SessionsCreds {
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  // Attach the Supabase session JWT to every API call for server-side authentication.
+  // Falls back gracefully if there is no active session (e.g. during onboarding).
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`;
+    }
+  } catch { /* no session available, proceed without auth header */ }
+
   const res = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
   const data = await res.json() as Record<string, unknown>;

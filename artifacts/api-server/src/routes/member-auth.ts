@@ -210,8 +210,11 @@ router.post("/member-auth/init", async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post("/member-auth/invites/list", async (req: Request, res: Response) => {
-  const { creds, userId }: { creds: DbCreds; userId: string } = req.body;
+  const { creds }: { creds: DbCreds } = req.body;
   if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds" });
+  // userId is derived from the verified JWT — never trusted from the request body
+  const userId = req.userId ?? "";
+  if (!userId) return void res.status(401).json({ error: "Authentication required" });
 
   try {
     let rows: InviteRecord[] = [];
@@ -263,13 +266,15 @@ router.post("/member-auth/invites/list", async (req: Request, res: Response) => 
 router.post("/member-auth/invites/create", async (req: Request, res: Response) => {
   const { creds, invite }: { creds: DbCreds; invite: Partial<InviteRecord> } = req.body;
   if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds" });
+  // created_by is derived from the verified JWT — never trusted from the request body
+  const userId = req.userId ?? "";
+  if (!userId) return void res.status(401).json({ error: "Authentication required" });
 
   const id     = randomUUID();
   const token  = randomUUID();
   const perms  = JSON.stringify(invite.permissions ?? []);
   const email  = invite.email ?? "";
   const role   = invite.role ?? "viewer";
-  const userId = invite.created_by ?? "";
   const now    = new Date().toISOString();
 
   try {

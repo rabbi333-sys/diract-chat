@@ -22,6 +22,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getStoredConnection, normalizeRow } from '@/lib/externalDb';
 import { getActiveConnection } from '@/lib/db-config';
+import { supabase } from '@/integrations/supabase/client';
 import type { ChatMessage } from '@/hooks/useChatHistory';
 
 export type SyncMode = 'realtime' | 'polling' | 'none';
@@ -280,9 +281,15 @@ export function useRealtimeUpdates(
 
         let token: string;
         try {
+          const initHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) initHeaders['Authorization'] = `Bearer ${session.access_token}`;
+          } catch { /* proceed without auth header */ }
+
           const initRes = await fetch('/api/realtime/init', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: initHeaders,
             body: JSON.stringify(initBody),
           });
           if (!initRes.ok) { if (!dead) rt = setTimeout(go, 5_000); return; }
