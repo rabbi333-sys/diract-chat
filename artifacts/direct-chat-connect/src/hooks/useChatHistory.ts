@@ -364,10 +364,9 @@ export const useAnalytics = () => {
   const dbKey = useDbConnectionKey();
   return useQuery({
     queryKey: ['analytics', dbKey],
-    staleTime: 4_000,
+    staleTime: Infinity,
     gcTime: 30 * 60_000,
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: false,
     retry: 1,
     placeholderData: (prev: any) => prev,
     queryFn: async (): Promise<AnalyticsData> => {
@@ -445,10 +444,9 @@ export const useChartData = (
 
   return useQuery({
     queryKey: ['chart-data', timeRange, customStart, customEnd, dbKey],
-    staleTime: 4_000,
+    staleTime: Infinity,
     gcTime: 30 * 60_000,
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: false,
     retry: 1,
     enabled: !isCustom || hasCustomDates,
     placeholderData: (prev: any) => prev,
@@ -564,10 +562,9 @@ export const useChatHistory = (sessionId?: string) => {
     queryKey: ['chat-history', sessionId, dbKey],
     enabled: !!sessionId,
     retry: 1,
-    staleTime: 30_000,      // show cached messages instantly; background refetch after 30 s
-    gcTime: 10 * 60_000,    // keep in memory for 10 min
-    refetchInterval: 3_000, // live-poll every 3 s while conversation is open
-    refetchIntervalInBackground: false,
+    staleTime: Infinity,
+    gcTime: 10 * 60_000,
+    refetchInterval: false,
     placeholderData: (prev: any) => prev, // show previous data immediately while refetching
     queryFn: () => fetchMessages(sessionId!),
   });
@@ -619,10 +616,9 @@ export const useSessions = (filterDate?: Date | null) => {
 
   return useQuery({
     queryKey: ['sessions', dateKey, dbKey],
-    staleTime: 4_000,
+    staleTime: Infinity,
     gcTime: 30 * 60_000,
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: false,
     retry: 1,
     placeholderData: (prev: any) => prev,
     queryFn: async () => {
