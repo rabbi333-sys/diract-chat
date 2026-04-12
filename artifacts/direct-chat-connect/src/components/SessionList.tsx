@@ -167,7 +167,7 @@ export const SessionList = () => {
     if (!sorted || sorted.length === 0) return [] as Platform[];
     const seen = new Set<Platform>();
     for (const s of sorted) {
-      const p = detectPlatform(s.recipient, platformConns);
+      const p = detectPlatform(s.recipient, platformConns, { sessionId: s.session_id, dbPlatform: s.platform });
       if (p !== 'unknown') seen.add(p);
     }
     return (['whatsapp', 'facebook', 'instagram'] as const).filter(p => seen.has(p));
@@ -176,18 +176,29 @@ export const SessionList = () => {
   const filtered = sorted.filter((s) => {
     const name = (recipientNames?.[s.recipient] || '').toLowerCase();
     const q = searchQuery.toLowerCase();
-    const matchesSearch = name.includes(q) || s.recipient.includes(q);
-    // Active tab: only sessions with last message within 5 minutes
-    if (activeTab === 'active') return matchesSearch && isWithin5Min(s.last_message_at);
-    // Platform filter
+    if (!name.includes(q) && !s.recipient.includes(q)) return false;
+    // Platform filter applies regardless of active/all tab
     if (platformFilter !== 'all') {
-      const p = detectPlatform(s.recipient, platformConns);
+      const p = detectPlatform(s.recipient, platformConns, { sessionId: s.session_id, dbPlatform: s.platform });
       if (p !== platformFilter) return false;
     }
-    return matchesSearch;
+    // Active tab: additionally require last message within 5 minutes
+    if (activeTab === 'active') return isWithin5Min(s.last_message_at);
+    return true;
   });
 
-  const activeCount = sessions?.filter(s => isWithin5Min(s.last_message_at)).length || 0;
+  // Active count scoped to the current platform filter
+  const activeCount = useMemo(() => {
+    if (!sorted.length) return 0;
+    return sorted.filter(s => {
+      if (!isWithin5Min(s.last_message_at)) return false;
+      if (platformFilter !== 'all') {
+        const p = detectPlatform(s.recipient, platformConns, { sessionId: s.session_id, dbPlatform: s.platform });
+        return p === platformFilter;
+      }
+      return true;
+    }).length;
+  }, [sorted, platformFilter, platformConns]);
 
   // ── Eager background pre-warm ─────────────────────────────────────────────
   // As soon as the filtered list is available, pre-fetch every session in the
@@ -374,7 +385,7 @@ export const SessionList = () => {
               key={session.session_id}
               session={session}
               recipientName={recipientNames?.[session.recipient]}
-              platform={detectPlatform(session.recipient, platformConns)}
+              platform={detectPlatform(session.recipient, platformConns, { sessionId: session.session_id, dbPlatform: session.platform })}
               onSelect={() => navigate(`/conversation/${session.session_id}?recipient=${session.recipient}`)}
               onPrefetch={() => prefetchSession(session.session_id)}
             />

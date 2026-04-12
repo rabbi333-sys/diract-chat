@@ -208,10 +208,19 @@ const Conversation = () => {
   const fbConn = platformConns.find(c => c.platform === 'facebook' && c.is_active);
   const igConn = platformConns.find(c => c.platform === 'instagram' && c.is_active);
 
+  // Look up the current session record (provides DB-level platform field if available)
+  const currentSessionRecord = useMemo(
+    () => sessions?.find(s => s.session_id === sessionId),
+    [sessions, sessionId]
+  );
+
   // Detect which platform this session belongs to
   const sessionPlatform: Platform = useMemo(
-    () => detectPlatform(recipient, platformConns),
-    [recipient, platformConns]
+    () => detectPlatform(recipient, platformConns, {
+      sessionId,
+      dbPlatform: currentSessionRecord?.platform,
+    }),
+    [recipient, platformConns, sessionId, currentSessionRecord?.platform]
   );
 
   // Pick the connection that matches the detected platform
@@ -403,12 +412,22 @@ const Conversation = () => {
           recipient,
         });
         try {
-          if (sessionPlatform === 'instagram' && igConn) await fbPost(igConn, recipient, { text });
-          else if (sessionPlatform === 'facebook' && fbConn) await fbPost(fbConn, recipient, { text });
-          else if (sessionPlatform === 'whatsapp' && waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
-          else if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
-          else if (fbConn) await fbPost(fbConn, recipient, { text });
-          else if (igConn) await fbPost(igConn, recipient, { text });
+          if (sessionPlatform === 'instagram') {
+            if (!igConn) throw new Error('Instagram connection not configured');
+            await fbPost(igConn, recipient, { text });
+          } else if (sessionPlatform === 'facebook') {
+            if (!fbConn) throw new Error('Facebook connection not configured');
+            await fbPost(fbConn, recipient, { text });
+          } else if (sessionPlatform === 'whatsapp') {
+            if (!waConn) throw new Error('WhatsApp connection not configured');
+            await waPost(waConn, recipient, { type: 'text', text: { body: text } });
+          } else {
+            // unknown: try available connections in priority order
+            if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
+            else if (fbConn) await fbPost(fbConn, recipient, { text });
+            else if (igConn) await fbPost(igConn, recipient, { text });
+            else throw new Error('No messaging connection configured');
+          }
           storePlatform(recipient, sessionPlatform);
           markSent(id);
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
@@ -455,20 +474,31 @@ const Conversation = () => {
         timestamp: new Date().toISOString(),
         recipient,
       });
-      const useWa = (sessionPlatform === 'whatsapp' && waConn) ||
-                    (sessionPlatform === 'unknown' && waConn);
-      const fbOrIg = sessionPlatform === 'instagram' ? (igConn || fbConn) : (fbConn || igConn);
-      if (useWa && waConn) {
+      if (sessionPlatform === 'whatsapp') {
+        if (!waConn) throw new Error('WhatsApp connection not configured');
         const mediaId = await waUploadFile(waConn, file, file.name, file.type);
         const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
         await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
-      } else if (fbOrIg) {
-        const attachId = await fbUploadFile(fbOrIg, file, mediaType);
-        await fbPost(fbOrIg, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
-      } else if (waConn) {
-        const mediaId = await waUploadFile(waConn, file, file.name, file.type);
-        const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
-        await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
+      } else if (sessionPlatform === 'instagram') {
+        if (!igConn) throw new Error('Instagram connection not configured');
+        const attachId = await fbUploadFile(igConn, file, mediaType);
+        await fbPost(igConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+      } else if (sessionPlatform === 'facebook') {
+        if (!fbConn) throw new Error('Facebook connection not configured');
+        const attachId = await fbUploadFile(fbConn, file, mediaType);
+        await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+      } else {
+        // unknown: prefer WA, fall back to Meta
+        if (waConn) {
+          const mediaId = await waUploadFile(waConn, file, file.name, file.type);
+          const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
+          await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
+        } else {
+          const metaConn = fbConn || igConn;
+          if (!metaConn) throw new Error('No messaging connection configured');
+          const attachId = await fbUploadFile(metaConn, file, mediaType);
+          await fbPost(metaConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+        }
       }
       storePlatform(recipient, sessionPlatform);
       markSent(id);

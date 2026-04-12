@@ -44,6 +44,7 @@ export interface SessionInfo {
   message_count: number;
   is_active: boolean;
   last_message_text?: string;
+  platform?: string;
 }
 
 export interface RecipientName {

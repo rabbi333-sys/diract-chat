@@ -33,6 +33,7 @@ export interface NormalizedMessage {
   message_text: string;
   timestamp: string;
   recipient?: string;
+  platform?: string;
 }
 
 export interface SessionInfo {
@@ -42,6 +43,7 @@ export interface SessionInfo {
   message_count: number;
   is_active: boolean;
   last_message_text?: string;
+  platform?: string;
 }
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
@@ -90,6 +92,9 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     timestamp = String(rawTs);
   }
 
+  // Extract platform field if present in the raw row
+  const platform = (raw.platform ?? raw.channel ?? raw.source ?? undefined) as string | undefined;
+
   // n8n / LangChain native: { message: { type, data: { content } } }
   // Supabase Realtime may deliver the JSONB `message` column as a string — parse it.
   if (raw.message && typeof raw.message === 'string') {
@@ -114,7 +119,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     );
     if (!text.trim()) return null;
     const sender = isHuman ? 'User' : isAi ? 'AI' : isAgent ? 'Agent' : 'AI';
-    return { id, session_id, sender, message_text: text, timestamp, recipient };
+    return { id, session_id, sender, message_text: text, timestamp, recipient, platform };
   }
 
   // Normalized: { sender, message_text }
@@ -124,7 +129,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     const isAgent = ['agent', 'human_agent', 'operator'].includes(s);
     const text = String(raw.message_text ?? '');
     if (!text.trim()) return null;
-    return { id, session_id, sender: isHuman ? 'User' : isAgent ? 'Agent' : 'AI', message_text: text, timestamp, recipient };
+    return { id, session_id, sender: isHuman ? 'User' : isAgent ? 'Agent' : 'AI', message_text: text, timestamp, recipient, platform };
   }
 
   // Role-based: { role, content }
@@ -133,7 +138,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     const isHuman = ['user', 'human', 'customer'].includes(role);
     const text = String(raw.content ?? raw.text ?? raw.body ?? '');
     if (!text.trim()) return null;
-    return { id, session_id, sender: isHuman ? 'User' : 'AI', message_text: text, timestamp, recipient };
+    return { id, session_id, sender: isHuman ? 'User' : 'AI', message_text: text, timestamp, recipient, platform };
   }
 
   // Generic fallback
@@ -141,7 +146,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
   const isHuman = ['user', 'human', 'customer', 'inbound'].includes(typeStr);
   const text = String(raw.content ?? raw.text ?? raw.body ?? raw.message_text ?? raw.message ?? '');
   if (!text.trim() || text === '{}') return null;
-  return { id, session_id, sender: isHuman ? 'User' : 'AI', message_text: text, timestamp, recipient };
+  return { id, session_id, sender: isHuman ? 'User' : 'AI', message_text: text, timestamp, recipient, platform };
 }
 
 // ─── Session builder ──────────────────────────────────────────────────────────
@@ -149,7 +154,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
 export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInfo[] {
   const map = new Map<
     string,
-    { recipient: string; last_id: string | number; count: number; last_ts: string; last_text: string }
+    { recipient: string; last_id: string | number; count: number; last_ts: string; last_text: string; platform?: string }
   >();
   msgs.forEach((m) => {
     const ex = map.get(m.session_id);
@@ -160,6 +165,7 @@ export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInf
         count: 1,
         last_ts: m.timestamp,
         last_text: m.message_text || '',
+        platform: m.platform,
       });
     } else {
       ex.count++;
@@ -171,6 +177,8 @@ export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInf
         ex.last_id = m.id;
         ex.last_text = m.message_text || '';
       }
+      // Take the first non-null platform found across all messages in the session
+      if (!ex.platform && m.platform) ex.platform = m.platform;
     }
   });
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -183,6 +191,7 @@ export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInf
     message_count: info.count,
     is_active: info.last_ts >= fiveMinutesAgo,
     last_message_text: info.last_text,
+    platform: info.platform,
   }));
   // If no real timestamps exist, sort by the highest row-id (more recent inserts first)
   const allFallback = sessions.every(s => s.last_message_at === FALLBACK_TS);

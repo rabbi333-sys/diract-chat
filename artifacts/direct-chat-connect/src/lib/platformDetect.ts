@@ -26,9 +26,36 @@ export function storePlatform(recipient: string, platform: Platform) {
   saveCache(cache);
 }
 
-export function detectPlatform(recipient: string, conns: PlatformConnection[]): Platform {
+export interface DetectPlatformOpts {
+  sessionId?: string;
+  dbPlatform?: string;
+}
+
+export function detectPlatform(
+  recipient: string,
+  conns: PlatformConnection[],
+  opts?: DetectPlatformOpts
+): Platform {
   if (!recipient) return 'unknown';
 
+  // 1. DB-level platform field is the most authoritative source
+  if (opts?.dbPlatform) {
+    const dbp = opts.dbPlatform.toLowerCase();
+    if (dbp === 'whatsapp' || dbp.includes('whatsapp') || dbp.startsWith('wa')) {
+      storePlatform(recipient, 'whatsapp');
+      return 'whatsapp';
+    }
+    if (dbp === 'instagram' || dbp.includes('instagram') || dbp.startsWith('ig')) {
+      storePlatform(recipient, 'instagram');
+      return 'instagram';
+    }
+    if (dbp === 'facebook' || dbp.includes('facebook') || dbp.includes('messenger') || dbp.startsWith('fb')) {
+      storePlatform(recipient, 'facebook');
+      return 'facebook';
+    }
+  }
+
+  // 2. Check localStorage cache (from previous successful sends)
   const cached = getStoredPlatform(recipient);
   if (cached) return cached;
 
@@ -36,7 +63,24 @@ export function detectPlatform(recipient: string, conns: PlatformConnection[]): 
   const activeFb = conns.find(c => c.platform === 'facebook' && c.is_active);
   const activeIg = conns.find(c => c.platform === 'instagram' && c.is_active);
 
-  // Phone number heuristic: starts with + or is a long numeric string (10-15 digits)
+  // 3. Session-ID prefix heuristics — common naming conventions used by n8n workflows
+  const sid = (opts?.sessionId ?? '').toLowerCase();
+  if (sid) {
+    if (sid.startsWith('wa_') || sid.startsWith('whatsapp_') || sid.includes('_wa_') || sid.includes('_whatsapp_')) {
+      const p: Platform = activeWa ? 'whatsapp' : 'unknown';
+      if (p !== 'unknown') { storePlatform(recipient, p); return p; }
+    }
+    if ((sid.startsWith('ig_') || sid.startsWith('instagram_') || sid.includes('_ig_') || sid.includes('_instagram_')) && activeIg) {
+      storePlatform(recipient, 'instagram');
+      return 'instagram';
+    }
+    if ((sid.startsWith('fb_') || sid.startsWith('facebook_') || sid.startsWith('messenger_') || sid.includes('_fb_') || sid.includes('_facebook_')) && activeFb) {
+      storePlatform(recipient, 'facebook');
+      return 'facebook';
+    }
+  }
+
+  // 4. Phone-number heuristic: E.164 or long numeric string → WhatsApp
   const stripped = recipient.replace(/[\s\-().]/g, '');
   const isPhoneNumber = /^\+?\d{10,15}$/.test(stripped);
 
@@ -44,10 +88,14 @@ export function detectPlatform(recipient: string, conns: PlatformConnection[]): 
 
   if (isPhoneNumber && activeWa) {
     result = 'whatsapp';
-  } else if (!isPhoneNumber && activeFb && !activeIg) {
-    result = 'facebook';
-  } else if (!isPhoneNumber && activeIg && !activeFb) {
-    result = 'instagram';
+  } else if (isPhoneNumber && !activeWa) {
+    // Phone number but no WA connection — could still be WA but undetectable
+    result = 'unknown';
+  } else if (!isPhoneNumber && activeFb && activeIg) {
+    // Both Meta platforms active — use digit count as tiebreaker:
+    // Instagram PSIDs tend to be ≥ 17 digits; Facebook PSIDs tend to be < 17 digits
+    const digits = stripped.replace(/\D/g, '');
+    result = digits.length >= 17 ? 'instagram' : 'facebook';
   } else if (!isPhoneNumber && activeFb) {
     result = 'facebook';
   } else if (!isPhoneNumber && activeIg) {
