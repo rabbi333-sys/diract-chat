@@ -302,6 +302,7 @@ interface ChatMessageProps {
   onMediaClick?: (url: string, type: 'image' | 'video') => void;
   onReact?: (msg: ChatMessageType, emoji: string) => void;
   reactions?: string[];
+  statusOverride?: 'sending' | 'sent' | 'delivered' | 'read';
   isFirst?: boolean;
   isLast?: boolean;
 }
@@ -322,6 +323,7 @@ export const ChatMessage = ({
   onMediaClick,
   onReact,
   reactions = [],
+  statusOverride,
   isFirst = true,
   isLast = true,
 }: ChatMessageProps) => {
@@ -348,9 +350,10 @@ export const ChatMessage = ({
     } catch { return ''; }
   })();
 
-  // Resolve display status from _status or legacy _sending
+  // Resolve display status: statusOverride (from external map) > _status > legacy _sending
   const msgStatus: 'sending' | 'sent' | 'delivered' | 'read' | null = (() => {
     if (!isRight) return null;
+    if (statusOverride) return statusOverride;
     if (message._status) return message._status;
     if (message._sending === true)  return 'sending';
     if (message._sending === false) return 'sent';

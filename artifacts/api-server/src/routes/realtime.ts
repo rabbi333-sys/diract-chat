@@ -209,4 +209,135 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
   }
 });
 
+// ─── POST /webhook/events ──────────────────────────────────────────────────────
+// Receives delivery, read-receipt, reaction, and typing webhook events from n8n
+// (or any other webhook relay) and broadcasts them to connected dashboard clients
+// via Supabase Realtime broadcast.
+//
+// Body shape:
+//   {
+//     supabase_url: string,      // e.g. "https://xyz.supabase.co"
+//     anon_key:     string,      // Supabase anon (public) key
+//     session_id:   string,      // chat session ID
+//     event_type:   "delivered" | "read" | "reaction" | "typing",
+//     message_id?:  string,      // platform message ID (wamid / FB mid)
+//     emoji?:       string,      // for reaction events
+//     raw?:         object,      // original raw webhook payload (WA/FB/IG)
+//   }
+//
+// The endpoint also auto-detects delivery/read/reaction from raw WA/FB payloads
+// when `raw` is provided so that n8n can forward the webhook verbatim.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/webhook/events", async (req: Request, res: Response): Promise<void> => {
+  const body = req.body as {
+    supabase_url?: string;
+    anon_key?: string;
+    session_id?: string;
+    event_type?: string;
+    message_id?: string;
+    emoji?: string;
+    raw?: Record<string, unknown>;
+  };
+
+  const { supabase_url, anon_key, session_id } = body;
+  if (!supabase_url || !anon_key || !session_id) {
+    res.status(400).json({ error: "supabase_url, anon_key, and session_id are required" });
+    return;
+  }
+
+  let { event_type, message_id, emoji } = body;
+
+  // ── Auto-detect from raw WhatsApp / Facebook / Instagram webhook payload ──
+  if (!event_type && body.raw) {
+    // Use `unknown` + optional chaining with safe helper to avoid complex generic casts
+    const r = body.raw as Record<string, unknown>;
+    const entry0 = (Array.isArray((r as Record<string, unknown[]>).entry)
+      ? ((r as Record<string, unknown[]>).entry[0] as Record<string, unknown>)
+      : undefined);
+
+    // WA delivery/read: entry[0].changes[0].value.statuses[0]
+    const waChanges = Array.isArray(entry0?.changes) ? (entry0!.changes as Record<string, unknown>[]) : [];
+    const waValue   = waChanges[0]?.value as Record<string, unknown> | undefined;
+    const waStatuses: Record<string, unknown>[] = Array.isArray(waValue?.statuses)
+      ? (waValue!.statuses as Record<string, unknown>[])
+      : [];
+    if (waStatuses.length > 0) {
+      const s = waStatuses[0];
+      const st = s.status as string | undefined;
+      if (st === 'delivered' || st === 'read') {
+        event_type = st;
+        message_id = s.id as string | undefined;
+      }
+    }
+
+    // WA reaction: entry[0].changes[0].value.messages[0].reaction
+    const waMessages: Record<string, unknown>[] = Array.isArray(waValue?.messages)
+      ? (waValue!.messages as Record<string, unknown>[])
+      : [];
+    if (!event_type && waMessages[0]?.type === 'reaction') {
+      const rxn = waMessages[0].reaction as Record<string, string> | undefined;
+      event_type = 'reaction';
+      message_id = rxn?.message_id;
+      emoji      = rxn?.emoji;
+    }
+
+    // FB/IG delivery/read/reaction: entry[0].messaging[0]
+    const fbMessaging: Record<string, unknown>[] = Array.isArray(entry0?.messaging)
+      ? (entry0!.messaging as Record<string, unknown>[])
+      : [];
+    if (!event_type && fbMessaging.length > 0) {
+      const fbMsg = fbMessaging[0];
+      if (fbMsg.delivery)  event_type = 'delivered';
+      else if (fbMsg.read) event_type = 'read';
+      else if (fbMsg.reaction) {
+        const rxn = fbMsg.reaction as Record<string, string> | undefined;
+        event_type = 'reaction';
+        message_id = rxn?.mid;
+        emoji      = rxn?.emoji;
+      }
+    }
+  }
+
+  if (!event_type) {
+    res.status(400).json({ error: "Could not determine event_type from payload" });
+    return;
+  }
+
+  // ── Broadcast to Supabase Realtime ───────────────────────────────────────
+  // Supabase Realtime REST broadcast endpoint
+  const channel = event_type === 'typing'
+    ? `typing:${session_id}`
+    : `msg_status:${session_id}`;
+
+  const broadcastUrl = `${supabase_url.replace(/\/$/, "")}/realtime/v1/api/broadcast`;
+  const payload: Record<string, unknown> = { message_id, emoji };
+
+  try {
+    const broadcastRes = await fetch(broadcastUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": anon_key,
+        "Authorization": `Bearer ${anon_key}`,
+      },
+      body: JSON.stringify({
+        messages: [{ topic: channel, event: event_type, payload }],
+      }),
+    });
+
+    if (!broadcastRes.ok) {
+      const err = await broadcastRes.text();
+      logger.warn({ err, event_type, session_id }, "Supabase broadcast failed");
+      res.status(502).json({ error: "Supabase broadcast failed", detail: err });
+      return;
+    }
+
+    logger.info({ event_type, session_id, message_id }, "Broadcast sent");
+    res.json({ ok: true, event_type, session_id });
+  } catch (err) {
+    logger.error({ err }, "Failed to broadcast webhook event");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 export default router;

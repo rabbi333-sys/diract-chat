@@ -61,6 +61,8 @@ async function fbPost(conn: PlatformConnection, recipient: string, message: obje
 }
 
 // Send typing indicator to platform (best-effort — silently ignores failures)
+// WhatsApp: attempts {phone}/messages with type:"typing_on" (Cloud API experimental)
+// Facebook & Instagram: sender_action via /me/messages (officially supported)
 async function sendTypingAction(
   conn: PlatformConnection,
   platform: Platform,
@@ -69,7 +71,19 @@ async function sendTypingAction(
 ): Promise<void> {
   try {
     if (platform === 'whatsapp') {
-      // WhatsApp Business API does not officially support typing indicators — skip
+      const phoneId = conn.phone_number_id;
+      if (!phoneId) return;
+      // Best-effort: WhatsApp Cloud API experimental typing indicator
+      await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${conn.access_token}` },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: recipient,
+          type: action === 'typing_on' ? 'typing_on' : 'typing_off',
+        }),
+      });
       return;
     }
     // Facebook & Instagram: sender_action via /me/messages
@@ -312,6 +326,10 @@ const Conversation = () => {
     } catch { return {}; }
   });
 
+  // ── Message status map — persists beyond optimistic revert so DB messages
+  //    can also show delivered/read status from incoming webhook events ────────
+  const [msgStatuses, setMsgStatuses] = useState<Record<string, 'sent' | 'delivered' | 'read'>>({});
+
   // ── Typing indicator (send) ────────────────────────────────────────────────
   const [typingActive, setTypingActive] = useState(false);
   const typingThrottleRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -532,16 +550,20 @@ const Conversation = () => {
     setLocalMessages(prev => prev.filter(m => m.id !== id));
   };
 
-  const markSent = (id: number) => {
-    setLocalMessages(prev => prev.map(m => m.id === id ? { ...m, _sending: false, _status: 'sent' as const } : m));
+  const markSent = (id: number, platformMsgId?: string) => {
+    setLocalMessages(prev => prev.map(m => m.id === id ? { ...m, _sending: false, _status: 'sent' as const, _platformMsgId: platformMsgId } : m));
+    setMsgStatuses(prev => ({ ...prev, [String(id)]: 'sent' }));
+    if (platformMsgId) setMsgStatuses(prev => ({ ...prev, [platformMsgId]: 'sent' }));
   };
 
   const markDelivered = (id: number | string) => {
     setLocalMessages(prev => prev.map(m => String(m.id) === String(id) ? { ...m, _status: 'delivered' as const } : m));
+    setMsgStatuses(prev => ({ ...prev, [String(id)]: 'delivered' }));
   };
 
   const markRead = (id: number | string) => {
     setLocalMessages(prev => prev.map(m => String(m.id) === String(id) ? { ...m, _status: 'read' as const } : m));
+    setMsgStatuses(prev => ({ ...prev, [String(id)]: 'read' }));
   };
 
   // Persist reactions to localStorage whenever they change
@@ -569,6 +591,7 @@ const Conversation = () => {
   }, [sessionId]);
 
   // Subscribe to Supabase realtime for message status updates (delivered/read)
+  // and incoming customer reactions forwarded via webhook pipeline
   useEffect(() => {
     if (!sessionId) return;
     const channel = supabase
@@ -580,6 +603,14 @@ const Conversation = () => {
       .on('broadcast', { event: 'read' }, (payload: { payload?: { message_id?: string } }) => {
         const msgId = payload?.payload?.message_id;
         if (msgId) markRead(msgId);
+      })
+      .on('broadcast', { event: 'reaction' }, (payload: { payload?: { message_id?: string; emoji?: string } }) => {
+        const { message_id, emoji } = payload?.payload ?? {};
+        if (!message_id || !emoji) return;
+        setReactions(prev => {
+          const existing = prev[message_id] || [];
+          return { ...prev, [message_id]: [...existing, emoji] };
+        });
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -594,7 +625,7 @@ const Conversation = () => {
 
   // ── Typing indicator (agent → customer) ───────────────────────────────────
   const handleTyping = useCallback(() => {
-    if (!activeConn || !recipient || sessionPlatform === 'whatsapp') return;
+    if (!activeConn || !recipient) return;
     // Throttle: send typing_on at most once per 3 seconds
     if (!typingThrottleRef.current) {
       sendTypingAction(activeConn, sessionPlatform, recipient, 'typing_on');
@@ -625,30 +656,47 @@ const Conversation = () => {
   // ── Emoji reactions ────────────────────────────────────────────────────────
   const handleReact = useCallback(async (msg: ChatMessageType, emoji: string) => {
     const key = String(msg.id);
+    // Use the platform message ID when available; fall back to local ID
+    const platformId = msg._platformMsgId || key;
+    const reactionKey = msg._platformMsgId || key;
+
     setReactions(prev => {
-      const existing = prev[key] || [];
+      const existing = prev[reactionKey] || [];
       // Toggle: if already reacted with same emoji, remove it; otherwise add
       const updated = existing.includes(emoji)
         ? existing.filter(e => e !== emoji)
         : [...existing, emoji];
-      return { ...prev, [key]: updated };
+      return { ...prev, [reactionKey]: updated };
     });
 
     // Best-effort: send reaction to platform
     try {
       if (sessionPlatform === 'whatsapp' && waConn) {
-        // WhatsApp reaction requires the platform message ID; we store local ID only
-        // so this is best-effort and will fail gracefully
+        // WhatsApp: uses the react message type with the platform message ID (wamid)
+        // Falls back gracefully if platformId is not a real wamid
         await waPost(waConn, recipient, {
           type: 'reaction',
-          reaction: { message_id: key, emoji },
+          reaction: { message_id: platformId, emoji },
         });
       } else if (sessionPlatform === 'facebook' && fbConn) {
-        // Facebook reactions require user_message_id — silently skip
+        // Facebook: send reaction via sender_action with the message_id (mid)
+        // Only works if we have a real FB message_id from the send response
+        if (msg._platformMsgId) {
+          await fbPost(fbConn, recipient, {
+            sender_action: 'react',
+            payload: {
+              action: 'react',
+              reaction: 'love', // FB supports limited reactions — map emoji to closest
+              message_id: msg._platformMsgId,
+            },
+          } as object);
+        }
+        // If no platform ID: reaction stored locally in UI only
       } else if (sessionPlatform === 'instagram' && igConn) {
-        // Instagram reactions not available via API — UI only
+        // Instagram private reply reaction endpoint — UI only fallback for now
+        // (Instagram reactions via API not publicly available)
       }
-    } catch { /* best-effort — ignore */ }
+    } catch { /* best-effort — reactions are always stored locally regardless */ }
   }, [sessionPlatform, waConn, fbConn, igConn, recipient]);
 
   // ── Unified send (text + optional staged images) ───────────────────────────
@@ -683,24 +731,34 @@ const Conversation = () => {
           recipient,
         });
         try {
+          let platformMsgId: string | undefined;
           if (sessionPlatform === 'instagram') {
             if (!igConn) throw new Error('Instagram connection not configured');
-            await fbPost(igConn, recipient, { text });
+            const r = await fbPost(igConn, recipient, { text });
+            platformMsgId = r?.message_id;
           } else if (sessionPlatform === 'facebook') {
             if (!fbConn) throw new Error('Facebook connection not configured');
-            await fbPost(fbConn, recipient, { text });
+            const r = await fbPost(fbConn, recipient, { text });
+            platformMsgId = r?.message_id;
           } else if (sessionPlatform === 'whatsapp') {
             if (!waConn) throw new Error('WhatsApp connection not configured');
-            await waPost(waConn, recipient, { type: 'text', text: { body: text } });
+            const r = await waPost(waConn, recipient, { type: 'text', text: { body: text } });
+            platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
           } else {
             // unknown: try available connections in priority order
-            if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
-            else if (fbConn) await fbPost(fbConn, recipient, { text });
-            else if (igConn) await fbPost(igConn, recipient, { text });
-            else throw new Error('No messaging connection configured');
+            if (waConn) {
+              const r = await waPost(waConn, recipient, { type: 'text', text: { body: text } });
+              platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
+            } else if (fbConn) {
+              const r = await fbPost(fbConn, recipient, { text });
+              platformMsgId = r?.message_id;
+            } else if (igConn) {
+              const r = await fbPost(igConn, recipient, { text });
+              platformMsgId = r?.message_id;
+            } else throw new Error('No messaging connection configured');
           }
           storePlatform(recipient, sessionPlatform);
-          markSent(id);
+          markSent(id, platformMsgId);
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
           queryClient.invalidateQueries({ queryKey: ['sessions'] });
           revertOptimistic(id);
@@ -1180,7 +1238,8 @@ const Conversation = () => {
                 onReply={canReply ? setReplyingTo : undefined}
                 onMediaClick={handleMediaClick}
                 onReact={canReply ? handleReact : undefined}
-                reactions={reactions[String(msg.id)]}
+                reactions={reactions[msg._platformMsgId || String(msg.id)]}
+                statusOverride={msgStatuses[msg._platformMsgId || String(msg.id)]}
                 isFirst={isFirst}
                 isLast={isLast}
               />
