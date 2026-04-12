@@ -41,6 +41,10 @@ export const ConversationChart = () => {
   const totalMessages      = chartData?.reduce((s, d) => s + d.messages,      0) || 0;
   const avgPerDay          = chartData?.length ? Math.round(totalConversations / chartData.length) : 0;
 
+  // For weekly/monthly the data is sparse (few buckets) — use linear interpolation
+  // so empty buckets stay flat at 0 instead of curving into neighbouring weeks.
+  const curveType: 'monotone' | 'linear' = (timeRange === 'daily' || timeRange === 'custom') ? 'monotone' : 'linear';
+
   const customLabel = customStart && customEnd
     ? `${format(new Date(customStart + 'T00:00:00'), 'MMM d')} – ${format(new Date(customEnd + 'T00:00:00'), 'MMM d, yyyy')}`
     : 'Custom';
@@ -224,8 +228,8 @@ export const ConversationChart = () => {
                     labelStyle={{ color: 'hsl(var(--foreground))', fontWeight: 600, marginBottom: 4 }}
                     itemStyle={{ color: 'hsl(var(--muted-foreground))', fontSize: 12 }}
                   />
-                  <Area type="monotone" dataKey="messages"      name="Messages"      stroke="hsl(var(--stat-green))" strokeWidth={2} fill="url(#messageGradient)" />
-                  <Area type="monotone" dataKey="conversations" name="Conversations" stroke="hsl(var(--primary))"    strokeWidth={2} fill="url(#conversationGradient)" />
+                  <Area type={curveType} dataKey="messages"      name="Messages"      stroke="hsl(var(--stat-green))" strokeWidth={2} fill="url(#messageGradient)" />
+                  <Area type={curveType} dataKey="conversations" name="Conversations" stroke="hsl(var(--primary))"    strokeWidth={2} fill="url(#conversationGradient)" />
                 </AreaChart>
               ) : (
                 <BarChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
