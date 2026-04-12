@@ -46,32 +46,33 @@ function sortSessions(sessions: SessionInfo[]): SessionInfo[] {
 }
 
 // ─── Platform badge icon (inline SVG) ─────────────────────────────────────────
-const PlatformBadge = ({ platform }: { platform: Platform }) => {
+export const PlatformBadge = ({ platform, size = 'md' }: { platform: Platform; size?: 'sm' | 'md' }) => {
   if (platform === 'unknown') return null;
   const cfg = PLATFORM_CONFIG[platform];
   const bg = cfg.gradient ?? cfg.color;
+  const dim = size === 'sm' ? 'w-4 h-4' : 'w-5 h-5';
+  const iconDim = size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3';
   return (
     <span
-      className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center shadow-sm border border-background"
+      className={`absolute -top-1 -right-1 ${dim} rounded-full flex items-center justify-center shadow border-[1.5px] border-background`}
       style={{ background: bg }}
       title={cfg.label}
     >
       {platform === 'whatsapp' && (
-        <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5">
-          <path d="M14.5 10.75c-.2-.1-.95-.47-1.1-.52-.15-.06-.26-.09-.37.08-.11.17-.42.52-.51.63-.1.11-.19.12-.35.04-.94-.47-1.56-.84-2.18-1.9-.17-.29.17-.27.48-.9.05-.1.03-.2-.01-.27-.04-.08-.37-.9-.51-1.23-.13-.33-.27-.28-.37-.29-.1 0-.21-.02-.32-.02s-.29.04-.44.22c-.15.17-.58.57-.58 1.38s.59 1.6.68 1.71c.08.11 1.16 1.77 2.82 2.48.39.17.7.27.94.35.4.12.76.1 1.04.06.32-.05.98-.4 1.12-.79.14-.39.14-.73.1-.8-.04-.07-.15-.11-.32-.19z" fill="white"/>
-          <path d="M10 2C5.6 2 2 5.6 2 10c0 1.4.4 2.8 1 4l-1.1 3.9L5.9 17c1.2.6 2.5 1 4.1 1 4.4 0 8-3.6 8-8s-3.6-8-8-8zm0 14.5c-1.3 0-2.6-.4-3.6-1l-.3-.2-2.2.6.6-2.2-.2-.3C3.4 12.4 3 11.2 3 10c0-3.9 3.1-7 7-7s7 3.1 7 7-3.1 7-7 7z" fill="white"/>
+        <svg viewBox="0 0 32 32" className={iconDim} fill="none">
+          <path fill="white" d="M16 3C8.832 3 3 8.832 3 16c0 2.3.617 4.458 1.688 6.323L3 29l6.854-1.656A12.938 12.938 0 0016 29c7.168 0 13-5.832 13-13S23.168 3 16 3zm0 2c6.086 0 11 4.914 11 11s-4.914 11-11 11a10.93 10.93 0 01-5.5-1.48l-.387-.227-4.007.969.996-3.899-.254-.406A10.944 10.944 0 015 16C5 9.914 9.914 5 16 5zm-3.281 5.719c-.2 0-.516.074-.789.371-.273.297-1.04 1.016-1.04 2.48 0 1.462 1.066 2.875 1.215 3.074.148.2 2.063 3.262 5.063 4.449 2.497.984 3.004.789 3.547.738.543-.05 1.75-.715 1.996-1.406.246-.691.246-1.285.172-1.406-.074-.121-.273-.195-.574-.34-.3-.148-1.75-.863-2.023-.961-.274-.098-.473-.148-.672.149-.199.296-.77.96-.945 1.16-.175.198-.35.222-.65.074-.3-.149-1.265-.466-2.41-1.484-.89-.793-1.492-1.77-1.668-2.067-.175-.296-.019-.457.132-.605.136-.133.3-.348.45-.52.148-.175.198-.3.297-.498.098-.2.05-.372-.025-.52-.074-.148-.664-1.618-.918-2.211-.234-.563-.476-.485-.664-.493-.175-.008-.37-.012-.571-.012z"/>
         </svg>
       )}
       {platform === 'facebook' && (
-        <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5">
-          <path d="M12 6.5h-1.5C10 6.5 10 7 10 7.5V9h2l-.3 2H10v5H8v-5H6V9h2V7.5C8 5.6 9.3 5 11 5h1v1.5z" fill="white"/>
+        <svg viewBox="0 0 32 32" className={iconDim} fill="none">
+          <path fill="white" d="M17.78 27.5V18.2h3.1l.46-3.6h-3.56v-2.3c0-1.04.29-1.75 1.77-1.75H21.5V7.4a23.7 23.7 0 00-3.1-.16c-3.07 0-5.17 1.88-5.17 5.32v2.97H10v3.6h3.23V27.5h4.55z"/>
         </svg>
       )}
       {platform === 'instagram' && (
-        <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5">
-          <rect x="3.5" y="3.5" width="13" height="13" rx="3.5" stroke="white" strokeWidth="1.5" fill="none"/>
-          <circle cx="10" cy="10" r="3" stroke="white" strokeWidth="1.5" fill="none"/>
-          <circle cx="14" cy="6" r="1" fill="white"/>
+        <svg viewBox="0 0 32 32" className={iconDim} fill="none">
+          <rect x="5" y="5" width="22" height="22" rx="6" stroke="white" strokeWidth="2.2" fill="none"/>
+          <circle cx="16" cy="16" r="5" stroke="white" strokeWidth="2.2" fill="none"/>
+          <circle cx="22.5" cy="9.5" r="1.4" fill="white"/>
         </svg>
       )}
     </span>
