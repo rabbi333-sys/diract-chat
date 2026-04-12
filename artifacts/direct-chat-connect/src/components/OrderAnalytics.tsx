@@ -62,27 +62,35 @@ async function generateAnalyticsPDF(
       import('html2canvas').then(m => m.default),
     ]);
 
-    const W = 210; const PH = 297; const M = 14; const CW = W - M * 2;
+    // ── Constants ─────────────────────────────────────────────
+    const W = 210; const PH = 297; const M = 16; const CW = W - M * 2;
     type RGB = [number, number, number];
     const C = {
-      blue:    [66, 133, 244] as RGB,
-      ink:     [32, 33, 36]   as RGB,
-      muted:   [95, 99, 104]  as RGB,
-      border:  [218, 220, 224] as RGB,
-      bg:      [248, 249, 250] as RGB,
+      navy:    [15,  23,  42]  as RGB,
+      blue:    [37,  99,  235] as RGB,
+      blueLt:  [219, 234, 254] as RGB,
+      ink:     [17,  24,  39]  as RGB,
+      dark:    [55,  65,  81]  as RGB,
+      muted:   [107, 114, 128] as RGB,
+      border:  [229, 231, 235] as RGB,
+      bg:      [249, 250, 251] as RGB,
       white:   [255, 255, 255] as RGB,
-      green:   [30, 142, 62]  as RGB,
-      amber:   [183, 117, 0]  as RGB,
-      red:     [197, 34, 31]  as RGB,
-      violet:  [109, 40, 180] as RGB,
-      cyan:    [6, 100, 140]  as RGB,
-      emerald: [4, 120, 87]   as RGB,
-      rowAlt:  [248, 250, 252] as RGB,
+      green:   [22,  163, 74]  as RGB,
+      greenLt: [220, 252, 231] as RGB,
+      red:     [220, 38,  38]  as RGB,
+      redLt:   [254, 226, 226] as RGB,
+      amber:   [180, 83,  9]   as RGB,
+      amberLt: [254, 243, 199] as RGB,
+      violet:  [124, 58,  237] as RGB,
+      cyan:    [8,   145, 178] as RGB,
+      emerald: [5,   150, 105] as RGB,
+      rowAlt:  [248, 249, 250] as RGB,
     };
     const statusColors: Record<string, RGB> = {
       pending: C.amber, confirmed: C.blue, processing: C.violet,
       shipped: C.cyan,  delivered: C.emerald, cancelled: C.red,
     };
+    const tk = (n: number) => `Tk. ${n.toLocaleString()}`;
 
     const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
     const fill   = (c: RGB) => pdf.setFillColor(...c);
@@ -92,105 +100,199 @@ async function generateAnalyticsPDF(
     const norm   = (s: number) => { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(s); };
 
     const h2c = (el: HTMLElement) =>
-      html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
+      html2canvas(el, { scale: 2.5, useCORS: true, backgroundColor: '#ffffff', logging: false });
 
-    const addSectionImage = (canvas: HTMLCanvasElement, yPos: number, maxH: number) => {
-      const imgW  = CW;
+    const addImg = (canvas: HTMLCanvasElement, yPos: number, maxH: number, xOff = 0, wOff = 0) => {
+      const imgW  = CW - wOff;
       const ratio = canvas.height / canvas.width;
       const imgH  = Math.min(imgW * ratio, maxH);
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', M, yPos, imgW, imgH);
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', M + xOff, yPos, imgW, imgH);
       return imgH;
     };
 
-    const addFooter = (page: number, total: number) => {
-      const fy = PH - 11;
-      fill(C.bg); pdf.rect(0, fy, W, 11, 'F');
-      stroke(C.border); pdf.setLineWidth(0.3); pdf.line(M, fy, W - M, fy);
-      color(C.muted); norm(7);
-      pdf.text('Chat Monitor  ·  Analytics Report', M, fy + 7);
-      pdf.text(`Page ${page} of ${total}  ·  Generated ${format(new Date(), 'dd MMM yyyy, HH:mm')}`, W - M, fy + 7, { align: 'right' });
+    const sectionHead = (title: string, yy: number) => {
+      color(C.navy); bold(10.5); pdf.text(title.toUpperCase(), M, yy);
+      fill(C.blue); pdf.rect(M, yy + 2.5, pdf.getTextWidth(title.toUpperCase()) + 2, 0.8, 'F');
+      return yy + 10;
     };
 
-    // ── PAGE 1 ────────────────────────────────────────────────
-    // Top accent bar
-    fill(C.blue); pdf.rect(0, 0, W, 4, 'F');
+    const addFooter = (page: number, total: number) => {
+      const fy = PH - 12;
+      fill(C.bg); pdf.rect(0, fy, W, 12, 'F');
+      stroke(C.border); pdf.setLineWidth(0.25); pdf.line(0, fy, W, fy);
+      color(C.muted); norm(7.5);
+      pdf.text('Chat Monitor  |  Analytics Report  |  Confidential', M, fy + 7.5);
+      pdf.text(`Page ${page} / ${total}   Generated: ${format(new Date(), 'dd MMM yyyy, HH:mm')}`, W - M, fy + 7.5, { align: 'right' });
+    };
 
-    // Header
-    let y = 13;
-    color(C.ink); bold(20); pdf.text('Analytics Report', M, y);
-    y += 6;
-    color(C.muted); norm(8.5);
-    pdf.text(`Period: ${viewMode.charAt(0).toUpperCase() + viewMode.slice(1)}  ·  ${summary.total} orders  ·  ৳${summary.revenue.toLocaleString()} revenue`, M, y);
-    y += 5;
-    stroke(C.border); pdf.setLineWidth(0.4); pdf.line(M, y, W - M, y);
-    y += 8;
+    // ════════════════════════════════════════════════════════
+    // PAGE 1
+    // ════════════════════════════════════════════════════════
 
-    // ── KPI cards screenshot ──────────────────────────────────
+    // Full-width dark header band
+    fill(C.navy); pdf.rect(0, 0, W, 46, 'F');
+    // Blue left accent stripe
+    fill(C.blue); pdf.rect(0, 0, 5, 46, 'F');
+    // Subtle diagonal highlight
+    pdf.setGState(new (pdf as any).GState({ opacity: 0.06 }));
+    fill(C.white); pdf.triangle(W - 60, 0, W, 0, W, 46, 'F');
+    pdf.setGState(new (pdf as any).GState({ opacity: 1 }));
+
+    // Logo badge
+    fill(C.blue); pdf.roundedRect(M + 2, 9, 26, 12, 2, 2, 'F');
+    color(C.white); bold(8); pdf.text('CHAT', M + 15, 14.5, { align: 'center' });
+    norm(6.5); pdf.text('MONITOR', M + 15, 19, { align: 'center' });
+
+    // Report title
+    color(C.white); bold(22); pdf.text('Analytics Report', M + 33, 18);
+    // Subtitle line
+    color([180, 200, 240] as RGB); norm(8.5);
+    const period = viewMode.charAt(0).toUpperCase() + viewMode.slice(1);
+    pdf.text(`${period} Period  |  ${summary.total} orders  |  ${tk(summary.revenue)} revenue  |  ${format(new Date(), 'dd MMM yyyy')}`, M + 33, 27);
+
+    // KPI pill badges in header
+    const pills = [
+      { label: 'Revenue',  val: tk(summary.revenue), c: C.blue  as RGB },
+      { label: 'Orders',   val: `${summary.total}`,  c: [30,90,170] as RGB },
+      { label: 'Pending',  val: `${summary.statuses.pending?.count ?? 0}`,   c: [100,60,0] as RGB },
+      { label: 'Delivered',val: `${summary.statuses.delivered?.count ?? 0}`, c: [0,100,60] as RGB },
+    ];
+    let px = M + 33;
+    pills.forEach(p => {
+      const lw = pdf.getTextWidth(p.label);
+      const vw = pdf.getTextWidth(p.val);
+      const pw = Math.max(lw, vw) + 6;
+      fill([255,255,255,0.12] as unknown as RGB);
+      pdf.setGState(new (pdf as any).GState({ opacity: 0.18 }));
+      fill(C.white); pdf.roundedRect(px, 31, pw, 10, 1.5, 1.5, 'F');
+      pdf.setGState(new (pdf as any).GState({ opacity: 1 }));
+      color(C.blueLt); norm(6); pdf.text(p.label, px + pw / 2, 35.5, { align: 'center' });
+      color(C.white); bold(7); pdf.text(p.val, px + pw / 2, 40, { align: 'center' });
+      px += pw + 3;
+    });
+
+    let y = 56;
+
+    // ── KPI Cards Screenshot ───────────────────────────────────
     if (refs.kpi) {
+      y = sectionHead('Key Performance Indicators', y);
       const canvas = await h2c(refs.kpi);
-      const h = addSectionImage(canvas, y, 75);
-      y += h + 8;
+      const h = addImg(canvas, y, 90);
+      y += h + 12;
     }
 
-    // ── Status breakdown table ────────────────────────────────
-    color(C.ink); bold(11); pdf.text('Order Status Breakdown', M, y);
-    fill(C.blue); pdf.rect(M, y + 2, 34, 0.7, 'F');
-    y += 9;
+    // ── Status Breakdown Table ─────────────────────────────────
+    y = sectionHead('Order Status Breakdown', y);
 
-    const SCOLS = [40, 20, 20, 22, 40, 26];
-    const SHEADS = ['STATUS', 'COUNT', '% SHARE', 'CHANGE', 'REVENUE', 'SHARE'];
-    fill(C.blue); pdf.rect(M, y, CW, 8, 'F');
-    color(C.white); bold(7);
-    let cx = M + 3;
-    SHEADS.forEach((h, i) => { pdf.text(h, cx, y + 5.5); cx += SCOLS[i]; });
-    y += 8;
+    // Table outer border
+    stroke(C.border); pdf.setLineWidth(0.3);
+    const tableStartY = y;
+
+    // Table header row
+    const SCOLS = [42, 18, 18, 22, 42, 24];
+    const SHEADS = ['STATUS', 'COUNT', 'SHARE', 'CHANGE', 'REVENUE', 'BAR'];
+    const TH = 9;
+    fill(C.navy); pdf.rect(M, y, CW, TH, 'F');
+    color(C.white); bold(7.5);
+    let cx = M + 4;
+    SHEADS.forEach((h, i) => {
+      pdf.text(h, cx, y + 6);
+      cx += SCOLS[i];
+    });
+    y += TH;
 
     Object.entries(STATUS_META).forEach(([key, meta], idx) => {
       const { count, change } = summary.statuses[key] ?? { count: 0, change: 0 };
       const pct = summary.total > 0 ? Math.round((count / summary.total) * 100) : 0;
       const rev = filteredOrders.filter(o => o.status === key).reduce((s, o) => s + (Number(o.total_price) || 0), 0);
-      const rowH = 9;
-      fill(idx % 2 === 0 ? C.white : C.rowAlt); pdf.rect(M, y, CW, rowH, 'F');
-      stroke(C.border); pdf.setLineWidth(0.15); pdf.line(M, y + rowH, M + CW, y + rowH);
+      const rowH = 10;
+
+      // Alternating row bg
+      fill(idx % 2 === 0 ? C.white : C.rowAlt);
+      pdf.rect(M, y, CW, rowH, 'F');
+      // Row bottom border
+      stroke(C.border); pdf.setLineWidth(0.15);
+      pdf.line(M, y + rowH, M + CW, y + rowH);
+
+      // Status dot
       const sc = statusColors[key] ?? C.muted;
-      fill(sc); pdf.circle(M + 4, y + 4.5, 2, 'F');
-      color(C.ink); norm(8.5); pdf.text(meta.label, M + 9, y + 5.8);
-      cx = M + SCOLS[0] + 3;
-      bold(8.5); pdf.text(count.toString(), cx, y + 5.8); cx += SCOLS[1];
-      norm(8); color(C.muted); pdf.text(`${pct}%`, cx, y + 5.8); cx += SCOLS[2];
-      color(change >= 0 ? C.green : C.red); pdf.text(`${change >= 0 ? '+' : ''}${change}%`, cx, y + 5.8); cx += SCOLS[3];
-      color(C.ink); norm(8); pdf.text(`৳${rev.toLocaleString()}`, cx, y + 5.8); cx += SCOLS[4];
-      const bw = SCOLS[5] - 4;
-      fill(C.border); pdf.roundedRect(cx, y + 3.5, bw, 2.5, 1, 1, 'F');
-      if (pct > 0) { fill(sc); pdf.roundedRect(cx, y + 3.5, Math.max(1.5, bw * pct / 100), 2.5, 1, 1, 'F'); }
+      fill(sc); pdf.circle(M + 5, y + 5, 2.2, 'F');
+
+      // Status label
+      color(C.ink); bold(8.5); pdf.text(meta.label, M + 10, y + 6.5);
+
+      cx = M + SCOLS[0] + 4;
+      // Count
+      bold(9); color(C.ink); pdf.text(count.toString(), cx, y + 6.5); cx += SCOLS[1];
+      // Share %
+      norm(8); color(C.muted); pdf.text(`${pct}%`, cx, y + 6.5); cx += SCOLS[2];
+      // Change
+      if (change > 0) {
+        color(C.green); bold(8); pdf.text(`+${change}%`, cx, y + 6.5);
+      } else if (change < 0) {
+        color(C.red); bold(8); pdf.text(`${change}%`, cx, y + 6.5);
+      } else {
+        color(C.muted); norm(8); pdf.text('--', cx, y + 6.5);
+      }
+      cx += SCOLS[3];
+      // Revenue
+      color(C.dark); norm(8); pdf.text(tk(rev), cx, y + 6.5); cx += SCOLS[4];
+      // Progress bar
+      const bw = SCOLS[5] - 5;
+      const bh = 3;
+      const by = y + (rowH - bh) / 2;
+      fill(C.border); pdf.roundedRect(cx, by, bw, bh, 1, 1, 'F');
+      if (pct > 0) {
+        fill(sc);
+        pdf.roundedRect(cx, by, Math.max(2, bw * pct / 100), bh, 1, 1, 'F');
+      }
       y += rowH;
     });
 
-    y += 10;
+    // Table outer box
+    stroke(C.border); pdf.setLineWidth(0.3);
+    pdf.rect(M, tableStartY, CW, y - tableStartY, 'S');
 
-    // ── Revenue chart screenshot ──────────────────────────────
+    y += 14;
+
+    // ── Revenue Chart ──────────────────────────────────────────
     if (refs.revChart) {
-      if (y > 200) { pdf.addPage(); y = 18; }
-      color(C.ink); bold(11); pdf.text('Sales Revenue', M, y);
-      fill(C.blue); pdf.rect(M, y + 2, 22, 0.7, 'F');
-      y += 9;
+      if (y > 205) { pdf.addPage(); y = 20; }
+      y = sectionHead('Sales Revenue Trend', y);
       const canvas = await h2c(refs.revChart);
-      const h = addSectionImage(canvas, y, 72);
-      y += h + 10;
+      const h = addImg(canvas, y, 78);
+      y += h + 14;
     }
 
-    // ── Status breakdown chart screenshot ─────────────────────
+    // ── Status Breakdown Chart ─────────────────────────────────
     if (refs.statusChart) {
-      if (y > 190) { pdf.addPage(); y = 18; }
-      color(C.ink); bold(11); pdf.text('Status Breakdown Chart', M, y);
-      fill(C.blue); pdf.rect(M, y + 2, 36, 0.7, 'F');
-      y += 9;
+      if (y > 195) { pdf.addPage(); y = 20; }
+      y = sectionHead('Status Breakdown Chart', y);
       const canvas = await h2c(refs.statusChart);
-      const h = addSectionImage(canvas, y, 80);
-      y += h + 6;
+      const h = addImg(canvas, y, 85);
+      y += h + 8;
     }
 
-    // ── Footers ───────────────────────────────────────────────
+    // ── Summary totals bar ─────────────────────────────────────
+    if (y < PH - 50) {
+      y += 4;
+      fill(C.navy); pdf.roundedRect(M, y, CW, 16, 2, 2, 'F');
+      color(C.white); bold(8);
+      const tots = [
+        { l: 'TOTAL REVENUE', v: tk(summary.revenue) },
+        { l: 'TOTAL ORDERS',  v: summary.total.toString() },
+        { l: 'DELIVERED',     v: (summary.statuses.delivered?.count ?? 0).toString() },
+        { l: 'CANCELLED',     v: (summary.statuses.cancelled?.count ?? 0).toString() },
+      ];
+      const tw = CW / tots.length;
+      tots.forEach((t, i) => {
+        const tx = M + i * tw + tw / 2;
+        color(C.blueLt); norm(6.5); pdf.text(t.l, tx, y + 6, { align: 'center' });
+        color(C.white); bold(9.5); pdf.text(t.v, tx, y + 13, { align: 'center' });
+      });
+    }
+
+    // ── Footers ────────────────────────────────────────────────
     const pageCount = (pdf as any).getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) { pdf.setPage(i); addFooter(i, pageCount); }
 
