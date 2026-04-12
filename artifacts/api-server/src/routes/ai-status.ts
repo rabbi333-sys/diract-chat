@@ -16,11 +16,8 @@
  */
 
 import { Router, type Request, type Response } from "express";
-import pg from "pg";
-import mysql from "mysql2/promise";
-import { MongoClient } from "mongodb";
-import { createClient as createRedis } from "redis";
 import { getServerDbConfig } from "../lib/server-db-config";
+import { getPgPool, getMysqlPool, getMongoClient, getRedisClient, type SessionsCreds } from "../lib/connection-pool";
 
 const router = Router();
 
@@ -36,6 +33,10 @@ type NonSupaCreds = {
   connectionString?: string;
 };
 
+function toSessionsCreds(c: NonSupaCreds): SessionsCreds {
+  return { ...c };
+}
+
 async function checkSupabase(supabaseUrl: string, anonKey: string, sessionId: string): Promise<boolean> {
   const url = `${supabaseUrl.replace(/\/$/, "")}/rest/v1/ai_control?session_id=eq.${encodeURIComponent(sessionId)}&select=ai_enabled&limit=1`;
   const res = await fetch(url, {
@@ -45,80 +46,42 @@ async function checkSupabase(supabaseUrl: string, anonKey: string, sessionId: st
       "Content-Type": "application/json",
     },
   });
-  if (!res.ok) return true; // default AI ON on error
+  if (!res.ok) return true;
   const rows = await res.json() as Array<{ ai_enabled: boolean }>;
-  if (!rows || rows.length === 0) return true; // row not found → AI ON
+  if (!rows || rows.length === 0) return true;
   return rows[0].ai_enabled ?? true;
 }
 
 async function checkPostgres(creds: NonSupaCreds, sessionId: string): Promise<boolean> {
-  const client = new pg.Client({
-    host: creds.host,
-    port: creds.port ? parseInt(creds.port) : 5432,
-    user: creds.dbUsername,
-    password: creds.dbPassword,
-    database: creds.dbName,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 8000,
-  });
-  await client.connect();
-  try {
-    const { rows } = await client.query(
-      "SELECT ai_enabled FROM ai_control WHERE session_id = $1 LIMIT 1",
-      [sessionId],
-    );
-    return rows[0]?.ai_enabled ?? true;
-  } finally {
-    await client.end().catch(() => {});
-  }
+  const pool = getPgPool(toSessionsCreds(creds));
+  const { rows } = await pool.query(
+    "SELECT ai_enabled FROM ai_control WHERE session_id = $1 LIMIT 1",
+    [sessionId],
+  );
+  return rows[0]?.ai_enabled ?? true;
 }
 
 async function checkMysql(creds: NonSupaCreds, sessionId: string): Promise<boolean> {
-  const conn = await mysql.createConnection({
-    host: creds.host,
-    port: creds.port ? parseInt(creds.port) : 3306,
-    user: creds.dbUsername,
-    password: creds.dbPassword,
-    database: creds.dbName,
-    connectTimeout: 8000,
-    ssl: {},
-  });
-  try {
-    const [rows] = await conn.query<mysql.RowDataPacket[]>(
-      "SELECT ai_enabled FROM ai_control WHERE session_id = ? LIMIT 1",
-      [sessionId],
-    );
-    return rows[0]?.ai_enabled ?? true;
-  } finally {
-    await conn.end().catch(() => {});
-  }
+  const pool = getMysqlPool(toSessionsCreds(creds));
+  const [rows] = await pool.execute<import("mysql2").RowDataPacket[]>(
+    "SELECT ai_enabled FROM ai_control WHERE session_id = ? LIMIT 1",
+    [sessionId],
+  );
+  return rows[0]?.ai_enabled ?? true;
 }
 
 async function checkMongo(creds: NonSupaCreds, sessionId: string): Promise<boolean> {
-  const uri = creds.connectionString ||
-    `mongodb://${creds.dbUsername}:${creds.dbPassword}@${creds.host}:${creds.port || 27017}/${creds.dbName}`;
-  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 8000 });
-  await client.connect();
-  try {
-    const db = client.db(creds.dbName);
-    const doc = await db.collection("ai_control").findOne({ session_id: sessionId }, { projection: { ai_enabled: 1 } });
-    return doc?.ai_enabled ?? true;
-  } finally {
-    await client.close().catch(() => {});
-  }
+  const client = await getMongoClient(toSessionsCreds(creds));
+  const db = client.db(creds.dbName);
+  const doc = await db.collection("ai_control").findOne({ session_id: sessionId }, { projection: { ai_enabled: 1 } });
+  return doc?.ai_enabled ?? true;
 }
 
 async function checkRedis(creds: NonSupaCreds, sessionId: string): Promise<boolean> {
-  const url = creds.connectionString || `redis://${creds.host}:${creds.port || 6379}`;
-  const client = createRedis({ url, socket: { connectTimeout: 8000 } });
-  await client.connect();
-  try {
-    const val = await client.get(`ai_control:${sessionId}`);
-    if (val === null) return true; // not set → AI ON
-    return val !== "false";
-  } finally {
-    await client.disconnect().catch(() => {});
-  }
+  const r = getRedisClient(toSessionsCreds(creds));
+  const val = await r.get(`ai_control:${sessionId}`);
+  if (val === null) return true;
+  return val !== "false";
 }
 
 // ─── Route ────────────────────────────────────────────────────────────────────
@@ -135,9 +98,6 @@ router.post("/ai-status", async (req: Request, res: Response) => {
     return void res.status(400).json({ error: "session_id is required" });
   }
 
-  // Resolve effective credentials:
-  // 1. Use what was passed in the request (explicit)
-  // 2. Fall back to server-stored credentials (saved from dashboard)
   let effectiveUrl = supabase_url;
   let effectiveKey = anon_key;
   let effectiveCreds = creds;
@@ -176,14 +136,13 @@ router.post("/ai-status", async (req: Request, res: Response) => {
     } else if (effectiveCreds?.dbType === "redis") {
       aiEnabled = await checkRedis(effectiveCreds, session_id);
     } else {
-      // No credentials at all — default AI ON and let the workflow continue
       return void res.json({ ai_enabled: true, session_id, note: "no_db_config" });
     }
 
     res.json({ ai_enabled: aiEnabled, session_id });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg, ai_enabled: true }); // default AI ON on error
+    res.status(500).json({ error: msg, ai_enabled: true });
   }
 });
 

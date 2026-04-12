@@ -1,28 +1,18 @@
 import { Router, type Request, type Response } from "express";
-import pg from "pg";
-import mysql from "mysql2/promise";
-import { MongoClient } from "mongodb";
-import Redis from "ioredis";
+import {
+  getPgPool,
+  getMysqlPool,
+  getMongoClient,
+  getRedisClient,
+  mongoUri,
+  type SessionsCreds,
+} from "../lib/connection-pool";
+
+export type { SessionsCreds };
 
 const router = Router();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-export type SessionsCreds = {
-  dbType: "postgresql" | "mysql" | "mongodb" | "redis" | "supabase";
-  // PostgreSQL / MySQL
-  host?: string;
-  port?: string;
-  dbUsername?: string;
-  dbPassword?: string;
-  dbName?: string;
-  // MongoDB / Redis
-  connectionString?: string;
-  // Supabase (direct pg connection via dbPassword)
-  supabaseUrl?: string;
-  // Table / collection name override
-  tableName?: string;
-};
 
 export type NormalizedMessage = {
   id: string | number;
@@ -31,7 +21,6 @@ export type NormalizedMessage = {
   message_text: string;
   timestamp: string;
   recipient?: string;
-  /** Platform message ID (wamid for WA, mid for FB/IG) — extracted from DB row when stored */
   platform_message_id?: string;
 };
 
@@ -51,7 +40,6 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
   const id = (raw.id ?? raw._id ?? "") as string | number;
   const session_id = String(raw.session_id ?? raw.sessionId ?? raw.conversation_id ?? "unknown");
   const recipient = (raw.recipient ?? raw.to ?? raw.phone ?? undefined) as string | undefined;
-  // Build timestamp: handle ISO strings, numeric Unix timestamps, and embedded message timestamps
   const rawTs =
     raw.created_at ?? raw.timestamp ?? raw.createdAt ??
     raw.updated_at ?? raw.updatedAt ?? raw.date ?? raw.time ??
@@ -70,10 +58,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     timestamp = String(rawTs);
   }
 
-  // Extract platform_message_id from multiple common field names.
-  // Covers: direct columns, n8n additional_kwargs, and metadata JSON objects.
   const platform_message_id: string | undefined = (() => {
-    // All raw fields are already typed as `any` via the function parameter — no new casts needed.
     const msgObj = raw.message && typeof raw.message === 'object'
       ? (raw.message as Record<string, unknown>)
       : null;
@@ -102,7 +87,6 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     return undefined;
   })();
 
-  // n8n / LangChain format: { message: { type, data: { content } } }
   if (raw.message && typeof raw.message === "object") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const msg = raw.message as Record<string, any>;
@@ -116,7 +100,6 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     return { id, session_id, sender: isHuman ? "User" : isAgent ? "Agent" : "AI", message_text: text, timestamp, recipient, platform_message_id };
   }
 
-  // Normalized: { sender, message_text }
   if (raw.sender !== undefined && raw.message_text !== undefined) {
     const s = String(raw.sender).toLowerCase();
     const isHuman = ["user", "human", "customer"].includes(s);
@@ -126,7 +109,6 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     return { id, session_id, sender: isHuman ? "User" : isAgent ? "Agent" : "AI", message_text: text, timestamp, recipient, platform_message_id };
   }
 
-  // Role-based: { role, content }
   if (raw.role !== undefined) {
     const role = String(raw.role).toLowerCase();
     const isHuman = ["user", "human", "customer"].includes(role);
@@ -135,7 +117,6 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     return { id, session_id, sender: isHuman ? "User" : "AI", message_text: text, timestamp, recipient, platform_message_id };
   }
 
-  // Generic fallback
   const typeStr = String(raw.type ?? raw.from ?? "").toLowerCase();
   const isHuman = ["user", "human", "customer", "inbound"].includes(typeStr);
   const text = String(raw.content ?? raw.text ?? raw.body ?? raw.message_text ?? raw.message ?? "");
@@ -172,53 +153,18 @@ function buildSessions(msgs: NormalizedMessage[]): SessionInfo[] {
   return sessions.map(({ last_id: _lid, ...s }) => s);
 }
 
-// ─── Connection helpers ────────────────────────────────────────────────────────
-
-function buildPgConnStr(c: SessionsCreds): string {
-  if (c.dbType === "supabase" && c.supabaseUrl && c.dbPassword) {
-    const match = c.supabaseUrl.trim().replace(/\/$/, "").match(/https:\/\/([^.]+)\.supabase\.co/i);
-    if (!match) throw new Error("Invalid Supabase URL");
-    return `postgresql://postgres:${encodeURIComponent(c.dbPassword)}@db.${match[1]}.supabase.co:5432/postgres`;
-  }
-  const user = encodeURIComponent(c.dbUsername || "postgres");
-  const pass = c.dbPassword ? encodeURIComponent(c.dbPassword) : "";
-  const host = c.host || "localhost";
-  const port = c.port || "5432";
-  const db = c.dbName || "postgres";
-  return `postgresql://${user}:${pass}@${host}:${port}/${db}`;
-}
+// ─── Query helpers (use pooled connections) ───────────────────────────────────
 
 async function pgQueryRaw(c: SessionsCreds, sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
-  const pool = new pg.Pool({ connectionString: buildPgConnStr(c), ssl: { rejectUnauthorized: false }, max: 1, idleTimeoutMillis: 5000, connectionTimeoutMillis: 8000 });
-  try {
-    const { rows } = await pool.query(sql, params);
-    return rows as Record<string, unknown>[];
-  } finally {
-    await pool.end();
-  }
+  const pool = getPgPool(c);
+  const { rows } = await pool.query(sql, params);
+  return rows as Record<string, unknown>[];
 }
 
 async function mysqlQueryRaw(c: SessionsCreds, sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
-  const conn = await mysql.createConnection({ host: c.host || "localhost", port: c.port ? Number(c.port) : 3306, user: c.dbUsername || "root", password: c.dbPassword || "", database: c.dbName || "mydb", ssl: { rejectUnauthorized: false } });
-  try {
-    const [rows] = await conn.query(sql, params);
-    return rows as Record<string, unknown>[];
-  } finally {
-    await conn.end();
-  }
-}
-
-function mongoUri(c: SessionsCreds): string {
-  if (c.connectionString) return c.connectionString;
-  const user = c.dbUsername ? encodeURIComponent(c.dbUsername) : "";
-  const pass = c.dbPassword ? encodeURIComponent(c.dbPassword) : "";
-  const auth = user ? `${user}:${pass}@` : "";
-  return `mongodb://${auth}${c.host || "localhost"}:${c.port || "27017"}/${c.dbName || ""}`;
-}
-
-function redisClient(c: SessionsCreds): Redis {
-  if (c.connectionString) return new Redis(c.connectionString, { lazyConnect: true, maxRetriesPerRequest: 1 });
-  return new Redis({ host: c.host || "localhost", port: c.port ? Number(c.port) : 6379, password: c.dbPassword || undefined, lazyConnect: true, maxRetriesPerRequest: 1 });
+  const pool = getMysqlPool(c);
+  const [rows] = await pool.execute(sql, params);
+  return rows as Record<string, unknown>[];
 }
 
 // ─── Fetch all messages (for session list + analytics) ────────────────────────
@@ -237,52 +183,42 @@ async function fetchAllMessages(c: SessionsCreds): Promise<NormalizedMessage[]> 
   }
 
   if (c.dbType === "mongodb") {
-    const client = new MongoClient(mongoUri(c), { serverSelectionTimeoutMS: 8000 });
-    await client.connect();
-    try {
-      const db = client.db(c.dbName || "meta_automation");
-      const rows = await db.collection(tbl).find({}).sort({ _id: -1 }).limit(2000).toArray();
-      return rows.map((r) => normalizeRow({ ...r, id: String(r._id ?? "") })).filter(Boolean) as NormalizedMessage[];
-    } finally {
-      await client.close();
-    }
+    const client = await getMongoClient(c);
+    const db = client.db(c.dbName || "meta_automation");
+    const rows = await db.collection(tbl).find({}).sort({ _id: -1 }).limit(2000).toArray();
+    return rows.map((r) => normalizeRow({ ...r, id: String(r._id ?? "") })).filter(Boolean) as NormalizedMessage[];
   }
 
   if (c.dbType === "redis") {
-    const r = redisClient(c);
-    await r.connect();
-    try {
-      const msgs: NormalizedMessage[] = [];
-      const sessionKeys = await r.smembers("sessions_index").catch(() => [] as string[]);
-      if (sessionKeys.length > 0) {
-        for (const sid of sessionKeys.slice(0, 200)) {
-          const items = await r.lrange(`session:${sid}`, 0, -1).catch(() => [] as string[]);
-          for (const item of items) {
-            try {
-              const parsed = JSON.parse(item);
-              const norm = normalizeRow({ ...parsed, session_id: parsed.session_id ?? sid });
-              if (norm) msgs.push(norm);
-            } catch { /* skip */ }
-          }
-        }
-      } else {
-        const keys = await r.keys("session:*").catch(() => [] as string[]);
-        for (const key of keys.slice(0, 200)) {
-          const sid = key.replace(/^session:/, "");
-          const items = await r.lrange(key, 0, -1).catch(() => [] as string[]);
-          for (const item of items) {
-            try {
-              const parsed = JSON.parse(item);
-              const norm = normalizeRow({ ...parsed, session_id: parsed.session_id ?? sid });
-              if (norm) msgs.push(norm);
-            } catch { /* skip */ }
-          }
+    const r = getRedisClient(c);
+    const msgs: NormalizedMessage[] = [];
+    const sessionKeys = await r.smembers("sessions_index").catch(() => [] as string[]);
+    if (sessionKeys.length > 0) {
+      for (const sid of sessionKeys.slice(0, 200)) {
+        const items = await r.lrange(`session:${sid}`, 0, -1).catch(() => [] as string[]);
+        for (const item of items) {
+          try {
+            const parsed = JSON.parse(item);
+            const norm = normalizeRow({ ...parsed, session_id: parsed.session_id ?? sid });
+            if (norm) msgs.push(norm);
+          } catch { /* skip */ }
         }
       }
-      return msgs;
-    } finally {
-      r.disconnect();
+    } else {
+      const keys = await r.keys("session:*").catch(() => [] as string[]);
+      for (const key of keys.slice(0, 200)) {
+        const sid = key.replace(/^session:/, "");
+        const items = await r.lrange(key, 0, -1).catch(() => [] as string[]);
+        for (const item of items) {
+          try {
+            const parsed = JSON.parse(item);
+            const norm = normalizeRow({ ...parsed, session_id: parsed.session_id ?? sid });
+            if (norm) msgs.push(norm);
+          } catch { /* skip */ }
+        }
+      }
     }
+    return msgs;
   }
 
   return [];
@@ -312,42 +248,31 @@ async function fetchSessionMessages(c: SessionsCreds, sessionId: string, limit =
   }
 
   if (c.dbType === "mongodb") {
-    const client = new MongoClient(mongoUri(c), { serverSelectionTimeoutMS: 8000 });
-    await client.connect();
-    try {
-      const db = client.db(c.dbName || "meta_automation");
-      const rows = await db
-        .collection(tbl)
-        .find({ session_id: sessionId })
-        .sort({ _id: -1 })
-        .skip(offset)
-        .limit(limit)
-        .toArray();
-      return rows.map((r) => normalizeRow({ ...r, id: String(r._id ?? "") })).filter(Boolean) as NormalizedMessage[];
-    } finally {
-      await client.close();
-    }
+    const client = await getMongoClient(c);
+    const db = client.db(c.dbName || "meta_automation");
+    const rows = await db
+      .collection(tbl)
+      .find({ session_id: sessionId })
+      .sort({ _id: -1 })
+      .skip(offset)
+      .limit(limit)
+      .toArray();
+    return rows.map((r) => normalizeRow({ ...r, id: String(r._id ?? "") })).filter(Boolean) as NormalizedMessage[];
   }
 
   if (c.dbType === "redis") {
-    const r = redisClient(c);
-    await r.connect();
-    try {
-      const items = await r.lrange(`session:${sessionId}`, 0, -1).catch(() => [] as string[]);
-      const all = items
-        .map((item) => {
-          try {
-            const parsed = JSON.parse(item);
-            return normalizeRow({ ...parsed, session_id: parsed.session_id ?? sessionId });
-          } catch { return null; }
-        })
-        .filter(Boolean) as NormalizedMessage[];
-      // Sort newest-first, then apply offset/limit
-      all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-      return all.slice(offset, offset + limit);
-    } finally {
-      r.disconnect();
-    }
+    const r = getRedisClient(c);
+    const items = await r.lrange(`session:${sessionId}`, 0, -1).catch(() => [] as string[]);
+    const all = items
+      .map((item) => {
+        try {
+          const parsed = JSON.parse(item);
+          return normalizeRow({ ...parsed, session_id: parsed.session_id ?? sessionId });
+        } catch { return null; }
+      })
+      .filter(Boolean) as NormalizedMessage[];
+    all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    return all.slice(offset, offset + limit);
   }
 
   return [];
@@ -435,7 +360,6 @@ router.post("/sessions/insert", async (req: Request, res: Response) => {
 
   try {
     if (creds.dbType === "postgresql" || creds.dbType === "supabase") {
-      // Try n8n format first, then normalized
       try {
         await pgQueryRaw(creds, `INSERT INTO ${tbl} (session_id, message, recipient) VALUES ($1, $2::jsonb, $3)`, [
           message.session_id,
@@ -466,33 +390,23 @@ router.post("/sessions/insert", async (req: Request, res: Response) => {
     }
 
     if (creds.dbType === "mongodb") {
-      const client = new MongoClient(mongoUri(creds), { serverSelectionTimeoutMS: 8000 });
-      await client.connect();
-      try {
-        const db = client.db(creds.dbName || "meta_automation");
-        await db.collection(tbl).insertOne({
-          session_id: message.session_id,
-          message: { type: "ai", data: { content: message.message_text } },
-          recipient: message.recipient ?? null,
-          created_at: ts,
-        });
-        return void res.json({ ok: true });
-      } finally {
-        await client.close();
-      }
+      const client = await getMongoClient(creds);
+      const db = client.db(creds.dbName || "meta_automation");
+      await db.collection(tbl).insertOne({
+        session_id: message.session_id,
+        message: { type: "ai", data: { content: message.message_text } },
+        recipient: message.recipient ?? null,
+        created_at: ts,
+      });
+      return void res.json({ ok: true });
     }
 
     if (creds.dbType === "redis") {
-      const r = redisClient(creds);
-      await r.connect();
-      try {
-        const payload = JSON.stringify({ session_id: message.session_id, message: { type: "ai", data: { content: message.message_text } }, recipient: message.recipient, created_at: ts });
-        await r.rpush(`session:${message.session_id}`, payload);
-        await r.sadd("sessions_index", message.session_id);
-        return void res.json({ ok: true });
-      } finally {
-        r.disconnect();
-      }
+      const r = getRedisClient(creds);
+      const payload = JSON.stringify({ session_id: message.session_id, message: { type: "ai", data: { content: message.message_text } }, recipient: message.recipient, created_at: ts });
+      await r.rpush(`session:${message.session_id}`, payload);
+      await r.sadd("sessions_index", message.session_id);
+      return void res.json({ ok: true });
     }
 
     res.status(400).json({ error: "Unsupported dbType" });
@@ -533,27 +447,17 @@ router.post("/sessions/validate", async (req: Request, res: Response) => {
     }
 
     if (creds.dbType === "mongodb") {
-      const client = new MongoClient(mongoUri(creds), { serverSelectionTimeoutMS: 8000 });
-      await client.connect();
-      try {
-        const db = client.db(creds.dbName || "meta_automation");
-        const collections = await db.listCollections({ name: tbl }).toArray();
-        if (collections.length === 0) return void res.json({ status: "table-missing" });
-        return void res.json({ status: "ok" });
-      } finally {
-        await client.close();
-      }
+      const client = await getMongoClient(creds);
+      const db = client.db(creds.dbName || "meta_automation");
+      const collections = await db.listCollections({ name: tbl }).toArray();
+      if (collections.length === 0) return void res.json({ status: "table-missing" });
+      return void res.json({ status: "ok" });
     }
 
     if (creds.dbType === "redis") {
-      const r = redisClient(creds);
-      await r.connect();
-      try {
-        await r.ping();
-        return void res.json({ status: "ok" });
-      } finally {
-        r.disconnect();
-      }
+      const r = getRedisClient(creds);
+      await r.ping();
+      return void res.json({ status: "ok" });
     }
 
     res.status(400).json({ error: "Unsupported dbType" });

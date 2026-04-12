@@ -11,14 +11,16 @@ import {
   clearServerDbConfig,
   type ServerDbConfig,
 } from "../lib/server-db-config";
+import { drainAllPools } from "../lib/connection-pool";
 
 const router = Router();
 
-router.post("/db-config", (req: Request, res: Response) => {
+router.post("/db-config", async (req: Request, res: Response) => {
   const body = req.body as Partial<ServerDbConfig>;
   if (!body.dbType) {
     return void res.status(400).json({ error: "dbType is required" });
   }
+  await drainAllPools();
   saveServerDbConfig(body as ServerDbConfig);
   res.json({ ok: true });
 });
@@ -34,7 +36,8 @@ router.get("/db-config", (_req: Request, res: Response) => {
   });
 });
 
-router.delete("/db-config", (_req: Request, res: Response) => {
+router.delete("/db-config", async (_req: Request, res: Response) => {
+  await drainAllPools();
   clearServerDbConfig();
   res.json({ ok: true });
 });

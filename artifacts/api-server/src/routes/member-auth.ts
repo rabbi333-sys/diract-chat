@@ -1,10 +1,14 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
-
-import pg from "pg";
-import mysql from "mysql2/promise";
-import { MongoClient } from "mongodb";
-import Redis from "ioredis";
+import type { Collection } from "mongodb";
+import type { Redis } from "ioredis";
+import {
+  getPgPool,
+  getMysqlPool,
+  getMongoClient,
+  getRedisClient,
+  type SessionsCreds,
+} from "../lib/connection-pool";
 
 const router = Router();
 
@@ -19,6 +23,10 @@ export type DbCreds = {
   dbName?: string;
   connectionString?: string;
 };
+
+function asSC(c: DbCreds): SessionsCreds {
+  return { ...c };
+}
 
 // ── Invite record ─────────────────────────────────────────────────────────────
 
@@ -40,30 +48,13 @@ type InviteRecord = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PostgreSQL helpers
+// PostgreSQL helpers (pooled)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function pgPool(c: DbCreds) {
-  return new pg.Pool({
-    host: c.host,
-    port: c.port ? Number(c.port) : 5432,
-    user: c.dbUsername,
-    password: c.dbPassword,
-    database: c.dbName,
-    ssl: { rejectUnauthorized: false },
-    max: 1,
-    idleTimeoutMillis: 3000,
-  });
-}
-
 async function pgQuery<T>(c: DbCreds, sql: string, params: unknown[] = []): Promise<T[]> {
-  const pool = pgPool(c);
-  try {
-    const { rows } = await pool.query(sql, params);
-    return rows as T[];
-  } finally {
-    await pool.end();
-  }
+  const pool = getPgPool(asSC(c));
+  const { rows } = await pool.query(sql, params);
+  return rows as T[];
 }
 
 const PG_INIT_SQL = `
@@ -97,28 +88,13 @@ END $$;
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MySQL helpers
+// MySQL helpers (pooled)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function mysqlConn(c: DbCreds) {
-  return mysql.createConnection({
-    host: c.host,
-    port: c.port ? Number(c.port) : 3306,
-    user: c.dbUsername,
-    password: c.dbPassword,
-    database: c.dbName,
-    ssl: { rejectUnauthorized: false },
-  });
-}
-
 async function mysqlQuery<T>(c: DbCreds, sql: string, params: unknown[] = []): Promise<T[]> {
-  const conn = await mysqlConn(c);
-  try {
-    const [rows] = await conn.query(sql, params);
-    return rows as T[];
-  } finally {
-    await conn.end();
-  }
+  const pool = getMysqlPool(asSC(c));
+  const [rows] = await pool.execute(sql, params);
+  return rows as T[];
 }
 
 function mysqlUUID() {
@@ -150,61 +126,28 @@ const MYSQL_MIGRATE_SQLS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MongoDB helpers
+// MongoDB helpers (pooled — no client.close())
 // ─────────────────────────────────────────────────────────────────────────────
 
-function mongoUri(c: DbCreds) {
-  if (c.connectionString) return c.connectionString;
-  const user = c.dbUsername ? encodeURIComponent(c.dbUsername) : "";
-  const pass = c.dbPassword ? encodeURIComponent(c.dbPassword) : "";
-  const auth = user ? `${user}:${pass}@` : "";
-  const host = c.host || "127.0.0.1";
-  const port = c.port || "27017";
-  return `mongodb://${auth}${host}:${port}/${c.dbName || ""}`;
-}
-
-async function mongoOp<T>(c: DbCreds, fn: (col: ReturnType<ReturnType<MongoClient["db"]>["collection"]>) => Promise<T>): Promise<T> {
-  const client = new MongoClient(mongoUri(c), { serverSelectionTimeoutMS: 5000 });
-  await client.connect();
-  try {
-    const db = client.db(c.dbName || "meta_automation");
-    await db.collection("team_invites").createIndex({ token: 1 }, { unique: true, background: true }).catch(() => null);
-    await db.collection("team_invites").createIndex({ created_by: 1 }, { background: true }).catch(() => null);
-    return await fn(db.collection("team_invites"));
-  } finally {
-    await client.close();
-  }
+async function mongoOp<T>(c: DbCreds, fn: (col: Collection) => Promise<T>): Promise<T> {
+  const client = await getMongoClient(asSC(c));
+  const db = client.db(c.dbName || "meta_automation");
+  await db.collection("team_invites").createIndex({ token: 1 }, { unique: true }).catch(() => null);
+  await db.collection("team_invites").createIndex({ created_by: 1 }).catch(() => null);
+  return fn(db.collection("team_invites"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Redis helpers
+// Redis helpers (pooled — no connect/disconnect)
 // ─────────────────────────────────────────────────────────────────────────────
-
-function redisClient(c: DbCreds) {
-  if (c.connectionString) return new Redis(c.connectionString, { lazyConnect: true, maxRetriesPerRequest: 1 });
-  return new Redis({
-    host: c.host || "127.0.0.1",
-    port: c.port ? Number(c.port) : 6379,
-    password: c.dbPassword || undefined,
-    db: c.dbName ? Number(c.dbName) : 0,
-    lazyConnect: true,
-    maxRetriesPerRequest: 1,
-    tls: undefined,
-  });
-}
 
 const REDIS_KEY = (token: string) => `team_invite:${token}`;
 const REDIS_IDX  = (userId: string) => `team_invite_idx:${userId}`;
-const REDIS_ALL  = "team_invite_all"; // Set of all tokens
+const REDIS_ALL  = "team_invite_all";
 
 async function redisOp<T>(c: DbCreds, fn: (r: Redis) => Promise<T>): Promise<T> {
-  const r = redisClient(c);
-  await r.connect();
-  try {
-    return await fn(r);
-  } finally {
-    r.disconnect();
-  }
+  const r = getRedisClient(asSC(c));
+  return fn(r);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -239,7 +182,6 @@ function normRow(r: Record<string, unknown>): InviteRecord {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route: POST /api/member-auth/init
-// Ensures the team_invites table/collection exists in the target database.
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post("/member-auth/init", async (req: Request, res: Response) => {
@@ -267,7 +209,6 @@ router.post("/member-auth/init", async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route: POST /api/member-auth/invites/list
-// Returns all invites for a given admin userId.
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post("/member-auth/invites/list", async (req: Request, res: Response) => {
@@ -380,7 +321,6 @@ router.post("/member-auth/invites/create", async (req: Request, res: Response) =
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route: POST /api/member-auth/invites/update
-// Updates status (accept / reject / revoke) on an invite.
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post("/member-auth/invites/update", async (req: Request, res: Response) => {
@@ -467,7 +407,6 @@ router.post("/member-auth/invites/delete", async (req: Request, res: Response) =
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route: POST /api/member-auth/token
-// Returns a pending invite record for the given token (used by InviteAccept).
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post("/member-auth/token", async (req: Request, res: Response) => {
@@ -510,7 +449,6 @@ router.post("/member-auth/token", async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route: POST /api/member-auth/submit
-// Member submits their registration details (name, email, password hash).
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post("/member-auth/submit", async (req: Request, res: Response) => {
@@ -575,7 +513,6 @@ router.post("/member-auth/submit", async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route: POST /api/member-auth/login
-// Validates member credentials and returns the invite record if accepted.
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post("/member-auth/login", async (req: Request, res: Response) => {
@@ -639,6 +576,7 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
           submitted_name: doc.submitted_name ? String(doc.submitted_name) : null,
           submitted_email: doc.submitted_email ? String(doc.submitted_email) : null,
           last_login_at: loginNow,
+          subadmin_db_creds: null,
         };
       });
     } else if (creds.dbType === "redis") {
@@ -658,6 +596,7 @@ router.post("/member-auth/login", async (req: Request, res: Response) => {
               submitted_name: doc.submitted_name,
               submitted_email: doc.submitted_email,
               last_login_at: loginNow,
+              subadmin_db_creds: null,
             };
           }
         }
