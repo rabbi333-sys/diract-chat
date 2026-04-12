@@ -460,11 +460,23 @@ export const useChartData = (
 
   const chartLsKey = LS_CHART + timeRange + '_' + (customStart ?? '') + '_' + (customEnd ?? '') + '_' + dbKey;
 
+  // Include today's date (and current week-of-month for weekly) in the query key so the
+  // chart automatically invalidates when the date changes — no manual refresh needed.
+  const _now = new Date();
+  const _todayStr = format(_now, 'yyyy-MM-dd');
+  const _weekOfMonth = Math.ceil(_now.getDate() / 7);
+  const dateKey = timeRange === 'weekly'
+    ? `${format(_now, 'yyyy-MM')}-w${_weekOfMonth}`
+    : timeRange === 'daily'
+      ? _todayStr
+      : format(_now, 'yyyy-MM');
+
   return useQuery({
-    queryKey: ['chart-data', timeRange, customStart, customEnd, dbKey],
-    staleTime: Infinity,
+    queryKey: ['chart-data', timeRange, customStart, customEnd, dbKey, dateKey],
+    staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchInterval: false,
+    refetchOnWindowFocus: true,
     retry: 1,
     enabled: !isCustom || hasCustomDates,
     placeholderData: (prev: any) => prev,
