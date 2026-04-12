@@ -395,7 +395,10 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
     //   );
     // If the table does not yet exist the upsert error is logged and ignored —
     // broadcast-only mode still works for in-session real-time updates.
-    if (event_type !== 'typing' && message_id) {
+    // Normalize event_type to the message_status schema values before persisting.
+    // 'read_watermark' is a broadcast-only event type — it maps to 'read' in storage.
+    const persistedStatus = event_type === 'read_watermark' ? 'read' : event_type;
+    if (persistedStatus !== 'typing' && message_id && !message_id.startsWith('fb_watermark:')) {
       const restUrl = `${supabase_url.replace(/\/$/, '')}/rest/v1/message_status`;
       try {
         const upsertRes = await fetch(restUrl, {
@@ -409,7 +412,7 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
           body: JSON.stringify({
             session_id,
             platform_message_id: message_id,
-            status: event_type,
+            status: persistedStatus,
             emoji: emoji ?? null,
             updated_at: new Date().toISOString(),
           }),

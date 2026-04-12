@@ -40,6 +40,28 @@ function msgIndexKey(text: string, ts: string) {
 }
 
 /**
+ * Typed interface for calling Supabase against untyped (custom) tables.
+ * Using `unknown` instead of `any` keeps the escape hatch explicit and narrow.
+ */
+type SupabaseUpsertFrom = {
+  from: (table: string) => {
+    upsert: (
+      data: Record<string, string>,
+      options: { onConflict: string }
+    ) => Promise<{ error: { message: string } | null }>;
+  };
+};
+type SupabaseSelectFrom = {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => Promise<{
+        data: Array<Record<string, string>> | null;
+      }>;
+    };
+  };
+};
+
+/**
  * Persist an outbound platform message ID to the Supabase cross-device index table.
  * This allows the msgIndex to survive localStorage clearing and work across devices.
  * Required table DDL (run once in Supabase):
@@ -58,15 +80,17 @@ async function persistPlatformIdToSupabase(
   msgTs: string
 ): Promise<void> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any)
+    await (supabase as unknown as SupabaseUpsertFrom)
       .from('message_platform_ids')
-      .upsert({
-        session_id: sessionId,
-        platform_message_id: platformMsgId,
-        msg_text_prefix: msgText.slice(0, 50),
-        sent_at_minute: msgTs.slice(0, 16),
-      }, { onConflict: 'session_id,platform_message_id' });
+      .upsert(
+        {
+          session_id: sessionId,
+          platform_message_id: platformMsgId,
+          msg_text_prefix: msgText.slice(0, 50),
+          sent_at_minute: msgTs.slice(0, 16),
+        },
+        { onConflict: 'session_id,platform_message_id' }
+      );
   } catch { /* graceful — table may not exist yet */ }
 }
 
@@ -660,18 +684,16 @@ const Conversation = () => {
     // Hydrate historical statuses and cross-device msgIndex from Supabase tables.
     // Both operations are merged under local state (local wins on conflict).
     void (async () => {
+      const sb = supabase as unknown as SupabaseSelectFrom;
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sb = supabase as any;
-
         // 1. Hydrate message statuses from message_status table
         const { data: statusData } = await sb
           .from('message_status')
           .select('platform_message_id, status')
           .eq('session_id', sessionId);
-        if (statusData && Array.isArray(statusData) && statusData.length > 0) {
+        if (statusData && statusData.length > 0) {
           const remote: Record<string, 'sent' | 'delivered' | 'read'> = {};
-          for (const row of statusData as Array<Record<string, string>>) {
+          for (const row of statusData) {
             if (row.platform_message_id && row.status && row.status !== 'reaction') {
               remote[row.platform_message_id] = row.status as 'sent' | 'delivered' | 'read';
             }
@@ -680,7 +702,9 @@ const Conversation = () => {
             setMsgStatuses(prev => ({ ...remote, ...prev }));
           }
         }
+      } catch { /* message_status table may not exist — no-op */ }
 
+      try {
         // 2. Hydrate cross-device msgIndex from message_platform_ids table.
         //    This allows status/reaction lookups to work on any device, even if
         //    localStorage was cleared or the user opened the session fresh.
@@ -688,9 +712,9 @@ const Conversation = () => {
           .from('message_platform_ids')
           .select('platform_message_id, msg_text_prefix, sent_at_minute')
           .eq('session_id', sessionId);
-        if (idxData && Array.isArray(idxData) && idxData.length > 0) {
+        if (idxData && idxData.length > 0) {
           const remoteIdx: Record<string, string> = {};
-          for (const row of idxData as Array<Record<string, string>>) {
+          for (const row of idxData) {
             if (row.platform_message_id && row.msg_text_prefix && row.sent_at_minute) {
               remoteIdx[msgIndexKey(row.msg_text_prefix, row.sent_at_minute)] = row.platform_message_id;
             }
@@ -699,9 +723,7 @@ const Conversation = () => {
             setMsgIndex(prev => ({ ...remoteIdx, ...prev }));
           }
         }
-      } catch {
-        // Tables may not exist — localStorage statuses and index still apply
-      }
+      } catch { /* message_platform_ids table may not exist — localStorage index still applies */ }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);

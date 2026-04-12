@@ -115,17 +115,33 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
   // Extract platform_message_id from multiple common field names.
   // Covers: direct columns, n8n additional_kwargs, and metadata JSON objects.
   const platform_message_id: string | undefined = (() => {
-    const direct =
-      raw.platform_message_id ??
-      raw.wamid ??
-      raw.mid ??
-      raw.message_id ??
-      (raw.metadata && typeof raw.metadata === 'object' ? (raw.metadata as Record<string, unknown>).platform_message_id : undefined) ??
-      (raw.message && typeof raw.message === 'object'
-        ? ((raw.message as Record<string, any>).data?.additional_kwargs?.platform_message_id ??
-           (raw.message as Record<string, any>).additional_kwargs?.platform_message_id)
-        : undefined);
-    return direct ? String(direct) : undefined;
+    const msgObj = raw.message && typeof raw.message === 'object'
+      ? (raw.message as Record<string, unknown>)
+      : null;
+    const msgData = msgObj && msgObj.data && typeof msgObj.data === 'object'
+      ? (msgObj.data as Record<string, unknown>)
+      : null;
+    const msgKwargs = msgObj && msgObj.additional_kwargs && typeof msgObj.additional_kwargs === 'object'
+      ? (msgObj.additional_kwargs as Record<string, unknown>)
+      : null;
+    const dataKwargs = msgData && msgData.additional_kwargs && typeof msgData.additional_kwargs === 'object'
+      ? (msgData.additional_kwargs as Record<string, unknown>)
+      : null;
+    const candidates: unknown[] = [
+      raw.platform_message_id,
+      raw.wamid,
+      raw.mid,
+      raw.message_id,
+      raw.metadata && typeof raw.metadata === 'object'
+        ? (raw.metadata as Record<string, unknown>).platform_message_id
+        : undefined,
+      dataKwargs?.platform_message_id,
+      msgKwargs?.platform_message_id,
+    ];
+    for (const c of candidates) {
+      if (c != null) return String(c);
+    }
+    return undefined;
   })();
 
   if (raw.message && typeof raw.message === 'object') {
