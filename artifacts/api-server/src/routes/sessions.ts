@@ -4,7 +4,6 @@ import {
   getMysqlPool,
   getMongoClient,
   getRedisClient,
-  mongoUri,
   type SessionsCreds,
 } from "../lib/connection-pool";
 

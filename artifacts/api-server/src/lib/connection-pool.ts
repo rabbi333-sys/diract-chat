@@ -67,6 +67,7 @@ export function mongoUri(c: SessionsCreds): string {
 const pgPools = new Map<string, pg.Pool>();
 const mysqlPools = new Map<string, mysql.Pool>();
 const mongoClients = new Map<string, MongoClient>();
+const mongoInFlight = new Map<string, Promise<MongoClient>>();
 const redisClients = new Map<string, Redis>();
 
 export function getPgPool(c: SessionsCreds): pg.Pool {
@@ -111,15 +112,25 @@ export function getMysqlPool(c: SessionsCreds): mysql.Pool {
   return pool;
 }
 
-export async function getMongoClient(c: SessionsCreds): Promise<MongoClient> {
+export function getMongoClient(c: SessionsCreds): Promise<MongoClient> {
   const key = mongoKey(c);
   const existing = mongoClients.get(key);
-  if (existing) return existing;
+  if (existing) return Promise.resolve(existing);
 
-  const client = new MongoClient(mongoUri(c), { serverSelectionTimeoutMS: 8000 });
-  await client.connect();
-  mongoClients.set(key, client);
-  return client;
+  const inflight = mongoInFlight.get(key);
+  if (inflight) return inflight;
+
+  const p = (async () => {
+    const client = new MongoClient(mongoUri(c), { serverSelectionTimeoutMS: 8000 });
+    await client.connect();
+    mongoClients.set(key, client);
+    mongoInFlight.delete(key);
+    return client;
+  })();
+
+  mongoInFlight.set(key, p);
+  p.catch(() => mongoInFlight.delete(key));
+  return p;
 }
 
 export function getRedisClient(c: SessionsCreds): Redis {
@@ -160,6 +171,7 @@ export async function drainAllPools(): Promise<void> {
 
   for (const client of mongoClients.values()) tasks.push(client.close().catch(() => {}));
   mongoClients.clear();
+  mongoInFlight.clear();
 
   for (const r of redisClients.values()) r.disconnect();
   redisClients.clear();
