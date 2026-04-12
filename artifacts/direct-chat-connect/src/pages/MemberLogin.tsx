@@ -155,7 +155,7 @@ const MemberLogin = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [hasCreds, setHasCreds] = useState(true);
+  const [hasCreds, setHasCreds] = useState(() => hasWorkspaceCreds());
   const [showOwnDbForm, setShowOwnDbForm] = useState(false);
   const [ownDbType, setOwnDbType] = useState<MainDbType>('supabase');
   const [ownUrl, setOwnUrl] = useState('');
