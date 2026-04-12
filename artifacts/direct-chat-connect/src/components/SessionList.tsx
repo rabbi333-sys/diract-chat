@@ -27,11 +27,18 @@ function getGradient(str: string): [string, string] {
   return GRADIENTS[h % GRADIENTS.length] as [string, string];
 }
 
+// Active = last message within the past 5 minutes
+const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
+function isWithin5Min(ts: string | null | undefined): boolean {
+  if (!ts) return false;
+  return Date.now() - new Date(ts).getTime() < ACTIVE_WINDOW_MS;
+}
+
 // Sort: active first (by last_message_at desc), then offline (by last_message_at desc)
 function sortSessions(sessions: SessionInfo[]): SessionInfo[] {
   return [...sessions].sort((a, b) => {
-    const aLive = a.is_active ? 1 : 0;
-    const bLive = b.is_active ? 1 : 0;
+    const aLive = isWithin5Min(a.last_message_at) ? 1 : 0;
+    const bLive = isWithin5Min(b.last_message_at) ? 1 : 0;
     if (aLive !== bLive) return bLive - aLive; // active first
     return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
   });
@@ -126,11 +133,11 @@ export const SessionList = () => {
     const q = searchQuery.toLowerCase();
     const matchesSearch = name.includes(q) || s.recipient.includes(q);
     // Active tab: only sessions with last message within 5 minutes
-    if (activeTab === 'active') return matchesSearch && s.is_active;
+    if (activeTab === 'active') return matchesSearch && isWithin5Min(s.last_message_at);
     return matchesSearch;
   });
 
-  const activeCount = sessions?.filter(s => s.is_active).length || 0;
+  const activeCount = sessions?.filter(s => isWithin5Min(s.last_message_at)).length || 0;
 
   // ── Eager background pre-warm ─────────────────────────────────────────────
   // As soon as the filtered list is available, pre-fetch every session in the
@@ -334,11 +341,10 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
         >
           {initials}
         </div>
-        {/* Active/offline indicator dot */}
-        {session.is_active && (
+        {/* Active/offline indicator dot — green if last message < 5 min ago */}
+        {isWithin5Min(session.last_message_at) ? (
           <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background bg-emerald-500 animate-pulse" />
-        )}
-        {!session.is_active && (
+        ) : (
           <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background bg-muted-foreground/30" />
         )}
       </div>
