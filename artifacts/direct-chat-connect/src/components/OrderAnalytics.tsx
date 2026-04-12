@@ -30,7 +30,23 @@ type SummaryType = {
   total: number; revenue: number; totalChange: number; revenueChange: number;
   statuses: Record<string, { count: number; change: number }>;
 };
-type ChartRow = { label: string; total: number; delivered: number; cancelled: number; pending: number; revenue: number };
+type ChartRow = {
+  label: string; total: number; revenue: number;
+  pending: number; confirmed: number; processing: number;
+  shipped: number; delivered: number; cancelled: number;
+};
+
+const ALL_STATUSES = ['pending','confirmed','processing','shipped','delivered','cancelled'] as const;
+type StatusKey = typeof ALL_STATUSES[number];
+
+const STATUS_CHART: Record<StatusKey, { label: string; color: string; gradId: string }> = {
+  pending:    { label: 'Pending',    color: '#f59e0b', gradId: 'ocPendFill' },
+  confirmed:  { label: 'Confirmed',  color: '#3b82f6', gradId: 'ocConfFill' },
+  processing: { label: 'Processing', color: '#8b5cf6', gradId: 'ocProcFill' },
+  shipped:    { label: 'Shipped',    color: '#06b6d4', gradId: 'ocShipFill' },
+  delivered:  { label: 'Delivered',  color: '#10b981', gradId: 'ocDelivFill' },
+  cancelled:  { label: 'Cancelled',  color: '#ef4444', gradId: 'ocCancFill' },
+};
 
 async function generateAnalyticsPDF(
   summary: SummaryType,
@@ -229,6 +245,13 @@ const OrderAnalytics = () => {
   const [days] = useState(90);
   const [isDownloading, setIsDownloading] = useState(false);
   const [orderChartType, setOrderChartType] = useState<'area' | 'bar'>('area');
+  const [visibleStatuses, setVisibleStatuses] = useState<Set<StatusKey>>(new Set(ALL_STATUSES));
+  const toggleStatus = (s: StatusKey) =>
+    setVisibleStatuses(prev => {
+      const next = new Set(prev);
+      if (next.has(s)) { if (next.size > 1) next.delete(s); } else next.add(s);
+      return next;
+    });
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [customApplied, setCustomApplied] = useState(false);
@@ -321,11 +344,10 @@ const OrderAnalytics = () => {
       if (bucketing === 'daily') { key = format(d, 'yyyy-MM-dd'); label = format(d, 'dd MMM'); }
       else if (bucketing === 'weekly') { const ws = startOfWeek(d, { weekStartsOn: 6 }); key = format(ws, 'yyyy-MM-dd'); label = `W${format(ws, 'dd MMM')}`; }
       else { const ms = startOfMonth(d); key = format(ms, 'yyyy-MM'); label = format(ms, 'MMM yy'); }
-      if (!buckets[key]) buckets[key] = { label, total: 0, delivered: 0, cancelled: 0, pending: 0, revenue: 0 };
+      if (!buckets[key]) buckets[key] = { label, total: 0, revenue: 0, pending: 0, confirmed: 0, processing: 0, shipped: 0, delivered: 0, cancelled: 0 };
       buckets[key].total++;
-      if (order.status === 'delivered') buckets[key].delivered++;
-      if (order.status === 'cancelled') buckets[key].cancelled++;
-      if (order.status === 'pending') buckets[key].pending++;
+      const st = order.status as StatusKey;
+      if (st in buckets[key]) (buckets[key] as any)[st]++;
       buckets[key].revenue += Number(order.total_price) || 0;
     });
     return Object.values(buckets);
@@ -679,84 +701,71 @@ const OrderAnalytics = () => {
             </div>
           </div>
 
+          {/* Toggleable status legend chips */}
+          <div className="px-5 pb-3 flex flex-wrap gap-1.5">
+            {ALL_STATUSES.map(s => {
+              const { label, color } = STATUS_CHART[s];
+              const active = visibleStatuses.has(s);
+              return (
+                <button
+                  key={s}
+                  onClick={() => toggleStatus(s)}
+                  className={cn(
+                    'flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-all',
+                    active
+                      ? 'border-transparent text-white'
+                      : 'border-[#D5D9D9] dark:border-border bg-white dark:bg-card text-[#565959] dark:text-muted-foreground opacity-50'
+                  )}
+                  style={active ? { backgroundColor: color, borderColor: color } : {}}
+                  title={active ? `Hide ${label}` : `Show ${label}`}
+                >
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: active ? '#fff' : color }} />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Chart */}
           <div className="px-3 pb-2">
             {orderChartType === 'area' ? (
-              <ResponsiveContainer width="100%" height={220}>
+              <ResponsiveContainer width="100%" height={240}>
                 <AreaChart data={chartData} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
                   <defs>
-                    <linearGradient id="ocTotalFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.18} />
-                      <stop offset="85%" stopColor="#3B82F6" stopOpacity={0.03} />
-                      <stop offset="100%" stopColor="#3B82F6" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="ocDelivFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#22C55E" stopOpacity={0.18} />
-                      <stop offset="85%" stopColor="#22C55E" stopOpacity={0.03} />
-                      <stop offset="100%" stopColor="#22C55E" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="ocCancFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#EF4444" stopOpacity={0.15} />
-                      <stop offset="85%" stopColor="#EF4444" stopOpacity={0.02} />
-                      <stop offset="100%" stopColor="#EF4444" stopOpacity={0} />
-                    </linearGradient>
+                    {ALL_STATUSES.map(s => (
+                      <linearGradient key={s} id={STATUS_CHART[s].gradId} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={STATUS_CHART[s].color} stopOpacity={0.18} />
+                        <stop offset="85%" stopColor={STATUS_CHART[s].color} stopOpacity={0.03} />
+                        <stop offset="100%" stopColor={STATUS_CHART[s].color} stopOpacity={0} />
+                      </linearGradient>
+                    ))}
                   </defs>
                   <CartesianGrid strokeDasharray="4 4" stroke="#E5E7EB" strokeOpacity={0.7} vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} dy={6} />
                   <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip content={<BarTooltip />} cursor={{ stroke: '#E5E7EB', strokeWidth: 1 }} />
-                  <Area type="monotone" dataKey="total" name="Total"
-                    stroke="#3B82F6" strokeWidth={2} fill="url(#ocTotalFill)" dot={false}
-                    activeDot={{ r: 4, strokeWidth: 2, stroke: '#3B82F6', fill: '#fff' }} />
-                  <Area type="monotone" dataKey="delivered" name="Delivered"
-                    stroke="#22C55E" strokeWidth={2} fill="url(#ocDelivFill)" dot={false}
-                    activeDot={{ r: 4, strokeWidth: 2, stroke: '#22C55E', fill: '#fff' }} />
-                  <Area type="monotone" dataKey="cancelled" name="Cancelled"
-                    stroke="#EF4444" strokeWidth={2} fill="url(#ocCancFill)" dot={false}
-                    activeDot={{ r: 4, strokeWidth: 2, stroke: '#EF4444', fill: '#fff' }} />
+                  <Tooltip content={<BarTooltip visibleStatuses={visibleStatuses} />} cursor={{ stroke: '#E5E7EB', strokeWidth: 1 }} />
+                  {ALL_STATUSES.filter(s => visibleStatuses.has(s)).map(s => (
+                    <Area key={s} type="monotone" dataKey={s} name={STATUS_CHART[s].label}
+                      stroke={STATUS_CHART[s].color} strokeWidth={2}
+                      fill={`url(#${STATUS_CHART[s].gradId})`} dot={false}
+                      activeDot={{ r: 4, strokeWidth: 2, stroke: STATUS_CHART[s].color, fill: '#fff' }} />
+                  ))}
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={chartData} barGap={3} barCategoryGap="38%" margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="ocTotalBar" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#60A5FA" />
-                      <stop offset="100%" stopColor="#2563EB" stopOpacity={0.9} />
-                    </linearGradient>
-                    <linearGradient id="ocDelivBar" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#4ADE80" />
-                      <stop offset="100%" stopColor="#16A34A" stopOpacity={0.9} />
-                    </linearGradient>
-                    <linearGradient id="ocCancBar" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#F87171" />
-                      <stop offset="100%" stopColor="#DC2626" stopOpacity={0.9} />
-                    </linearGradient>
-                  </defs>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={chartData} barGap={2} barCategoryGap="30%" margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="4 4" stroke="#E5E7EB" strokeOpacity={0.7} vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} dy={6} />
                   <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip content={<BarTooltip />} cursor={{ fill: '#F1F5F9', fillOpacity: 0.7, radius: 4 }} />
-                  <Bar dataKey="total" name="Total" fill="url(#ocTotalBar)" radius={[5,5,0,0]} maxBarSize={30} />
-                  <Bar dataKey="delivered" name="Delivered" fill="url(#ocDelivBar)" radius={[5,5,0,0]} maxBarSize={30} />
-                  <Bar dataKey="cancelled" name="Cancelled" fill="url(#ocCancBar)" radius={[5,5,0,0]} maxBarSize={30} />
+                  <Tooltip content={<BarTooltip visibleStatuses={visibleStatuses} />} cursor={{ fill: '#F1F5F9', fillOpacity: 0.7 }} />
+                  {ALL_STATUSES.filter(s => visibleStatuses.has(s)).map(s => (
+                    <Bar key={s} dataKey={s} name={STATUS_CHART[s].label}
+                      fill={STATUS_CHART[s].color} radius={[4,4,0,0]} maxBarSize={22} />
+                  ))}
                 </BarChart>
               </ResponsiveContainer>
             )}
-          </div>
-
-          {/* Legend */}
-          <div className="flex items-center justify-center gap-5 pb-4 pt-1">
-            {[
-              { color: '#3B82F6', label: 'Total' },
-              { color: '#22C55E', label: 'Delivered' },
-              { color: '#EF4444', label: 'Cancelled' },
-            ].map(l => (
-              <div key={l.label} className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: l.color }} />
-                <span className="text-[11px] font-medium text-[#565959] dark:text-muted-foreground">{l.label}</span>
-              </div>
-            ))}
           </div>
         </div>
       )}
@@ -802,20 +811,23 @@ const StatChip = ({ color, label, value }: { color: string; label: string; value
   </div>
 );
 
-const BarTooltip = ({ active, payload, label }: any) => {
+const BarTooltip = ({ active, payload, label, visibleStatuses: _vs }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-card/95 backdrop-blur-sm border border-border/60 rounded-xl shadow-xl p-3 min-w-[140px]">
+    <div className="bg-card/95 backdrop-blur-sm border border-border/60 rounded-xl shadow-xl p-3 min-w-[150px]">
       <p className="text-[11px] font-bold text-foreground mb-2 pb-2 border-b border-border/40">{label}</p>
-      {payload.map((p: any) => (
-        <div key={p.name} className="flex items-center justify-between gap-4 py-0.5">
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.fill?.includes('url') ? p.color : p.fill }} />
-            <span className="text-[10px] text-muted-foreground">{p.name}</span>
+      {payload.map((p: any) => {
+        const dotColor = p.stroke || (p.fill?.startsWith('url') ? p.color : p.fill);
+        return (
+          <div key={p.name} className="flex items-center justify-between gap-4 py-0.5">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: dotColor }} />
+              <span className="text-[10px] text-muted-foreground">{p.name}</span>
+            </div>
+            <span className="text-[11px] font-bold text-foreground">{p.value}</span>
           </div>
-          <span className="text-[11px] font-bold text-foreground">{p.value}</span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };
