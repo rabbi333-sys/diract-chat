@@ -8,7 +8,7 @@ import {
   getStoredMemberProxyCreds, proxyLoginMember, storeMemberProxyCreds, type DbCreds,
 } from '@/lib/memberAuthProxy';
 import { getConnections, setActiveConnection, DB_TYPES, type MainDbType } from '@/lib/db-config';
-import { LogIn, Database, Eye, EyeOff, ChevronDown, CheckCircle2 } from 'lucide-react';
+import { LogIn, Database, Eye, EyeOff, ChevronDown, Link } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const DB_SETTINGS_KEY = 'chat_monitor_db_settings';
@@ -155,19 +155,7 @@ const MemberLogin = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [wsConnected, setWsConnected] = useState(false);
-  const [showWsForm, setShowWsForm] = useState(false);
-  const [wsConnecting, setWsConnecting] = useState(false);
-  const [wsDbType, setWsDbType] = useState<MainDbType>('supabase');
-  const [wsUrl, setWsUrl] = useState('');
-  const [wsAnonKey, setWsAnonKey] = useState('');
-  const [wsShowAnonKey, setWsShowAnonKey] = useState(false);
-  const [wsHost, setWsHost] = useState('');
-  const [wsPort, setWsPort] = useState('');
-  const [wsUsername, setWsUsername] = useState('');
-  const [wsPassword, setWsPassword] = useState('');
-  const [wsDbName, setWsDbName] = useState('');
-  const [wsConnStr, setWsConnStr] = useState('');
+  const [hasCreds, setHasCreds] = useState(true);
   const [showOwnDbForm, setShowOwnDbForm] = useState(false);
   const [ownDbType, setOwnDbType] = useState<MainDbType>('supabase');
   const [ownUrl, setOwnUrl] = useState('');
@@ -182,45 +170,15 @@ const MemberLogin = () => {
   const [ownSaving, setOwnSaving] = useState(false);
 
   useEffect(() => {
-    const connected = hasWorkspaceCreds();
-    setWsConnected(connected);
-    if (!connected) setShowWsForm(true);
+    setHasCreds(hasWorkspaceCreds());
     getMemberSession().then(session => {
       if (session?.role === 'sub-admin' && !localStorage.getItem(SUBADMIN_DB_KEY)) setShowOwnDbForm(true);
     });
   }, []);
 
-  const currentDbType = DB_TYPES.find(t => t.value === wsDbType);
-  const needsConnStr = wsDbType === 'mongodb' || wsDbType === 'redis';
-  const needsHostFields = wsDbType === 'postgresql' || wsDbType === 'mysql';
   const ownNeedsConnStr = ownDbType === 'mongodb' || ownDbType === 'redis';
   const ownNeedsHostFields = ownDbType === 'postgresql' || ownDbType === 'mysql';
   const ownCurrentDbType = DB_TYPES.find(t => t.value === ownDbType);
-
-  const handleConnectWorkspace = async () => {
-    setWsConnecting(true);
-    try {
-      if (wsDbType === 'supabase') {
-        if (!wsUrl.trim() || !wsAnonKey.trim()) { toast.error('Please enter Supabase URL and Anon Key'); return; }
-        localStorage.setItem(DB_SETTINGS_KEY, JSON.stringify({ db_type: 'supabase', supabase_url: wsUrl.trim(), anon_key: wsAnonKey.trim(), service_role_key: wsAnonKey.trim(), table_name: 'n8n_chat_histories', is_active: true }));
-        const existing = getConnections();
-        const alreadyExists = existing.find(c => c.url === wsUrl.trim());
-        if (!alreadyExists) {
-          const newConn = { id: `member-ws-${Date.now()}`, name: 'Workspace', dbType: 'supabase' as const, url: wsUrl.trim(), anonKey: wsAnonKey.trim(), createdAt: new Date().toISOString() };
-          localStorage.setItem('meta_db_connections', JSON.stringify([...existing, newConn]));
-          setActiveConnection(newConn.id);
-        } else { setActiveConnection(alreadyExists.id); }
-      } else {
-        const nc = wsDbType === 'mongodb' || wsDbType === 'redis';
-        if (nc && !wsConnStr.trim()) { toast.error('Please enter a connection string'); return; }
-        if (!nc && (!wsHost.trim() || !wsUsername.trim())) { toast.error('Please enter host and username'); return; }
-        storeMemberProxyCreds({ dbType: wsDbType, host: wsHost.trim() || undefined, port: wsPort.trim() || undefined, dbUsername: wsUsername.trim() || undefined, dbPassword: wsPassword || undefined, dbName: wsDbName.trim() || undefined, connectionString: wsConnStr.trim() || undefined });
-      }
-      setWsConnected(true);
-      setShowWsForm(false);
-      toast.success('Workspace connected!');
-    } finally { setWsConnecting(false); }
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -346,76 +304,41 @@ const MemberLogin = () => {
     <>
       <Logo />
 
-      {/* Workspace Connect card */}
-      {showWsForm && (
-        <div style={glassCard} className="p-6 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)' }}>
-              <Database size={15} style={{ color: '#818cf8' }} />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-white">Connect Workspace</p>
-              <p className="text-xs" style={{ color: 'rgba(148,163,184,0.7)' }}>Enter workspace database credentials</p>
-            </div>
-          </div>
-          <div className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
-            <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(147,197,253,0.9)' }}>First time on this device? Enter your workspace credentials below — they will be saved for future logins.</p>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium" style={{ color: 'rgba(203,213,225,0.9)' }}>Database Type</label>
-            <div className="relative">
-              <select value={wsDbType} onChange={e => setWsDbType(e.target.value as MainDbType)} style={selectStyle} className="focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                {DB_TYPES.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
-              </select>
-              <ChevronDown size={12} className="absolute right-2.5 top-3.5 pointer-events-none" style={{ color: 'rgba(148,163,184,0.6)' }} />
-            </div>
-          </div>
-          {wsDbType === 'supabase' && (<>
-            <DarkInput label="Supabase Project URL" value={wsUrl} onChange={setWsUrl} placeholder="https://xxx.supabase.co" />
-            <DarkInput label="Anon Key" type={wsShowAnonKey ? 'text' : 'password'} value={wsAnonKey} onChange={setWsAnonKey} placeholder="eyJ..." rightEl={<button type="button" onClick={() => setWsShowAnonKey(s => !s)} style={{ color: 'rgba(148,163,184,0.7)' }}>{wsShowAnonKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>} />
-          </>)}
-          {needsHostFields && (<>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="col-span-2"><DarkInput label="Host" value={wsHost} onChange={setWsHost} placeholder="localhost" /></div>
-              <DarkInput label="Port" value={wsPort} onChange={setWsPort} placeholder={currentDbType?.defaultPort || ''} />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <DarkInput label="Username" value={wsUsername} onChange={setWsUsername} placeholder="root" />
-              <DarkInput label="Password" type="password" value={wsPassword} onChange={setWsPassword} placeholder="••••••••" />
-            </div>
-            <DarkInput label="Database Name" value={wsDbName} onChange={setWsDbName} placeholder="mydb" />
-          </>)}
-          {needsConnStr && <DarkInput label="Connection String" value={wsConnStr} onChange={setWsConnStr} placeholder={wsDbType === 'mongodb' ? 'mongodb://...' : 'redis://...'} />}
-          <GradientButton onClick={handleConnectWorkspace} disabled={wsConnecting}>{wsConnecting ? 'Connecting…' : 'Save Workspace'}</GradientButton>
-        </div>
-      )}
-
-      {/* Main login card */}
       <div style={glassCard} className="p-7">
-        {/* Workspace status banner */}
-        {wsConnected && !showWsForm && (
-          <div className="flex items-center justify-between rounded-xl px-3.5 py-2.5 mb-5" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
-            <div className="flex items-center gap-2">
-              <CheckCircle2 size={14} style={{ color: '#34d399' }} />
-              <span className="text-xs font-medium" style={{ color: '#6ee7b7' }}>Workspace connected — enter your credentials below</span>
+        {!hasCreds ? (
+          /* No workspace credentials stored on this device — show invite link message */
+          <div className="space-y-5 text-center py-2">
+            <div className="flex items-center justify-center">
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.25)' }}>
+                <Link size={24} style={{ color: '#818cf8' }} />
+              </div>
             </div>
-            <button onClick={() => setShowWsForm(true)} className="text-xs font-medium underline underline-offset-2 transition-colors" style={{ color: 'rgba(99,102,241,0.8)' }}>Change</button>
+            <div className="space-y-2">
+              <p className="text-base font-semibold text-white">Workspace not set up on this device</p>
+              <p className="text-sm leading-relaxed" style={{ color: 'rgba(148,163,184,0.85)' }}>
+                Please re-open your invite link to connect this device to the workspace.
+              </p>
+              <p className="text-xs leading-relaxed" style={{ color: 'rgba(100,116,139,0.8)' }}>
+                If you no longer have your invite link, contact your admin to resend it.
+              </p>
+            </div>
           </div>
+        ) : (
+          /* Workspace credentials exist — show normal sign-in form */
+          <form onSubmit={handleLogin} className="space-y-4">
+            <DarkInput label="Email" type="email" value={email} onChange={setEmail} placeholder="Enter your email" />
+            <DarkInput label="Password" type={showPassword ? 'text' : 'password'} value={password} onChange={setPassword} placeholder="Enter your password"
+              rightEl={<button type="button" onClick={() => setShowPassword(s => !s)} style={{ color: 'rgba(148,163,184,0.7)' }}>{showPassword ? <EyeOff size={14} /> : <Eye size={14} />}</button>} />
+            <GradientButton disabled={loading}>
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                  Signing in…
+                </span>
+              ) : 'Sign In'}
+            </GradientButton>
+          </form>
         )}
-
-        <form onSubmit={handleLogin} className="space-y-4">
-          <DarkInput label="Email" type="email" value={email} onChange={setEmail} placeholder="Enter your email" />
-          <DarkInput label="Password" type={showPassword ? 'text' : 'password'} value={password} onChange={setPassword} placeholder="Enter your password"
-            rightEl={<button type="button" onClick={() => setShowPassword(s => !s)} style={{ color: 'rgba(148,163,184,0.7)' }}>{showPassword ? <EyeOff size={14} /> : <Eye size={14} />}</button>} />
-          <GradientButton disabled={loading}>
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                Signing in…
-              </span>
-            ) : 'Sign In'}
-          </GradientButton>
-        </form>
         <p className="text-center text-xs mt-4" style={{ color: 'rgba(100,116,139,0.7)' }}>
           Don't have access yet? Ask your admin for an invite link.
         </p>
