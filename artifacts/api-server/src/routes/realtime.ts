@@ -3,6 +3,7 @@ import { MongoClient } from "mongodb";
 import Redis from "ioredis";
 import { normalizeRow } from "./sessions.js";
 import { logger } from "../lib/logger.js";
+import { getServerDbConfig } from "../lib/server-db-config.js";
 
 const router = Router();
 
@@ -214,12 +215,14 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
 // (or any other webhook relay) and broadcasts them to connected dashboard clients
 // via Supabase Realtime broadcast.
 //
+// Supabase credentials are read from the server-side stored DB config (set via
+// POST /api/db-config). They are NEVER accepted from the request body to prevent
+// SSRF and credential injection attacks.
+//
 // Body shape:
 //   {
-//     supabase_url: string,      // e.g. "https://xyz.supabase.co"
-//     anon_key:     string,      // Supabase anon (public) key
 //     session_id:   string,      // chat session ID
-//     event_type:   "delivered" | "read" | "reaction" | "typing",
+//     event_type?:  "delivered" | "read" | "reaction" | "typing",
 //     message_id?:  string,      // platform message ID (wamid / FB mid)
 //     emoji?:       string,      // for reaction events
 //     raw?:         object,      // original raw webhook payload (WA/FB/IG)
@@ -229,9 +232,16 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
 // when `raw` is provided so that n8n can forward the webhook verbatim.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/webhook/events", async (req: Request, res: Response): Promise<void> => {
+  // ── Resolve Supabase credentials from server-side config only (no SSRF risk) ─
+  const serverCfg = getServerDbConfig();
+  if (!serverCfg || serverCfg.dbType !== 'supabase' || !serverCfg.supabase_url || !serverCfg.anon_key) {
+    res.status(503).json({ error: "Supabase not configured on this server. Push DB config via POST /api/db-config first." });
+    return;
+  }
+  const supabase_url = serverCfg.supabase_url;
+  const anon_key     = serverCfg.anon_key;
+
   const body = req.body as {
-    supabase_url?: string;
-    anon_key?: string;
     session_id?: string;
     event_type?: string;
     message_id?: string;
@@ -239,9 +249,9 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
     raw?: Record<string, unknown>;
   };
 
-  const { supabase_url, anon_key, session_id } = body;
-  if (!supabase_url || !anon_key || !session_id) {
-    res.status(400).json({ error: "supabase_url, anon_key, and session_id are required" });
+  const { session_id } = body;
+  if (!session_id) {
+    res.status(400).json({ error: "session_id is required" });
     return;
   }
 

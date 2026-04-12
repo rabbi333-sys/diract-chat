@@ -17,6 +17,27 @@ import { cn } from '@/lib/utils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LS_REACTIONS_PREFIX = 'cm_reactions_';
+const LS_STATUS_PREFIX    = 'cm_mstatus_';  // platformMsgId → 'sent'|'delivered'|'read'
+const LS_MSG_IDX_PREFIX   = 'cm_msidx_';   // compositeKey → platformMsgId
+
+function loadStatusStore(sid: string): Record<string, 'sent'|'delivered'|'read'> {
+  try { return JSON.parse(localStorage.getItem(LS_STATUS_PREFIX + sid) || '{}') as Record<string, 'sent'|'delivered'|'read'>; }
+  catch { return {}; }
+}
+function saveStatusStore(sid: string, s: Record<string, 'sent'|'delivered'|'read'>) {
+  try { localStorage.setItem(LS_STATUS_PREFIX + sid, JSON.stringify(s)); } catch { /* quota */ }
+}
+function loadMsgIndex(sid: string): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(LS_MSG_IDX_PREFIX + sid) || '{}') as Record<string, string>; }
+  catch { return {}; }
+}
+function saveMsgIndex(sid: string, idx: Record<string, string>) {
+  try { localStorage.setItem(LS_MSG_IDX_PREFIX + sid, JSON.stringify(idx)); } catch { /* quota */ }
+}
+/** Composite key for message index: first 50 chars of text + minute-precision timestamp */
+function msgIndexKey(text: string, ts: string) {
+  return `${text.slice(0, 50)}|${ts.slice(0, 16)}`;
+}
 
 const QUICK_REPLIES = [
   'Thank you! Is there anything else you need?',
@@ -326,9 +347,16 @@ const Conversation = () => {
     } catch { return {}; }
   });
 
-  // ── Message status map — persists beyond optimistic revert so DB messages
-  //    can also show delivered/read status from incoming webhook events ────────
-  const [msgStatuses, setMsgStatuses] = useState<Record<string, 'sent' | 'delivered' | 'read'>>({});
+  // ── Message status map — keyed by platformMsgId; loaded from and persisted to
+  //    localStorage so DB messages can show delivered/read after page refresh ──
+  const [msgStatuses, setMsgStatuses] = useState<Record<string, 'sent' | 'delivered' | 'read'>>(() =>
+    sessionId ? loadStatusStore(sessionId) : {}
+  );
+  // ── Message index — compositeKey(text, ts) → platformMsgId —  allows DB
+  //    messages (which don't carry platformMsgId) to find their status entry ──
+  const [msgIndex, setMsgIndex] = useState<Record<string, string>>(() =>
+    sessionId ? loadMsgIndex(sessionId) : {}
+  );
 
   // ── Typing indicator (send) ────────────────────────────────────────────────
   const [typingActive, setTypingActive] = useState(false);
@@ -550,10 +578,25 @@ const Conversation = () => {
     setLocalMessages(prev => prev.filter(m => m.id !== id));
   };
 
-  const markSent = (id: number, platformMsgId?: string) => {
-    setLocalMessages(prev => prev.map(m => m.id === id ? { ...m, _sending: false, _status: 'sent' as const, _platformMsgId: platformMsgId } : m));
-    setMsgStatuses(prev => ({ ...prev, [String(id)]: 'sent' }));
-    if (platformMsgId) setMsgStatuses(prev => ({ ...prev, [platformMsgId]: 'sent' }));
+  /**
+   * Mark a local optimistic message as sent.
+   * Pass msgText + msgTs to index the message text/timestamp → platformMsgId mapping,
+   * which allows DB-fetched messages (lacking _platformMsgId) to show their status.
+   */
+  const markSent = (id: number, platformMsgId?: string, msgText?: string, msgTs?: string) => {
+    setLocalMessages(prev => prev.map(m => m.id === id
+      ? { ...m, _sending: false, _status: 'sent' as const, _platformMsgId: platformMsgId }
+      : m
+    ));
+    setMsgStatuses(prev => {
+      const next = { ...prev, [String(id)]: 'sent' as const };
+      if (platformMsgId) next[platformMsgId] = 'sent';
+      return next;
+    });
+    // Index: compositeKey(text, ts) → platformMsgId so DB messages can look up status
+    if (platformMsgId && msgText && msgTs) {
+      setMsgIndex(prev => ({ ...prev, [msgIndexKey(msgText, msgTs)]: platformMsgId }));
+    }
   };
 
   const markDelivered = (id: number | string) => {
@@ -572,6 +615,18 @@ const Conversation = () => {
     try { localStorage.setItem(LS_REACTIONS_PREFIX + sessionId, JSON.stringify(reactions)); }
     catch { /* ignore quota errors */ }
   }, [reactions, sessionId]);
+
+  // Persist message statuses (keyed by platformMsgId) to localStorage
+  useEffect(() => {
+    if (!sessionId) return;
+    saveStatusStore(sessionId, msgStatuses);
+  }, [msgStatuses, sessionId]);
+
+  // Persist message index (text+ts composite → platformMsgId) to localStorage
+  useEffect(() => {
+    if (!sessionId) return;
+    saveMsgIndex(sessionId, msgIndex);
+  }, [msgIndex, sessionId]);
 
   // Subscribe to Supabase realtime for customer typing events
   useEffect(() => {
@@ -669,33 +724,20 @@ const Conversation = () => {
       return { ...prev, [reactionKey]: updated };
     });
 
-    // Best-effort: send reaction to platform
+    // Platform send: WhatsApp supports sending reactions via the Cloud API.
+    // Facebook Messenger and Instagram do NOT expose a public send-reaction
+    // endpoint, so reactions on those platforms are stored in local state only.
     try {
-      if (sessionPlatform === 'whatsapp' && waConn) {
-        // WhatsApp: uses the react message type with the platform message ID (wamid)
-        // Falls back gracefully if platformId is not a real wamid
+      if (sessionPlatform === 'whatsapp' && waConn && platformId) {
+        // WA Cloud API reaction message type — requires the wamid of the target message.
+        // If platformId is the local optimistic ID (not a real wamid) the API will
+        // return an error which is silently caught; local reaction still persists.
         await waPost(waConn, recipient, {
           type: 'reaction',
           reaction: { message_id: platformId, emoji },
         });
-      } else if (sessionPlatform === 'facebook' && fbConn) {
-        // Facebook: send reaction via sender_action with the message_id (mid)
-        // Only works if we have a real FB message_id from the send response
-        if (msg._platformMsgId) {
-          await fbPost(fbConn, recipient, {
-            sender_action: 'react',
-            payload: {
-              action: 'react',
-              reaction: 'love', // FB supports limited reactions — map emoji to closest
-              message_id: msg._platformMsgId,
-            },
-          } as object);
-        }
-        // If no platform ID: reaction stored locally in UI only
-      } else if (sessionPlatform === 'instagram' && igConn) {
-        // Instagram private reply reaction endpoint — UI only fallback for now
-        // (Instagram reactions via API not publicly available)
       }
+      // Facebook/Instagram: no public reaction-send API — stored in UI/localStorage only.
     } catch { /* best-effort — reactions are always stored locally regardless */ }
   }, [sessionPlatform, waConn, fbConn, igConn, recipient]);
 
@@ -722,12 +764,14 @@ const Conversation = () => {
       // 1. Send caption text first (if any)
       if (text) {
         const id = nextId();
+        // Capture once so addOptimistic, DB insert, and markSent use the same timestamp
+        const sentTs = new Date().toISOString();
         addOptimistic(id, text, rt);
         insertMessageToExternalDb(getStoredConnection(), {
           session_id: sessionId || '',
           sender: 'Agent',
           message_text: text,
-          timestamp: new Date().toISOString(),
+          timestamp: sentTs,
           recipient,
         });
         try {
@@ -758,7 +802,8 @@ const Conversation = () => {
             } else throw new Error('No messaging connection configured');
           }
           storePlatform(recipient, sessionPlatform);
-          markSent(id, platformMsgId);
+          // Pass text + sentTs so markSent can build the compositeKey→platformMsgId index
+          markSent(id, platformMsgId, text, sentTs);
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
           queryClient.invalidateQueries({ queryKey: ['sessions'] });
           revertOptimistic(id);
@@ -1231,15 +1276,24 @@ const Conversation = () => {
             </div>
           )}
 
-          {groupedMessages.map(({ msg, isFirst, isLast }) => (
+          {groupedMessages.map(({ msg, isFirst, isLast }) => {
+            // Resolve platform message ID for status/reaction lookup.
+            // For optimistic local messages, _platformMsgId is set after send.
+            // For DB-fetched messages it is undefined, so fall back to the
+            // compositeKey index which maps text+timestamp → platformMsgId.
+            const resolvedPlatId =
+              msg._platformMsgId ||
+              msgIndex[msgIndexKey(msg.message_text, msg.timestamp || '')];
+            const statusKey = resolvedPlatId || String(msg.id);
+            return (
             <div key={`${msg.id}`} className="relative">
               <ChatMessage
                 message={msg}
                 onReply={canReply ? setReplyingTo : undefined}
                 onMediaClick={handleMediaClick}
                 onReact={canReply ? handleReact : undefined}
-                reactions={reactions[msg._platformMsgId || String(msg.id)]}
-                statusOverride={msgStatuses[msg._platformMsgId || String(msg.id)]}
+                reactions={reactions[statusKey]}
+                statusOverride={msgStatuses[statusKey]}
                 isFirst={isFirst}
                 isLast={isLast}
               />
@@ -1250,7 +1304,8 @@ const Conversation = () => {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
 
           {allMessages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-24 text-center">
