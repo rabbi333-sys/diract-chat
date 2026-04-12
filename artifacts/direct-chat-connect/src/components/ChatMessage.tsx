@@ -20,7 +20,7 @@ type Segment =
   | { type: 'video-placeholder' }
   | { type: 'document'; url: string; name: string; size?: number };
 
-function parseSegments(text: string): Segment[] {
+export function parseSegments(text: string): Segment[] {
   const trimmed = text.trim();
 
   // Prefixed blob URLs from file picker optimistic messages

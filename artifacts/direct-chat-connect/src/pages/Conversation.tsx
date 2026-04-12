@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fetchNameFromMeta, fetchMessages, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
-import { ChatMessage } from '@/components/ChatMessage';
+import { ChatMessage, parseSegments } from '@/components/ChatMessage';
 import { PlatformAvatar } from '@/components/SessionList';
 import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp, Paperclip, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react';
 import { detectPlatform, storePlatform, PLATFORM_CONFIG, Platform } from '@/lib/platformDetect';
@@ -425,14 +425,16 @@ const Conversation = () => {
   // olderMessages prepended so the full list is chronological
   const allMessages = [...olderMessages, ...(messages || []), ...dedupedLocal];
 
-  // Collect all resolved image URLs for lightbox prev/next navigation
+  // Collect all image URLs in the conversation for lightbox prev/next navigation.
+  // Uses parseSegments so it picks up images inside mixed text+URL messages too.
   const allImageUrls = useMemo(() => {
     const urls: string[] = [];
     for (const m of allMessages) {
-      const t = m.message_text?.trim() || '';
-      if (t.startsWith('data:image/'))   { urls.push(t); continue; }
-      if (t.startsWith('blob-image:'))   { urls.push(t.slice('blob-image:'.length)); continue; }
-      if (t.startsWith('http') && /\.(jpg|jpeg|png|gif|webp|bmp|avif)(\?.*)?$/i.test(t)) { urls.push(t); continue; }
+      if (!m.message_text) continue;
+      const segs = parseSegments(m.message_text);
+      for (const seg of segs) {
+        if (seg.type === 'image') urls.push(seg.url);
+      }
     }
     return urls;
   }, [allMessages]);
