@@ -107,7 +107,6 @@ const Conversation = () => {
   const navigate = useNavigate();
   const { data: messages, isLoading, error, refetch } = useChatHistory(sessionId);
   const { data: sessions } = useSessions();
-  const isSessionActive = sessions?.find(s => s.session_id === sessionId)?.is_active ?? false;
   const { data: recipientNames } = useRecipientNames();
   const { data: platformConns = [] } = usePlatformConnections();
   const { displayName: agentName } = useTeamRole();
@@ -297,6 +296,15 @@ const Conversation = () => {
   // olderMessages prepended so the full list is chronological
   const allMessages = [...olderMessages, ...(messages || []), ...dedupedLocal];
 
+  // Active = any message within the last 5 minutes (either party), or the DB flag as fallback
+  const ACTIVE_WINDOW = 5 * 60 * 1000;
+  const latestTs = allMessages.length > 0
+    ? new Date(allMessages[allMessages.length - 1].timestamp).getTime()
+    : 0;
+  const isSessionActive =
+    (latestTs > 0 && Date.now() - latestTs < ACTIVE_WINDOW) ||
+    (sessions?.find(s => s.session_id === sessionId)?.is_active ?? false);
+
   const scrollToBottom = useCallback((instant = false) => {
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -382,6 +390,7 @@ const Conversation = () => {
           else if (igConn) await fbPost(igConn, recipient, { text });
           markSent(id);
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+          queryClient.invalidateQueries({ queryKey: ['sessions'] });
           revertOptimistic(id);
         } catch (err: unknown) {
           revertOptimistic(id);
@@ -439,6 +448,7 @@ const Conversation = () => {
       URL.revokeObjectURL(rawUrl);
       // Refetch DB — the data URL version now shows in its place
       await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
     } catch (err: unknown) {
       revertOptimistic(id);
       URL.revokeObjectURL(rawUrl);
@@ -511,6 +521,7 @@ const Conversation = () => {
           await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
           markSent(id);
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+          queryClient.invalidateQueries({ queryKey: ['sessions'] });
           // Remove local blob; DB data URL now shows in its place
           revertOptimistic(id);
           URL.revokeObjectURL(localUrl);
