@@ -596,6 +596,27 @@ export const N8nPromptSettings = () => {
                   </div>
                 </div>
               </div>
+
+              {/* cURL equivalent */}
+              <div className="mt-3 space-y-1.5">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Test with cURL
+                </p>
+                <div className="relative">
+                  <pre className="text-[10px] bg-zinc-900 dark:bg-black/40 text-emerald-400 border border-zinc-700/60 rounded-lg p-3 overflow-x-auto leading-relaxed font-mono pr-16 whitespace-pre-wrap break-all">
+{`curl -s \\
+  -H "apikey: ${anonKey}" \\
+  -H "Authorization: Bearer ${anonKey}" \\
+  "${fetchUrl}"`}
+                  </pre>
+                  <div className="absolute top-2 right-2">
+                    <CopyButton
+                      value={`curl -s \\\n  -H "apikey: ${anonKey}" \\\n  -H "Authorization: Bearer ${anonKey}" \\\n  "${fetchUrl}"`}
+                      label="cURL"
+                    />
+                  </div>
+                </div>
+              </div>
             </GuideStep>
 
             <GuideStep num={3} title="Set the AI Agent System Message">
