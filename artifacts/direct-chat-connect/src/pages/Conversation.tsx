@@ -6,7 +6,7 @@ import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fe
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage } from '@/components/ChatMessage';
 import { PlatformAvatar } from '@/components/SessionList';
-import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp, Paperclip, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react';
 import { detectPlatform, storePlatform, PLATFORM_CONFIG, Platform } from '@/lib/platformDetect';
 import { useAiControl } from '@/hooks/useAiControl';
 import { useTeamRole } from '@/hooks/useTeamRole';
@@ -77,7 +77,7 @@ async function waUploadFile(conn: PlatformConnection, file: Blob, filename: stri
 }
 
 // Upload file to Facebook → returns attachment_id
-async function fbUploadFile(conn: PlatformConnection, file: File, mediaType: 'image' | 'audio' | 'video'): Promise<string> {
+async function fbUploadFile(conn: PlatformConnection, file: File, mediaType: 'image' | 'audio' | 'video' | 'file'): Promise<string> {
   const form = new FormData();
   form.append('message', JSON.stringify({ attachment: { type: mediaType, payload: {} } }));
   form.append('filedata', file, file.name);
@@ -102,6 +102,96 @@ function fileToDataUrl(file: Blob): Promise<string> {
 // ─── Pending message tracker (for optimistic revert) ─────────────────────────
 let _msgCounter = Date.now();
 const nextId = () => ++_msgCounter;
+
+// ─── Fullscreen media viewer (lightbox + video modal) ────────────────────────
+interface MediaViewerProps {
+  url: string;
+  type: 'image' | 'video';
+  allImages: string[];
+  onClose: () => void;
+  onNavigate: (url: string) => void;
+}
+
+function MediaViewer({ url, type, allImages, onClose, onNavigate }: MediaViewerProps) {
+  const [scale, setScale] = useState(1);
+  const currentIdx = type === 'image' ? allImages.indexOf(url) : -1;
+  const hasPrev = currentIdx > 0;
+  const hasNext = currentIdx >= 0 && currentIdx < allImages.length - 1;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowLeft'  && hasPrev) onNavigate(allImages[currentIdx - 1]);
+      if (e.key === 'ArrowRight' && hasNext)  onNavigate(allImages[currentIdx + 1]);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose, hasPrev, hasNext, currentIdx, allImages, onNavigate]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center" onClick={onClose}>
+      {/* Top toolbar */}
+      <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-3 z-10 pointer-events-none">
+        <span className="text-white/50 text-sm tabular-nums">
+          {currentIdx >= 0 && allImages.length > 1 ? `${currentIdx + 1} / ${allImages.length}` : ''}
+        </span>
+        <div className="flex items-center gap-1.5 pointer-events-auto">
+          {type === 'image' && <>
+            <button onClick={e => { e.stopPropagation(); setScale(s => Math.max(0.5, +(s - 0.25).toFixed(2))); }}
+              className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
+              <ZoomOut size={17} />
+            </button>
+            <button onClick={e => { e.stopPropagation(); setScale(s => Math.min(4, +(s + 0.25).toFixed(2))); }}
+              className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
+              <ZoomIn size={17} />
+            </button>
+          </>}
+          <a href={url} download title="Download"
+            className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+            onClick={e => e.stopPropagation()}>
+            <Download size={17} />
+          </a>
+          <button onClick={onClose}
+            className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
+            <X size={17} />
+          </button>
+        </div>
+      </div>
+
+      {/* Prev arrow */}
+      {hasPrev && (
+        <button
+          onClick={e => { e.stopPropagation(); onNavigate(allImages[currentIdx - 1]); }}
+          className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white z-10 transition-colors">
+          <ChevronLeft size={24} />
+        </button>
+      )}
+
+      {/* Content */}
+      <div onClick={e => e.stopPropagation()} className="flex items-center justify-center max-w-[90vw] max-h-[85vh]">
+        {type === 'image' ? (
+          <img
+            src={url}
+            alt="fullscreen"
+            style={{ transform: `scale(${scale})`, transition: 'transform 0.2s', transformOrigin: 'center' }}
+            className="max-w-[90vw] max-h-[85vh] object-contain rounded-xl select-none"
+          />
+        ) : (
+          <video src={url} controls autoPlay className="max-w-[90vw] max-h-[85vh] rounded-xl" />
+        )}
+      </div>
+
+      {/* Next arrow */}
+      {hasNext && (
+        <button
+          onClick={e => { e.stopPropagation(); onNavigate(allImages[currentIdx + 1]); }}
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white z-10 transition-colors">
+          <ChevronRight size={24} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const Conversation = () => {
@@ -188,9 +278,13 @@ const Conversation = () => {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Media viewer (lightbox + video modal)
+  const [mediaViewer, setMediaViewer] = useState<{ url: string; type: 'image' | 'video'; allImages: string[] } | null>(null);
+
   // Refs
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef  = useRef<HTMLInputElement>(null);
   const scrollEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const hasInitialScrolled = useRef(false);
@@ -323,11 +417,30 @@ const Conversation = () => {
     if (m.message_text.startsWith('blob-audio:') &&
         dbAgentMessages.some(db =>
           db.message_text?.startsWith('data:audio/') || db.message_text?.startsWith('blob-audio:'))) return false;
+    if (m.message_text.startsWith('blob-doc:') &&
+        dbAgentMessages.some(db => db.message_text?.startsWith('doc-data:'))) return false;
     return true;
   });
 
   // olderMessages prepended so the full list is chronological
   const allMessages = [...olderMessages, ...(messages || []), ...dedupedLocal];
+
+  // Collect all resolved image URLs for lightbox prev/next navigation
+  const allImageUrls = useMemo(() => {
+    const urls: string[] = [];
+    for (const m of allMessages) {
+      const t = m.message_text?.trim() || '';
+      if (t.startsWith('data:image/'))   { urls.push(t); continue; }
+      if (t.startsWith('blob-image:'))   { urls.push(t.slice('blob-image:'.length)); continue; }
+      if (t.startsWith('http') && /\.(jpg|jpeg|png|gif|webp|bmp|avif)(\?.*)?$/i.test(t)) { urls.push(t); continue; }
+    }
+    return urls;
+  }, [allMessages]);
+
+  // Open lightbox / video modal
+  const handleMediaClick = useCallback((url: string, type: 'image' | 'video') => {
+    setMediaViewer({ url, type, allImages: type === 'image' ? allImageUrls : [] });
+  }, [allImageUrls]);
 
   // Active = any message within the last 5 minutes (either party), or the DB flag as fallback
   const ACTIVE_WINDOW = 5 * 60 * 1000;
@@ -524,6 +637,62 @@ const Conversation = () => {
     }
   }, [activeConn, waConn, fbConn, igConn, recipient, replyingTo, sessionId, sessionPlatform]);
 
+  // ── Send document from file picker ──────────────────────────────────────────
+  const handleDocSelected = useCallback(async (file: File) => {
+    if (!activeConn) { toast.error('Add a connection in Settings first'); return; }
+    const blobUrl = URL.createObjectURL(file);
+    const localText = `blob-doc:${file.name}|||${blobUrl}`;
+    const id = nextId();
+    addOptimistic(id, localText, replyingTo);
+    setReplyingTo(null);
+    setUploadingId(id);
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const storedText = `doc-data:${file.name}|||${dataUrl}`;
+      await insertMessageToExternalDb(getStoredConnection(), {
+        session_id: sessionId || '',
+        sender: 'Agent',
+        message_text: storedText,
+        timestamp: new Date().toISOString(),
+        recipient,
+      });
+      if (sessionPlatform === 'whatsapp' && waConn) {
+        const mediaId = await waUploadFile(waConn, file, file.name, file.type);
+        await waPost(waConn, recipient, { type: 'document', document: { id: mediaId, filename: file.name } });
+      } else if (sessionPlatform === 'facebook' && fbConn) {
+        const attachId = await fbUploadFile(fbConn, file, 'file');
+        await fbPost(fbConn, recipient, { attachment: { type: 'file', payload: { attachment_id: attachId } } });
+      } else if (sessionPlatform === 'instagram' && igConn) {
+        const attachId = await fbUploadFile(igConn, file, 'file');
+        await fbPost(igConn, recipient, { attachment: { type: 'file', payload: { attachment_id: attachId } } });
+      } else if (sessionPlatform === 'unknown') {
+        if (waConn) {
+          const mediaId = await waUploadFile(waConn, file, file.name, file.type);
+          await waPost(waConn, recipient, { type: 'document', document: { id: mediaId, filename: file.name } });
+        } else {
+          const metaConn = fbConn || igConn;
+          if (!metaConn) throw new Error('No messaging connection configured');
+          const attachId = await fbUploadFile(metaConn, file, 'file');
+          await fbPost(metaConn, recipient, { attachment: { type: 'file', payload: { attachment_id: attachId } } });
+        }
+      } else {
+        throw new Error('No connection available for this platform');
+      }
+      storePlatform(recipient, sessionPlatform);
+      markSent(id);
+      revertOptimistic(id);
+      URL.revokeObjectURL(blobUrl);
+      await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    } catch (err: unknown) {
+      revertOptimistic(id);
+      URL.revokeObjectURL(blobUrl);
+      toast.error(err instanceof Error ? err.message : 'Failed to send document');
+    } finally {
+      setUploadingId(null);
+    }
+  }, [activeConn, waConn, fbConn, igConn, recipient, replyingTo, sessionId, sessionPlatform]);
+
   // ── Voice recording ─────────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
     try {
@@ -711,6 +880,18 @@ const Conversation = () => {
           }
         }}
       />
+      {/* Hidden document input */}
+      <input
+        ref={docInputRef}
+        type="file"
+        accept="application/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.zip,.rar"
+        className="hidden"
+        onChange={e => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) handleDocSelected(file);
+        }}
+      />
 
       {/* ── Header ───────────────────────────────────────────────────────────── */}
       <header className="flex-shrink-0 border-b border-border/30 bg-background/95 backdrop-blur-sm">
@@ -845,6 +1026,7 @@ const Conversation = () => {
               <ChatMessage
                 message={msg}
                 onReply={canReply ? setReplyingTo : undefined}
+                onMediaClick={handleMediaClick}
                 isFirst={isFirst}
                 isLast={isLast}
               />
@@ -986,9 +1168,15 @@ const Conversation = () => {
                 )}
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  title="Send image / file"
+                  title="Send image / video"
                   className="w-9 h-9 rounded-full flex items-center justify-center text-primary hover:bg-primary/10 transition-colors">
                   <ImageIcon size={20} />
+                </button>
+                <button
+                  onClick={() => docInputRef.current?.click()}
+                  title="Send document"
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-primary hover:bg-primary/10 transition-colors">
+                  <Paperclip size={20} />
                 </button>
               </div>
 
@@ -1045,6 +1233,17 @@ const Conversation = () => {
           )}
         </div>
       </div>
+
+      {/* Fullscreen media viewer */}
+      {mediaViewer && (
+        <MediaViewer
+          url={mediaViewer.url}
+          type={mediaViewer.type}
+          allImages={mediaViewer.allImages}
+          onClose={() => setMediaViewer(null)}
+          onNavigate={url => setMediaViewer(v => v ? { ...v, url } : null)}
+        />
+      )}
     </div>
   );
 };

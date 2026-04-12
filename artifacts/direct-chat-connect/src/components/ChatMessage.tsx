@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { cn } from '@/lib/utils';
-import { Reply, ExternalLink, Clock, CheckCheck, Mic, ImageIcon, Video, Play, Pause, Volume2 } from 'lucide-react';
+import { Reply, ExternalLink, Clock, CheckCheck, Mic, ImageIcon, Video, Play, Pause, Download, FileText, File, FileSpreadsheet } from 'lucide-react';
 
 // ─── URL / text parsers ────────────────────────────────────────────────────────
 const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|avif|svg)(\?.*)?$/i;
@@ -17,7 +17,8 @@ type Segment =
   | { type: 'text'; text: string }
   | { type: 'voice-placeholder' }
   | { type: 'image-placeholder' }
-  | { type: 'video-placeholder' };
+  | { type: 'video-placeholder' }
+  | { type: 'document'; url: string; name: string };
 
 function parseSegments(text: string): Segment[] {
   const trimmed = text.trim();
@@ -27,18 +28,38 @@ function parseSegments(text: string): Segment[] {
   if (trimmed.startsWith('blob-video:')) return [{ type: 'video', url: trimmed.slice('blob-video:'.length) }];
   if (trimmed.startsWith('blob-audio:')) return [{ type: 'audio', url: trimmed.slice('blob-audio:'.length) }];
 
+  // Document optimistic: blob-doc:<filename>|||<blobUrl>
+  if (trimmed.startsWith('blob-doc:')) {
+    const rest = trimmed.slice('blob-doc:'.length);
+    const sep = rest.indexOf('|||');
+    const name = sep >= 0 ? rest.slice(0, sep) : 'Document';
+    const url  = sep >= 0 ? rest.slice(sep + 3) : rest;
+    return [{ type: 'document', url, name }];
+  }
+
+  // Document stored: doc-data:<filename>|||data:application/...
+  if (trimmed.startsWith('doc-data:')) {
+    const rest = trimmed.slice('doc-data:'.length);
+    const sep = rest.indexOf('|||');
+    const name = sep >= 0 ? rest.slice(0, sep) : 'Document';
+    const url  = sep >= 0 ? rest.slice(sep + 3) : '';
+    return [{ type: 'document', url, name }];
+  }
+
   // Plain blob: URLs = optimistic voice recordings (legacy / stopAndSendVoice)
   if (trimmed.startsWith('blob:')) return [{ type: 'audio', url: trimmed }];
 
   // Base64 data URLs (persisted media from file uploads)
-  if (trimmed.startsWith('data:image/')) return [{ type: 'image', url: trimmed }];
-  if (trimmed.startsWith('data:video/')) return [{ type: 'video', url: trimmed }];
-  if (trimmed.startsWith('data:audio/')) return [{ type: 'audio', url: trimmed }];
+  if (trimmed.startsWith('data:image/'))       return [{ type: 'image', url: trimmed }];
+  if (trimmed.startsWith('data:video/'))       return [{ type: 'video', url: trimmed }];
+  if (trimmed.startsWith('data:audio/'))       return [{ type: 'audio', url: trimmed }];
+  if (trimmed.startsWith('data:application/')) return [{ type: 'document', url: trimmed, name: 'Document' }];
 
   // Meta placeholder strings
   if (/^\[voice message\]$/i.test(trimmed)) return [{ type: 'voice-placeholder' }];
   if (/^\[image\]$/i.test(trimmed))         return [{ type: 'image-placeholder' }];
   if (/^\[video\]$/i.test(trimmed))         return [{ type: 'video-placeholder' }];
+  if (/^\[document\]$/i.test(trimmed))      return [{ type: 'document', url: '', name: 'Document' }];
 
   // URL parsing
   const parts = text.split(URL_REGEX);
@@ -157,6 +178,51 @@ const AudioPlayer = ({ url, isRight }: { url: string; isRight: boolean }) => {
   );
 };
 
+// ─── File/document card ───────────────────────────────────────────────────────
+const FileCard = ({ url, name, isRight }: { url: string; name: string; isRight: boolean }) => {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  const isPdf   = ext === 'pdf';
+  const isWord  = ['doc', 'docx'].includes(ext);
+  const isExcel = ['xls', 'xlsx', 'csv'].includes(ext);
+  const iconBg  = isPdf ? 'bg-red-500' : isWord ? 'bg-blue-500' : isExcel ? 'bg-emerald-600' : 'bg-slate-500';
+  const Icon    = isExcel ? FileSpreadsheet : (isPdf || isWord) ? FileText : File;
+  const canDownload = !!(url && (url.startsWith('data:') || url.startsWith('blob:')));
+  return (
+    <div className="flex items-center gap-2.5 py-1.5 min-w-[200px] max-w-[260px]">
+      <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0', iconBg)}>
+        <Icon size={20} className="text-white" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className={cn('text-xs font-semibold truncate', isRight ? 'text-white' : 'text-foreground')}>{name}</p>
+        <p className={cn('text-[10px] uppercase font-medium tracking-wide', isRight ? 'text-white/60' : 'text-muted-foreground')}>{ext || 'file'}</p>
+      </div>
+      {canDownload && (
+        <a href={url} download={name} title="Download"
+          className={cn('flex-shrink-0 p-1.5 rounded-full transition-colors',
+            isRight ? 'text-white/70 hover:text-white hover:bg-white/20' : 'text-muted-foreground hover:text-foreground hover:bg-muted')}
+          onClick={e => e.stopPropagation()}>
+          <Download size={15} />
+        </a>
+      )}
+    </div>
+  );
+};
+
+// ─── Video thumbnail ──────────────────────────────────────────────────────────
+const VideoThumbnail = ({ url, onClick }: { url: string; onClick: () => void }) => (
+  <div
+    className="relative my-0.5 rounded-xl overflow-hidden max-w-[260px] cursor-pointer group"
+    onClick={onClick}
+  >
+    <video src={url} preload="metadata" muted className="max-w-full block" style={{ maxHeight: 200 }} />
+    <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
+      <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg">
+        <Play size={20} className="text-gray-800 ml-1" />
+      </div>
+    </div>
+  </div>
+);
+
 // ─── Placeholder cards ─────────────────────────────────────────────────────────
 const VoicePlaceholder = ({ isRight }: { isRight: boolean }) => (
   <div className={cn('flex items-center gap-2.5 py-1.5 min-w-[180px]')}>
@@ -197,12 +263,13 @@ const VideoPlaceholder = ({ isRight }: { isRight: boolean }) => (
 interface ChatMessageProps {
   message: ChatMessageType;
   onReply?: (msg: ChatMessageType) => void;
+  onMediaClick?: (url: string, type: 'image' | 'video') => void;
   isFirst?: boolean;
   isLast?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export const ChatMessage = ({ message, onReply, isFirst = true, isLast = true }: ChatMessageProps) => {
+export const ChatMessage = ({ message, onReply, onMediaClick, isFirst = true, isLast = true }: ChatMessageProps) => {
   const [imgError, setImgError] = useState<Record<string, boolean>>({});
   const [hover, setHover] = useState(false);
 
@@ -214,7 +281,7 @@ export const ChatMessage = ({ message, onReply, isFirst = true, isLast = true }:
 
   // Pure-media messages get transparent background
   const isMediaOnly = segments.every(s =>
-    s.type === 'image' || s.type === 'audio' || s.type === 'video' ||
+    s.type === 'image' || s.type === 'audio' || s.type === 'video' || s.type === 'document' ||
     s.type === 'voice-placeholder' || s.type === 'image-placeholder' || s.type === 'video-placeholder'
   );
 
@@ -303,15 +370,15 @@ export const ChatMessage = ({ message, onReply, isFirst = true, isLast = true }:
           {/* For media-only messages, wrap with bubble style applied to inner content */}
           {isMediaOnly && isRight && (
             <div className="rounded-2xl p-2.5" style={bubbleStyle}>
-              {segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError))}
+              {segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError, onMediaClick))}
             </div>
           )}
           {isMediaOnly && !isRight && (
             <div className="rounded-2xl p-2.5 bg-muted/80 dark:bg-white/10 border border-border/40">
-              {segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError))}
+              {segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError, onMediaClick))}
             </div>
           )}
-          {!isMediaOnly && segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError))}
+          {!isMediaOnly && segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError, onMediaClick))}
         </div>
 
         {/* Timestamp + send status */}
@@ -345,6 +412,7 @@ function renderSegment(
   isRight: boolean,
   imgError: Record<string, boolean>,
   setImgError: React.Dispatch<React.SetStateAction<Record<string, boolean>>>,
+  onMediaClick?: (url: string, type: 'image' | 'video') => void,
 ) {
   switch (seg.type) {
     case 'audio':
@@ -353,6 +421,9 @@ function renderSegment(
     case 'voice-placeholder':
       return <VoicePlaceholder key={i} isRight={isRight} />;
 
+    case 'document':
+      return <FileCard key={i} url={seg.url} name={seg.name} isRight={isRight} />;
+
     case 'image':
       return imgError[seg.url] ? (
         <a key={i} href={seg.url} target="_blank" rel="noopener noreferrer"
@@ -360,8 +431,9 @@ function renderSegment(
           <ExternalLink size={12} /> {seg.url.split('/').pop()}
         </a>
       ) : (
-        <div key={i} className="my-0.5 rounded-xl overflow-hidden max-w-[260px]">
-          <img src={seg.url} alt="image" className="max-w-full rounded-xl object-cover block"
+        <div key={i} className="my-0.5 rounded-xl overflow-hidden max-w-[260px] cursor-pointer"
+          onClick={() => onMediaClick?.(seg.url, 'image')}>
+          <img src={seg.url} alt="image" className="max-w-full rounded-xl object-cover block hover:opacity-90 transition-opacity"
             style={{ maxHeight: 260 }}
             onError={() => setImgError(prev => ({ ...prev, [seg.url]: true }))} />
         </div>
@@ -372,9 +444,7 @@ function renderSegment(
 
     case 'video':
       return (
-        <div key={i} className="my-0.5 rounded-xl overflow-hidden max-w-[260px]">
-          <video controls src={seg.url} className="max-w-full rounded-xl block" style={{ maxHeight: 260 }} />
-        </div>
+        <VideoThumbnail key={i} url={seg.url} onClick={() => onMediaClick?.(seg.url, 'video')} />
       );
 
     case 'video-placeholder':
