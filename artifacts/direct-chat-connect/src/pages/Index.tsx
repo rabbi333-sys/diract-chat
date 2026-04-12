@@ -22,6 +22,7 @@ import WebhookSettings from '@/components/WebhookSettings';
 import { useGlobalAiControl } from '@/hooks/useAiControl';
 import { useAnalytics, useChartData } from '@/hooks/useChatHistory';
 import { useRealtimeUpdates } from '@/hooks/useRealtimeUpdates';
+import { LiveSyncBadge } from '@/components/LiveSyncBadge';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useTeamRole } from '@/hooks/useTeamRole';
@@ -88,9 +89,8 @@ const Index = () => {
   useAnalytics();
   useChartData('daily');
 
-  // ── Supabase Realtime — instant updates without manual refresh ────────────
-  const { connected: realtimeConnected } = useRealtimeUpdates((sessionId) => {
-    // Notify when a new message arrives on a different session than the one open
+  // ── Live sync — Realtime / SSE / Smart-polling depending on db type ────────
+  const { connected: syncConnected, mode: syncMode } = useRealtimeUpdates((sessionId) => {
     const currentPath = window.location.pathname;
     if (!currentPath.includes(sessionId)) {
       toast('New message received', { duration: 3000 });
@@ -405,9 +405,6 @@ const Index = () => {
             >
               <item.icon size={18} />
               <span className="flex-1 text-left">{t(NAV_LABEL_KEYS[item.label])}</span>
-              {item.label === 'Messages' && realtimeConnected && (
-                <span title="Realtime connected" className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
-              )}
               {item.badgeKey && counts[item.badgeKey] > 0 && (
                 <span className={cn(
                   "min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 animate-pulse",
@@ -430,8 +427,9 @@ const Index = () => {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col pt-14 md:pt-0 overflow-hidden relative">
-        {/* Desktop top-right toolbar: AI toggle + Theme — hidden on Orders page */}
-        <div className={cn("hidden items-center gap-2 absolute top-3 right-4 z-10", activeNav !== 'Orders' && "md:flex")}>
+        {/* Desktop top-right toolbar: Live Sync badge + AI toggle + Theme */}
+        <div className={cn("hidden items-center gap-3 absolute top-3 right-4 z-10", activeNav !== 'Orders' && "md:flex")}>
+          <LiveSyncBadge connected={syncConnected} mode={syncMode} />
           <button
             onClick={toggleGlobalAi}
             disabled={globalAiPending}

@@ -44,7 +44,7 @@ export type SessionInfo = {
 // ─── Row normalizer (mirrors frontend normalizeRow) ───────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizeRow(raw: Record<string, any>): NormalizedMessage | null {
+export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null {
   if (!raw) return null;
   const id = (raw.id ?? raw._id ?? "") as string | number;
   const session_id = String(raw.session_id ?? raw.sessionId ?? raw.conversation_id ?? "unknown");
