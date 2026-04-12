@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { format, subDays, subMonths, startOfWeek, endOfWeek, eachDayOfInterval, parseISO } from 'date-fns';
+import { format, subDays, subMonths, startOfWeek, endOfWeek, eachDayOfInterval, parseISO, startOfMonth } from 'date-fns';
 import {
   getStoredConnection,
   queryExternalSupabase,
@@ -153,6 +153,26 @@ const FALLBACK_TS = '2000-01-01T00:00:00.000Z';
 function computeChartData(msgs: NormalizedMessage[], timeRange: 'daily' | 'weekly' | 'monthly'): ChartData[] {
   const now = new Date();
 
+  // ── Helper: compute dynamic week buckets for the current month ──────────────
+  // Weeks are month-relative: Week 1 = days 1-7, Week 2 = days 8-14, etc.
+  // Only weeks that have already started (up to today) are included.
+  const buildMonthWeeks = (): { label: string; wStart: Date; wEnd: Date }[] => {
+    const mStart = startOfMonth(now);
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const currentDay = now.getDate();
+    // How many full-or-partial 7-day windows have started?
+    const weeksToShow = Math.ceil(currentDay / 7);
+    return Array.from({ length: weeksToShow }, (_, i) => {
+      const dayFrom = i * 7 + 1;
+      const dayTo   = Math.min((i + 1) * 7, daysInMonth);
+      return {
+        label:  `Week ${i + 1}`,
+        wStart: new Date(mStart.getFullYear(), mStart.getMonth(), dayFrom, 0,  0,  0),
+        wEnd:   new Date(mStart.getFullYear(), mStart.getMonth(), dayTo,   23, 59, 59),
+      };
+    });
+  };
+
   // If no messages have real timestamps (all fallback), show totals in the most recent bucket
   const hasRealTimestamps = msgs.some((m) => m.timestamp !== FALLBACK_TS);
   if (!hasRealTimestamps && msgs.length > 0) {
@@ -165,10 +185,11 @@ function computeChartData(msgs: NormalizedMessage[], timeRange: 'daily' | 'weekl
       });
     }
     if (timeRange === 'weekly') {
-      return Array.from({ length: 4 }, (_, i) => ({
-        label: `Week ${i + 1}`,
-        conversations: i === 3 ? totalSessions : 0,
-        messages: i === 3 ? totalMessages : 0,
+      const weeks = buildMonthWeeks();
+      return weeks.map((w, i) => ({
+        label: w.label,
+        conversations: i === weeks.length - 1 ? totalSessions : 0,
+        messages:      i === weeks.length - 1 ? totalMessages : 0,
       }));
     }
     return Array.from({ length: 6 }, (_, i) => {
@@ -188,16 +209,13 @@ function computeChartData(msgs: NormalizedMessage[], timeRange: 'daily' | 'weekl
   }
 
   if (timeRange === 'weekly') {
-    return Array.from({ length: 4 }, (_, i) => {
-      const weekRef = subDays(now, (3 - i) * 7);
-      const wStart = startOfWeek(weekRef);
-      const wEnd = endOfWeek(weekRef);
+    return buildMonthWeeks().map(({ label, wStart, wEnd }) => {
       const wMsgs = msgs.filter((m) => {
         if (m.timestamp === FALLBACK_TS) return false;
         try { const d = new Date(m.timestamp); return d >= wStart && d <= wEnd; } catch { return false; }
       });
       const sessions = new Set(wMsgs.map((m) => m.session_id));
-      return { label: `Week ${i + 1}`, conversations: sessions.size, messages: wMsgs.length };
+      return { label, conversations: sessions.size, messages: wMsgs.length };
     });
   }
 
