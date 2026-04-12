@@ -669,7 +669,7 @@ const OrderAnalytics = () => {
           {/* Header */}
           <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-[14px] font-bold text-[#0F1111] dark:text-foreground">Orders by {viewLabel}</h3>
+              <h3 className="text-[14px] font-bold text-[#0F1111] dark:text-foreground">Status Breakdown by {viewLabel}</h3>
               <p className="text-[10.5px] text-[#565959] dark:text-muted-foreground mt-0.5">{summary.total} total orders in this period</p>
             </div>
             {/* Chart type toggle */}
