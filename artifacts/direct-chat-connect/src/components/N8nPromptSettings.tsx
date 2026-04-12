@@ -1,20 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Bot,
-  Eye,
-  EyeOff,
   Save,
   Loader2,
   CheckCircle2,
   Info,
   Zap,
-  Key,
   Copy,
   Check,
-  Link2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -96,19 +90,10 @@ export const N8nPromptSettings = () => {
     ...emptySettings(),
     ...saved,
   }));
-  const [credentialsSaved, setCredentialsSaved] = useState(
-    !!(saved?.supabaseUrl && saved?.supabaseAnonKey)
-  );
-  const [autoSynced, setAutoSynced] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [showAnonKey, setShowAnonKey] = useState(false);
   const [editedPrompt, setEditedPrompt] = useState('');
   const [promptLoaded, setPromptLoaded] = useState(false);
 
-  // ── Auto-sync from active DB connection ────────────────────────────────────
-  // When the user connects Supabase in Settings → Database, all other sections
-  // that need Supabase credentials (prompt save, n8n guide) auto-use those same
-  // credentials — no need to re-enter them here.
+  // ── Auto-sync Supabase credentials from active DB connection ───────────────
   useEffect(() => {
     const sync = () => {
       const conn = getActiveConnection();
@@ -122,34 +107,12 @@ export const N8nPromptSettings = () => {
           saveN8nSettings(updated);
           return updated;
         });
-        setCredentialsSaved(true);
-        setAutoSynced(true);
         setPromptLoaded(false);
       }
     };
     sync();
     return onDbChange(sync);
   }, []);
-
-  const set = <K extends keyof N8nSettings>(k: K, v: N8nSettings[K]) =>
-    setForm((prev) => ({ ...prev, [k]: v }));
-
-  const canSaveCredentials =
-    form.supabaseUrl.trim() !== '' && form.supabaseAnonKey.trim() !== '';
-
-  const handleSaveCredentials = () => {
-    const trimmed: N8nSettings = {
-      n8nUrl: form.n8nUrl.trim().replace(/\/$/, ''),
-      n8nApiKey: form.n8nApiKey.trim(),
-      supabaseUrl: form.supabaseUrl.trim().replace(/\/$/, ''),
-      supabaseAnonKey: form.supabaseAnonKey.trim(),
-      mode: 'proxy',
-    };
-    saveN8nSettings(trimmed);
-    setForm(trimmed);
-    setCredentialsSaved(true);
-    toast.success('Credentials saved!');
-  };
 
   const { data: savedPrompt } = useLoadPromptDirect(form.supabaseUrl, form.supabaseAnonKey);
   useEffect(() => {
@@ -181,139 +144,6 @@ export const N8nPromptSettings = () => {
 
   return (
     <div className="space-y-5">
-
-      {/* ── Credentials ── */}
-      <div className="space-y-3 bg-muted/30 rounded-xl p-4 border border-border">
-        <div className="flex items-center gap-2 mb-1">
-          <Key size={13} className="text-muted-foreground" />
-          <p className="text-xs font-semibold text-foreground uppercase tracking-wider">
-            Credentials
-          </p>
-          {credentialsSaved && (
-            <CheckCircle2 size={13} className="text-emerald-500 ml-auto" />
-          )}
-        </div>
-
-        {autoSynced ? (
-          /* Auto-connected banner — credentials come from Settings → Database */
-          <div className="flex items-start gap-2.5 rounded-lg border border-emerald-400/40 bg-emerald-50/60 dark:bg-emerald-950/20 px-3 py-2.5">
-            <Link2 size={14} className="text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
-            <div className="space-y-0.5">
-              <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                Auto-connected from your database settings
-              </p>
-              <p className="text-[10.5px] text-emerald-700/70 dark:text-emerald-400/70 leading-relaxed">
-                The Supabase credentials from <strong>Settings → Database</strong> are being used here automatically — no need to re-enter them.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Supabase Project URL</Label>
-              <Input
-                placeholder="https://xxxx.supabase.co"
-                value={form.supabaseUrl}
-                onChange={(e) => {
-                  set('supabaseUrl', e.target.value);
-                  setCredentialsSaved(false);
-                  setPromptLoaded(false);
-                }}
-                data-testid="input-proxy-supabase-url"
-                className="text-sm font-mono"
-              />
-              <p className="text-[10px] text-muted-foreground">
-                Supabase Dashboard → Settings → API → Project URL
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">Supabase Anon Key</Label>
-              <div className="relative">
-                <Input
-                  type={showAnonKey ? 'text' : 'password'}
-                  placeholder="eyJhbGciOiJIUzI1NiIs..."
-                  value={form.supabaseAnonKey}
-                  onChange={(e) => {
-                    set('supabaseAnonKey', e.target.value);
-                    setCredentialsSaved(false);
-                    setPromptLoaded(false);
-                  }}
-                  className="pr-9 text-sm font-mono"
-                  data-testid="input-proxy-anon-key"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowAnonKey(!showAnonKey)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showAnonKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                Supabase Dashboard → Settings → API → anon public
-              </p>
-            </div>
-          </>
-        )}
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">
-            n8n Instance URL{' '}
-            <span className="text-muted-foreground font-normal">(optional)</span>
-          </Label>
-          <Input
-            placeholder="https://your-n8n.app.n8n.cloud"
-            value={form.n8nUrl}
-            onChange={(e) => {
-              set('n8nUrl', e.target.value);
-              setCredentialsSaved(false);
-            }}
-            data-testid="input-n8n-url"
-            className="text-sm font-mono"
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">
-            n8n API Key{' '}
-            <span className="text-muted-foreground font-normal">(optional)</span>
-          </Label>
-          <div className="relative">
-            <Input
-              type={showApiKey ? 'text' : 'password'}
-              placeholder="n8n_api_xxxxxxxx..."
-              value={form.n8nApiKey}
-              onChange={(e) => {
-                set('n8nApiKey', e.target.value);
-                setCredentialsSaved(false);
-              }}
-              className="pr-9 text-sm font-mono"
-              data-testid="input-n8n-api-key"
-            />
-            <button
-              type="button"
-              onClick={() => setShowApiKey(!showApiKey)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
-          </div>
-        </div>
-
-        {(!autoSynced || form.n8nUrl.trim() || form.n8nApiKey.trim()) && (
-          <Button
-            onClick={handleSaveCredentials}
-            disabled={!canSaveCredentials}
-            size="sm"
-            className="w-full"
-            data-testid="button-save-n8n-credentials"
-          >
-            <Save size={13} className="mr-1.5" />
-            {autoSynced ? 'Save n8n Settings' : 'Save Credentials'}
-          </Button>
-        )}
-      </div>
 
       {/* ── Prompt Editor ── */}
       <div className="space-y-3 bg-muted/30 rounded-xl p-4 border border-border">
