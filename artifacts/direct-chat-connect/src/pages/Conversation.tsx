@@ -721,13 +721,15 @@ const Conversation = () => {
               {/* Platform chip */}
               {sessionPlatform !== 'unknown' && (() => {
                 const cfg = PLATFORM_CONFIG[sessionPlatform];
+                const chipBg = cfg.gradient ? cfg.gradient : cfg.color + '22';
+                const chipColor = cfg.gradient ? '#fff' : cfg.color;
                 return (
                   <span
                     className="flex-shrink-0 flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                    style={{ background: cfg.color + '22', color: cfg.color }}
+                    style={{ background: chipBg, color: chipColor }}
                   >
                     {sessionPlatform === 'whatsapp' && (
-                      <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5" style={{ color: cfg.color }}>
+                      <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5">
                         <path d="M10 2C5.6 2 2 5.6 2 10c0 1.4.4 2.8 1 4l-1.1 3.9L5.9 17c1.2.6 2.5 1 4.1 1 4.4 0 8-3.6 8-8s-3.6-8-8-8zm4.5 8.75c-.2-.1-.95-.47-1.1-.52-.15-.06-.26-.09-.37.08-.11.17-.42.52-.51.63-.1.11-.19.12-.35.04-.94-.47-1.56-.84-2.18-1.9-.17-.29.17-.27.48-.9.05-.1.03-.2-.01-.27-.04-.08-.37-.9-.51-1.23-.13-.33-.27-.28-.37-.29-.1 0-.21-.02-.32-.02s-.29.04-.44.22c-.15.17-.58.57-.58 1.38s.59 1.6.68 1.71c.08.11 1.16 1.77 2.82 2.48.39.17.7.27.94.35.4.12.76.1 1.04.06.32-.05.98-.4 1.12-.79.14-.39.14-.73.1-.8-.04-.07-.15-.11-.32-.19z" fill="currentColor"/>
                       </svg>
                     )}

@@ -44,7 +44,7 @@ export interface SessionInfo {
   message_count: number;
   is_active: boolean;
   last_message_text?: string;
-  platform?: string;
+  platform?: 'whatsapp' | 'facebook' | 'instagram';
 }
 
 export interface RecipientName {

@@ -26,6 +26,8 @@ export interface StoredConnection {
   is_active?: boolean;
 }
 
+export type KnownPlatform = 'whatsapp' | 'facebook' | 'instagram';
+
 export interface NormalizedMessage {
   id: string | number;
   session_id: string;
@@ -33,7 +35,7 @@ export interface NormalizedMessage {
   message_text: string;
   timestamp: string;
   recipient?: string;
-  platform?: string;
+  platform?: KnownPlatform;
 }
 
 export interface SessionInfo {
@@ -43,7 +45,7 @@ export interface SessionInfo {
   message_count: number;
   is_active: boolean;
   last_message_text?: string;
-  platform?: string;
+  platform?: KnownPlatform;
 }
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
@@ -92,8 +94,15 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     timestamp = String(rawTs);
   }
 
-  // Extract platform field if present in the raw row
-  const platform = (raw.platform ?? raw.channel ?? raw.source ?? undefined) as string | undefined;
+  // Extract and normalize platform field to a known union value
+  const rawPlatform = String(raw.platform ?? raw.channel ?? raw.source ?? '').toLowerCase();
+  const platform: KnownPlatform | undefined = rawPlatform.includes('whatsapp') || rawPlatform.startsWith('wa')
+    ? 'whatsapp'
+    : rawPlatform.includes('instagram') || rawPlatform.startsWith('ig')
+      ? 'instagram'
+      : rawPlatform.includes('facebook') || rawPlatform.includes('messenger') || rawPlatform.startsWith('fb')
+        ? 'facebook'
+        : undefined;
 
   // n8n / LangChain native: { message: { type, data: { content } } }
   // Supabase Realtime may deliver the JSONB `message` column as a string — parse it.
@@ -204,7 +213,10 @@ export function buildSessionsFromMessages(msgs: NormalizedMessage[]): SessionInf
   } else {
     sessions.sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
   }
-  return sessions.map(({ last_id: _lid, ...s }) => s);
+  return sessions.map(({ last_id: _lid, ...s }) => ({
+    ...s,
+    platform: s.platform as KnownPlatform | undefined,
+  })) as SessionInfo[];
 }
 
 // ─── Raw Supabase REST fetch — bypasses @supabase/supabase-js entirely ────────

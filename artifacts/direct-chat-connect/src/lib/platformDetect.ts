@@ -124,13 +124,16 @@ export const PLATFORM_CONFIG = {
   whatsapp: {
     label: 'WhatsApp',
     color: '#25D366',
+    gradient: null as string | null,
   },
   facebook: {
     label: 'Facebook',
     color: '#0082FB',
+    gradient: null as string | null,
   },
   instagram: {
     label: 'Instagram',
-    color: '#E1306C',
+    color: '#C13584',
+    gradient: 'linear-gradient(135deg, #FFDC80 0%, #FCAF45 20%, #F77737 40%, #C13584 70%, #833AB4 100%)',
   },
-} as const;
+};

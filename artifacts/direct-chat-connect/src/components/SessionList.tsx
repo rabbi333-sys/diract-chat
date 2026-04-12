@@ -49,10 +49,11 @@ function sortSessions(sessions: SessionInfo[]): SessionInfo[] {
 const PlatformBadge = ({ platform }: { platform: Platform }) => {
   if (platform === 'unknown') return null;
   const cfg = PLATFORM_CONFIG[platform];
+  const bg = cfg.gradient ?? cfg.color;
   return (
     <span
       className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center shadow-sm border border-background"
-      style={{ background: cfg.color }}
+      style={{ background: bg }}
       title={cfg.label}
     >
       {platform === 'whatsapp' && (
@@ -337,11 +338,11 @@ export const SessionList = () => {
                     ? 'text-white border-transparent'
                     : 'bg-transparent text-muted-foreground border-border hover:text-foreground hover:border-foreground/40'
                 )}
-                style={isActive ? { background: cfg.color, borderColor: cfg.color } : {}}
+                style={isActive ? { background: cfg.gradient ?? cfg.color, borderColor: cfg.color } : {}}
               >
                 <span
                   className="w-3 h-3 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ background: cfg.color }}
+                  style={{ background: cfg.gradient ?? cfg.color }}
                 >
                   {p === 'whatsapp' && (
                     <svg viewBox="0 0 20 20" fill="none" className="w-2 h-2">
