@@ -39,7 +39,7 @@ function mongoKey(c: SessionsCreds): string {
 }
 
 function redisKey(c: SessionsCreds): string {
-  return `redis|${c.connectionString ?? ""}|${c.host ?? ""}|${c.port ?? ""}|${c.dbPassword ?? ""}`;
+  return `redis|${c.connectionString ?? ""}|${c.host ?? ""}|${c.port ?? ""}|${c.dbPassword ?? ""}|${c.dbName ?? ""}`;
 }
 
 export function buildPgConnStr(c: SessionsCreds): string {
@@ -127,12 +127,16 @@ export function getRedisClient(c: SessionsCreds): Redis {
   const existing = redisClients.get(key);
   if (existing) return existing;
 
+  const dbIndex = c.dbName !== undefined && c.dbName !== "" && !isNaN(Number(c.dbName))
+    ? Number(c.dbName)
+    : 0;
   const r = c.connectionString
     ? new Redis(c.connectionString, { maxRetriesPerRequest: 1, enableReadyCheck: false })
     : new Redis({
         host: c.host || "localhost",
         port: c.port ? Number(c.port) : 6379,
         password: c.dbPassword || undefined,
+        db: dbIndex,
         maxRetriesPerRequest: 1,
         enableReadyCheck: false,
       });

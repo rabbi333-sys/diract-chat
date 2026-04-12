@@ -163,7 +163,8 @@ async function pgQueryRaw(c: SessionsCreds, sql: string, params: unknown[] = [])
 
 async function mysqlQueryRaw(c: SessionsCreds, sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
   const pool = getMysqlPool(c);
-  const [rows] = await pool.execute(sql, params);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rows] = await pool.execute(sql, params as any[]);
   return rows as Record<string, unknown>[];
 }
 

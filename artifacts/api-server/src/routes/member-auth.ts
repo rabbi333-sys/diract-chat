@@ -93,12 +93,9 @@ END $$;
 
 async function mysqlQuery<T>(c: DbCreds, sql: string, params: unknown[] = []): Promise<T[]> {
   const pool = getMysqlPool(asSC(c));
-  const [rows] = await pool.execute(sql, params);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rows] = await pool.execute(sql, params as any[]);
   return rows as T[];
-}
-
-function mysqlUUID() {
-  return randomUUID();
 }
 
 const MYSQL_INIT_SQL = `
@@ -339,7 +336,7 @@ router.post("/member-auth/invites/update", async (req: Request, res: Response) =
       await mysqlQuery(creds, `UPDATE team_invites SET ${setClauses} WHERE id = ?`, [...fields.map(([, v]) => v), id]);
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => {
-        await col.updateOne({ $or: [{ id }, { _id: id as unknown }] }, { $set: Object.fromEntries(fields) });
+        await col.updateOne({ id }, { $set: Object.fromEntries(fields) });
       });
     } else if (creds.dbType === "redis") {
       await redisOp(creds, async (r) => {
@@ -379,7 +376,7 @@ router.post("/member-auth/invites/delete", async (req: Request, res: Response) =
       await mysqlQuery(creds, "DELETE FROM team_invites WHERE id = ?", [id]);
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => {
-        await col.deleteOne({ $or: [{ id }, { _id: id as unknown }] });
+        await col.deleteOne({ id });
       });
     } else if (creds.dbType === "redis") {
       await redisOp(creds, async (r) => {
