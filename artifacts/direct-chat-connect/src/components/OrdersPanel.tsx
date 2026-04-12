@@ -217,65 +217,56 @@ async function generateInvoice(order: Order) {
     fill(C.blue); pdf.rect(0, 0, W, 4, 'F');
 
     // ─────────────────────────────────────────────────────────
-    // HEADER — logo left, INVOICE label right
+    // HEADER — brand left, INVOICE + status right
     // ─────────────────────────────────────────────────────────
-    let y = 16;
+    let y = 20;
 
-    // Logo pill
-    fill(C.blue);
-    pdf.roundedRect(ML, y, 12, 12, 2, 2, 'F');
-    color(C.white); bold(9);
-    pdf.text('CM', ML + 6, y + 8.5, { align: 'center' });
+    // Brand name only (no icon box)
+    color(C.ink); bold(17);
+    pdf.text('Chat Monitor', ML, y);
 
-    // Brand name
-    color(C.ink); bold(14);
-    pdf.text('Chat Monitor', ML + 16, y + 8);
+    // Right side: large INVOICE label
+    color(C.ink); bold(30);
+    pdf.text('INVOICE', W - MR, y, { align: 'right' });
 
-    // Right side: INVOICE heading
-    color(C.ink); bold(26);
-    pdf.text('INVOICE', W - MR, y + 9, { align: 'right' });
+    y += 9;
 
-    y += 18;
-
-    // Status badge (right-aligned under INVOICE heading)
-    const statusW = 30;
-    fill(st.bg);
-    pdf.roundedRect(W - MR - statusW, y, statusW, 7, 1.5, 1.5, 'F');
-    color(st.fg); bold(6.5);
-    pdf.text(st.label, W - MR - statusW / 2, y + 4.8, { align: 'center' });
+    // Status — plain colored text (no badge box)
+    color(st.fg); bold(8);
+    pdf.text(st.label, W - MR, y, { align: 'right' });
 
     y += 14;
 
     // Thin full-width divider
     stroke(C.border); pdf.setLineWidth(0.4);
     pdf.line(ML, y, W - MR, y);
-    y += 10;
+    y += 12;
 
     // ─────────────────────────────────────────────────────────
     // TWO-COLUMN META — Bill To (left) | Invoice Details (right)
     // ─────────────────────────────────────────────────────────
-    const COL_R = W - MR - 72;   // right column starts here
+    const COL_R = W - MR - 80;   // right column starts here
 
     // ── BILL TO ──
-    color(C.blue); bold(7);
+    color(C.blue); bold(8);
     pdf.text('BILL TO', ML, y);
-    y += 6;
-    color(C.ink); bold(11);
+    y += 7;
+    color(C.ink); bold(13);
     pdf.text(order.customer_name || '—', ML, y);
 
-    let leftY = y + 6;
-    norm(8.5);
+    let leftY = y + 8;
+    norm(9.5);
     if (order.customer_phone) {
       color(C.muted); pdf.text('Phone', ML, leftY);
-      color(C.ink);   pdf.text(order.customer_phone, ML + 18, leftY);
-      leftY += 6;
+      color(C.ink);   pdf.text(order.customer_phone, ML + 22, leftY);
+      leftY += 8;
     }
     if (order.customer_address) {
       color(C.muted); pdf.text('Address', ML, leftY);
       color(C.ink);
-      const addrLines = pdf.splitTextToSize(order.customer_address, 70);
-      pdf.text(addrLines.slice(0, 2), ML + 22, leftY);
-      leftY += 6 * Math.min(addrLines.length, 2);
+      const addrLines = pdf.splitTextToSize(order.customer_address, 68);
+      pdf.text(addrLines.slice(0, 2), ML + 26, leftY);
+      leftY += 8 * Math.min(addrLines.length, 2);
     }
 
     // ── INVOICE DETAILS (right column) ──
@@ -286,78 +277,71 @@ async function generateInvoice(order: Order) {
       ['Payment',      (order.payment_status || 'N/A').toUpperCase()],
     ];
 
-    let rightY = y - 6;
+    let rightY = y - 7;
     detailRows.forEach(([label, val]) => {
-      color(C.muted); norm(8); pdf.text(label, COL_R, rightY);
-      color(C.ink);   bold(8); pdf.text(val, W - MR, rightY, { align: 'right' });
-      rightY += 7;
+      color(C.muted); norm(9); pdf.text(label, COL_R, rightY);
+      color(C.ink);   bold(9); pdf.text(val, W - MR, rightY, { align: 'right' });
+      rightY += 8;
     });
 
-    y = Math.max(leftY, rightY) + 10;
+    y = Math.max(leftY, rightY) + 12;
 
     // ─────────────────────────────────────────────────────────
     // LINE ITEMS TABLE
     // ─────────────────────────────────────────────────────────
-    // Section label
-    color(C.ink); bold(10);
+    color(C.ink); bold(11);
     pdf.text('Items', ML, y);
-    // Blue underline
-    fill(C.blue); pdf.rect(ML, y + 2, 12, 0.7, 'F');
-    y += 8;
+    fill(C.blue); pdf.rect(ML, y + 2.5, 14, 0.8, 'F');
+    y += 10;
 
     // Table header bg
     fill(C.blueLight); stroke(C.blueLight); pdf.setLineWidth(0);
-    pdf.rect(ML, y, CW, 9, 'F');
+    pdf.rect(ML, y, CW, 10, 'F');
 
-    // Header labels
-    const TCOLS = { desc: ML + 3, qty: ML + 105, unit: ML + 125, total: ML + CW };
-    color(C.blueDark); bold(7.5);
-    pdf.text('DESCRIPTION',  TCOLS.desc,  y + 6);
-    pdf.text('QTY',          TCOLS.qty,   y + 6);
-    pdf.text('UNIT PRICE',   TCOLS.unit,  y + 6);
-    pdf.text('AMOUNT',       TCOLS.total, y + 6, { align: 'right' });
-    y += 9;
+    const TCOLS = { desc: ML + 4, qty: ML + 108, unit: ML + 130, total: ML + CW };
+    color(C.blueDark); bold(8);
+    pdf.text('DESCRIPTION',  TCOLS.desc,  y + 7);
+    pdf.text('QTY',          TCOLS.qty,   y + 7);
+    pdf.text('UNIT PRICE',   TCOLS.unit,  y + 7);
+    pdf.text('AMOUNT',       TCOLS.total, y + 7, { align: 'right' });
+    y += 10;
 
-    // Row 1 (white bg)
-    fill(C.white); pdf.rect(ML, y, CW, 13, 'F');
+    // Item row
+    const rowH = order.sku ? 16 : 13;
+    fill(C.white); pdf.rect(ML, y, CW, rowH, 'F');
     stroke(C.border); pdf.setLineWidth(0.3);
-    pdf.line(ML, y,      W - MR, y);
-    pdf.line(ML, y + 13, W - MR, y + 13);
+    pdf.line(ML, y,        W - MR, y);
+    pdf.line(ML, y + rowH, W - MR, y + rowH);
 
-    color(C.ink); bold(9.5);
-    pdf.text(order.product_name || 'Product', TCOLS.desc, y + 5.5);
+    color(C.ink); bold(10.5);
+    pdf.text(order.product_name || 'Product', TCOLS.desc, y + 6.5);
     if (order.sku) {
-      color(C.muted); norm(7.5);
-      pdf.text(`SKU: ${order.sku}`, TCOLS.desc, y + 10.5);
+      color(C.muted); norm(8);
+      pdf.text(`SKU: ${order.sku}`, TCOLS.desc, y + 12.5);
     }
-    norm(9); color(C.ink);
-    pdf.text(qty.toString(), TCOLS.qty, y + 8);
-    pdf.text(`Tk ${unit.toLocaleString('en-US', { minimumFractionDigits: 0 })}`, TCOLS.unit, y + 8);
-    bold(9); color(C.ink);
-    pdf.text(`Tk ${total.toLocaleString('en-US', { minimumFractionDigits: 0 })}`, TCOLS.total, y + 8, { align: 'right' });
+    norm(10); color(C.ink);
+    pdf.text(qty.toString(),                                                        TCOLS.qty,   y + (rowH / 2) + 2);
+    pdf.text(`Tk ${unit.toLocaleString('en-US', { minimumFractionDigits: 0 })}`,   TCOLS.unit,  y + (rowH / 2) + 2);
+    bold(10); color(C.ink);
+    pdf.text(`Tk ${total.toLocaleString('en-US', { minimumFractionDigits: 0 })}`,  TCOLS.total, y + (rowH / 2) + 2, { align: 'right' });
 
-    y += 20;
+    y += rowH + 18;
 
     // ─────────────────────────────────────────────────────────
-    // TOTALS BLOCK (right-aligned, 80 mm wide)
+    // TOTALS BLOCK (right-aligned, 85 mm wide)
     // ─────────────────────────────────────────────────────────
-    const TW   = 82;
+    const TW   = 88;
     const TX   = W - MR - TW;
     let   ty   = y;
 
-    const tRow = (label: string, val: string, isBold = false, hlFg?: RGB, hlBg?: RGB) => {
-      if (hlBg) {
-        fill(hlBg); pdf.rect(TX, ty - 1, TW, 9, 'F');
-      }
-      if (hlFg) color(hlFg); else color(C.muted);
-      if (isBold) bold(8.5); else norm(8.5);
-      pdf.text(label, TX + 4, ty + 5.5);
-      if (hlFg) color(hlFg); else color(C.ink);
-      if (isBold) bold(8.5); else norm(8.5);
-      pdf.text(val, TX + TW - 4, ty + 5.5, { align: 'right' });
+    const tRow = (label: string, val: string) => {
+      color(C.muted); norm(9.5);
+      pdf.text(label, TX + 4, ty + 6);
+      color(C.ink);   norm(9.5);
+      pdf.text(val, TX + TW - 4, ty + 6, { align: 'right' });
       stroke(C.border); pdf.setLineWidth(0.3);
-      pdf.line(TX, ty + 8, TX + TW, ty + 8);
-      ty += 9;
+      pdf.line(TX, ty + 10, TX + TW, ty + 10);
+      ty += 11;
     };
 
     tRow('Subtotal', `Tk ${total.toLocaleString()}`);
@@ -365,15 +349,16 @@ async function generateInvoice(order: Order) {
     if (hasCollect) {
       tRow('Amount to Collect', `Tk ${toCollect.toLocaleString()}`);
     }
-    tRow('Tax / VAT', 'Included', false);
-    // Grand total — highlighted
-    fill(C.blue); pdf.rect(TX, ty, TW, 11, 'F');
-    color(C.white); bold(9.5);
-    pdf.text('TOTAL DUE', TX + 4, ty + 7.5);
-    pdf.text(`Tk ${total.toLocaleString()}`, TX + TW - 4, ty + 7.5, { align: 'right' });
-    ty += 11;
+    tRow('Tax / VAT', 'Included');
 
-    y = ty + 16;
+    // Grand total row — solid blue
+    fill(C.blue); pdf.rect(TX, ty, TW, 13, 'F');
+    color(C.white); bold(10.5);
+    pdf.text('TOTAL DUE', TX + 4, ty + 9);
+    pdf.text(`Tk ${total.toLocaleString()}`, TX + TW - 4, ty + 9, { align: 'right' });
+    ty += 13;
+
+    y = ty + 18;
 
     // ─────────────────────────────────────────────────────────
     // NOTES / THANK-YOU BLOCK
