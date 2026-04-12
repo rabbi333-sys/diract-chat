@@ -235,7 +235,12 @@ const Conversation = () => {
   })();
 
   const canReply = !!activeConn && !!recipient;
-  const supportsVoice = sessionPlatform === 'whatsapp' || (sessionPlatform === 'unknown' && !!waConn);
+  const supportsVoice = !!(
+    (sessionPlatform === 'whatsapp' && waConn) ||
+    (sessionPlatform === 'facebook' && fbConn) ||
+    (sessionPlatform === 'instagram' && igConn) ||
+    (sessionPlatform === 'unknown' && (waConn || fbConn || igConn))
+  );
 
   const { aiEnabled, toggle: toggleAi, isPending: aiTogglePending } = useAiControl(sessionId);
 
@@ -575,23 +580,40 @@ const Conversation = () => {
           timestamp: new Date().toISOString(),
           recipient,
         });
-        if (waConn && (sessionPlatform === 'whatsapp' || sessionPlatform === 'unknown' || (!fbConn && !igConn))) {
-          const ext = mimeType.includes('ogg') ? 'voice.ogg' : 'voice.webm';
-          const uploadMime = mimeType.includes('ogg') ? 'audio/ogg' : 'audio/webm';
+        const ext = mimeType.includes('ogg') ? 'voice.ogg' : mimeType.includes('mp4') ? 'voice.mp4' : 'voice.webm';
+        const uploadMime = mimeType.includes('ogg') ? 'audio/ogg' : mimeType.includes('mp4') ? 'audio/mp4' : 'audio/webm';
+        const audioFile = new File([blob], ext, { type: uploadMime });
+
+        if (sessionPlatform === 'whatsapp' && waConn) {
           const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
           await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
           storePlatform(recipient, 'whatsapp');
-          markSent(id);
-          await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
-          queryClient.invalidateQueries({ queryKey: ['sessions'] });
-          // Remove local blob; DB data URL now shows in its place
-          revertOptimistic(id);
-          URL.revokeObjectURL(localUrl);
+        } else if (sessionPlatform === 'facebook' && fbConn) {
+          const attachId = await fbUploadFile(fbConn, audioFile, 'audio');
+          await fbPost(fbConn, recipient, { attachment: { type: 'audio', payload: { attachment_id: attachId } } });
+          storePlatform(recipient, 'facebook');
+        } else if (sessionPlatform === 'instagram' && igConn) {
+          const attachId = await fbUploadFile(igConn, audioFile, 'audio');
+          await fbPost(igConn, recipient, { attachment: { type: 'audio', payload: { attachment_id: attachId } } });
+          storePlatform(recipient, 'instagram');
+        } else if (sessionPlatform === 'unknown') {
+          if (waConn) {
+            const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
+            await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
+          } else {
+            const metaConn = fbConn || igConn;
+            if (!metaConn) throw new Error('No messaging connection configured');
+            const attachId = await fbUploadFile(metaConn, audioFile, 'audio');
+            await fbPost(metaConn, recipient, { attachment: { type: 'audio', payload: { attachment_id: attachId } } });
+          }
         } else {
-          toast.error('Voice notes are only supported on WhatsApp');
-          revertOptimistic(id);
-          URL.revokeObjectURL(localUrl);
+          throw new Error('No connection available for this platform');
         }
+        markSent(id);
+        await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        revertOptimistic(id);
+        URL.revokeObjectURL(localUrl);
       } catch (err: unknown) {
         revertOptimistic(id);
         URL.revokeObjectURL(localUrl);
@@ -957,7 +979,7 @@ const Conversation = () => {
                 {supportsVoice && (
                   <button
                     onClick={startRecording}
-                    title="Voice message (WhatsApp only)"
+                    title="Voice message"
                     className="w-9 h-9 rounded-full flex items-center justify-center text-primary hover:bg-primary/10 transition-colors">
                     <Mic size={20} />
                   </button>

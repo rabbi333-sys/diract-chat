@@ -58,25 +58,37 @@ function parseSegments(text: string): Segment[] {
   return result;
 }
 
+const SPEEDS = [1, 1.5, 2] as const;
+type Speed = typeof SPEEDS[number];
+
 // ─── Mini audio player ─────────────────────────────────────────────────────────
 const AudioPlayer = ({ url, isRight }: { url: string; isRight: boolean }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [speed, setSpeed] = useState<Speed>(1);
 
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
-    const onTime = () => setProgress(el.duration ? (el.currentTime / el.duration) * 100 : 0);
-    const onDur  = () => setDuration(el.duration || 0);
-    const onEnd  = () => { setPlaying(false); setProgress(0); };
+    const onTime = () => {
+      const d = el.duration;
+      setProgress((d && isFinite(d)) ? (el.currentTime / d) * 100 : 0);
+    };
+    const onDur = () => {
+      const d = el.duration;
+      setDuration((d && isFinite(d)) ? d : 0);
+    };
+    const onEnd = () => { setPlaying(false); setProgress(0); };
     el.addEventListener('timeupdate', onTime);
     el.addEventListener('loadedmetadata', onDur);
+    el.addEventListener('durationchange', onDur);
     el.addEventListener('ended', onEnd);
     return () => {
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('loadedmetadata', onDur);
+      el.removeEventListener('durationchange', onDur);
       el.removeEventListener('ended', onEnd);
     };
   }, []);
@@ -90,21 +102,29 @@ const AudioPlayer = ({ url, isRight }: { url: string; isRight: boolean }) => {
 
   const seek = (e: React.MouseEvent<HTMLDivElement>) => {
     const el = audioRef.current;
-    if (!el || !el.duration) return;
+    if (!el || !el.duration || !isFinite(el.duration)) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
-    el.currentTime = pct * el.duration;
+    el.currentTime = ((e.clientX - rect.left) / rect.width) * el.duration;
   };
 
-  const fmtTime = (s: number) => isNaN(s) ? '0:00' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const cycleSpeed = () => {
+    const el = audioRef.current;
+    const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+    setSpeed(next);
+    if (el) el.playbackRate = next;
+  };
+
+  const fmtTime = (s: number) =>
+    (!isFinite(s) || isNaN(s)) ? '0:00' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
   const trackColor = isRight ? 'bg-white/30' : 'bg-foreground/15';
   const fillColor  = isRight ? 'bg-white'     : 'bg-primary';
   const iconColor  = isRight ? 'text-white'   : 'text-foreground';
   const timeColor  = isRight ? 'text-white/60' : 'text-muted-foreground';
+  const speedColor = isRight ? 'text-white/70 hover:text-white border-white/30' : 'text-muted-foreground hover:text-foreground border-border';
 
   return (
-    <div className="flex items-center gap-2.5 py-1 min-w-[200px] max-w-[260px]">
+    <div className="flex items-center gap-2 py-1 min-w-[210px] max-w-[270px]">
       <audio ref={audioRef} src={url} preload="metadata" className="hidden" />
       <button
         onClick={toggle}
@@ -116,16 +136,21 @@ const AudioPlayer = ({ url, isRight }: { url: string; isRight: boolean }) => {
           : <Play  size={15} className={cn(iconColor, 'ml-0.5')} />}
       </button>
 
-      <div className="flex-1 flex flex-col gap-1.5">
-        {/* Waveform-style bar */}
+      <div className="flex-1 flex flex-col gap-1.5 min-w-0">
         <div className={cn('w-full h-1.5 rounded-full cursor-pointer', trackColor)} onClick={seek}>
           <div className={cn('h-full rounded-full transition-all', fillColor)} style={{ width: `${progress}%` }} />
         </div>
-        <div className="flex items-center justify-between">
-          <Volume2 size={10} className={timeColor} />
+        <div className="flex items-center justify-between gap-1">
           <span className={cn('text-[10px] font-medium tabular-nums', timeColor)}>
-            {duration > 0 ? fmtTime(duration) : '0:00'}
+            {duration > 0 ? fmtTime(playing ? (audioRef.current?.currentTime ?? 0) : duration) : '0:00'}
           </span>
+          <button
+            onClick={cycleSpeed}
+            title="Playback speed"
+            className={cn('text-[9px] font-bold border rounded px-1 py-0.5 leading-none transition-colors flex-shrink-0', speedColor)}
+          >
+            {speed}×
+          </button>
         </div>
       </div>
     </div>
