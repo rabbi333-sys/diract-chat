@@ -334,7 +334,8 @@ router.post("/member-auth/invites/update", async (req: Request, res: Response) =
       await pgQuery(creds, `UPDATE team_invites SET ${setClauses} WHERE id = $1`, [id, ...fields.map(([, v]) => v)]);
     } else if (creds.dbType === "mysql") {
       const setClauses = fields.map(([k]) => `${k} = ?`).join(", ");
-      await mysqlQuery(creds, `UPDATE team_invites SET ${setClauses} WHERE id = ?`, [...fields.map(([, v]) => v), id]);
+      const values: MySqlParam[] = fields.map(([, v]) => (v != null ? String(v) : null));
+      await mysqlQuery(creds, `UPDATE team_invites SET ${setClauses} WHERE id = ?`, [...values, id]);
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => {
         const filter: Filter<Document> = { $or: [{ id }, { _id: id }] };
