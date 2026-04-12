@@ -316,22 +316,28 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
       const fbMsg = fbMessaging[0];
       if (fbMsg.delivery) {
         event_type = 'delivered';
-        // FB delivery: watermark is the max timestamp of delivered msgs (ms)
         const deliveryObj = fbMsg.delivery as Record<string, unknown> | undefined;
-        if (!message_id && deliveryObj?.watermark) {
-          // Encode watermark as a special synthetic message_id for correlation
-          message_id = `fb_watermark:${deliveryObj.watermark}`;
-          (body as Record<string, unknown>).watermark = deliveryObj.watermark;
+        // delivery.mids: array of concrete message IDs that were delivered.
+        // Use these for per-message status persistence when available.
+        const mids = Array.isArray(deliveryObj?.mids)
+          ? (deliveryObj!.mids as string[]).filter(m => typeof m === 'string' && m.length > 0)
+          : [];
+        if (mids.length > 0) {
+          message_id = mids[0];                           // primary ID for broadcast
+          (body as Record<string, unknown>).delivery_mids = mids; // all IDs for persistence
+        } else if (deliveryObj?.watermark) {
+          // No mids — fall back to watermark-based broadcast only (not persisted)
+          (body as Record<string, unknown>).delivery_watermark = deliveryObj.watermark;
         }
       } else if (fbMsg.read) {
-        // FB/IG read: use watermark-based event so frontend can mark all msgs
-        // before this timestamp as read without needing a per-message ID.
+        // FB/IG read receipts carry only a watermark — resolve to per-message IDs
+        // on the server by querying message_platform_ids (done in persistence step below).
         const readObj = fbMsg.read as Record<string, unknown> | undefined;
         const watermark = readObj?.watermark;
         if (watermark) {
           event_type = 'read_watermark';
-          message_id = `fb_watermark:${watermark}`;
           (body as Record<string, unknown>).watermark = watermark;
+          // No synthetic message_id — watermark is passed in payload directly
         } else {
           event_type = 'read';
         }
@@ -356,10 +362,16 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
     : `msg_status:${session_id}`;
 
   const broadcastUrl = `${supabase_url.replace(/\/$/, "")}/realtime/v1/api/broadcast`;
-  // For watermark-based read events, include the raw watermark timestamp
-  // so the frontend can mark all messages before it as read.
+  // Collect extra metadata attached during auto-detect phase
   const watermarkMs: number | undefined = (body as Record<string, unknown>).watermark as number | undefined;
-  const payload: Record<string, unknown> = { message_id, emoji, ...(watermarkMs != null ? { watermark: watermarkMs } : {}) };
+  const deliveryMids: string[] | undefined = (body as Record<string, unknown>).delivery_mids as string[] | undefined;
+  const payload: Record<string, unknown> = {
+    message_id,
+    emoji,
+    ...(watermarkMs != null ? { watermark: watermarkMs } : {}),
+    // Expose all delivered mids so the frontend can update every message
+    ...(deliveryMids && deliveryMids.length > 1 ? { message_ids: deliveryMids } : {}),
+  };
 
   try {
     const broadcastRes = await fetch(broadcastUrl, {
@@ -395,35 +407,87 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
     //   );
     // If the table does not yet exist the upsert error is logged and ignored —
     // broadcast-only mode still works for in-session real-time updates.
-    // Normalize event_type to the message_status schema values before persisting.
-    // 'read_watermark' is a broadcast-only event type — it maps to 'read' in storage.
-    const persistedStatus = event_type === 'read_watermark' ? 'read' : event_type;
-    if (persistedStatus !== 'typing' && message_id && !message_id.startsWith('fb_watermark:')) {
-      const restUrl = `${supabase_url.replace(/\/$/, '')}/rest/v1/message_status`;
+    // ── Durable persistence helpers ───────────────────────────────────────────
+    const restBase = supabase_url.replace(/\/$/, '');
+    const restHeaders = {
+      'Content-Type': 'application/json',
+      'apikey': anon_key,
+      'Authorization': `Bearer ${anon_key}`,
+      'Prefer': 'resolution=merge-duplicates,return=minimal',
+    };
+
+    /**
+     * Upsert one or more rows into message_status.
+     * Errors are logged and swallowed — table may not exist yet.
+     */
+    const upsertStatuses = async (
+      rows: Array<Record<string, string | null>>
+    ): Promise<void> => {
+      if (rows.length === 0) return;
       try {
-        const upsertRes = await fetch(restUrl, {
+        const r = await fetch(`${restBase}/rest/v1/message_status`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': anon_key,
-            'Authorization': `Bearer ${anon_key}`,
-            'Prefer': 'resolution=merge-duplicates,return=minimal',
-          },
-          body: JSON.stringify({
-            session_id,
-            platform_message_id: message_id,
-            status: persistedStatus,
-            emoji: emoji ?? null,
-            updated_at: new Date().toISOString(),
-          }),
+          headers: restHeaders,
+          body: JSON.stringify(rows.length === 1 ? rows[0] : rows),
         });
-        if (!upsertRes.ok) {
-          const upsertErr = await upsertRes.text();
-          logger.warn({ upsertErr, event_type, session_id }, "message_status upsert failed (table may not exist yet)");
+        if (!r.ok) {
+          const err = await r.text();
+          logger.warn({ err, event_type, session_id }, "message_status upsert failed (table may not exist yet)");
         }
-      } catch (upsertErr) {
-        logger.warn({ upsertErr }, "message_status upsert error (table may not exist yet)");
+      } catch (e) {
+        logger.warn({ e }, "message_status upsert error (table may not exist yet)");
       }
+    };
+
+    const now = new Date().toISOString();
+
+    if (event_type === 'delivered') {
+      // FB/IG: persist each concrete mid from delivery.mids (real platform message IDs)
+      if (deliveryMids && deliveryMids.length > 0) {
+        await upsertStatuses(deliveryMids.map(mid => ({
+          session_id,
+          platform_message_id: mid,
+          status: 'delivered',
+          emoji: null,
+          updated_at: now,
+        })));
+      } else if (message_id) {
+        // WA or single-mid fallback
+        await upsertStatuses([{ session_id, platform_message_id: message_id, status: 'delivered', emoji: null, updated_at: now }]);
+      }
+    } else if (event_type === 'read' && message_id) {
+      await upsertStatuses([{ session_id, platform_message_id: message_id, status: 'read', emoji: null, updated_at: now }]);
+    } else if (event_type === 'read_watermark' && watermarkMs) {
+      // Server-side resolution: find all outbound message IDs sent ≤ watermark
+      // from the message_platform_ids sidecar table, then persist each as 'read'.
+      try {
+        const watermarkMinute = new Date(Number(watermarkMs)).toISOString().slice(0, 16);
+        const qUrl =
+          `${restBase}/rest/v1/message_platform_ids` +
+          `?session_id=eq.${encodeURIComponent(session_id)}` +
+          `&sent_at_minute=lte.${encodeURIComponent(watermarkMinute)}` +
+          `&select=platform_message_id`;
+        const qRes = await fetch(qUrl, {
+          headers: { apikey: anon_key, Authorization: `Bearer ${anon_key}` },
+        });
+        if (qRes.ok) {
+          const resolved = await qRes.json() as Array<{ platform_message_id: string }>;
+          if (resolved.length > 0) {
+            await upsertStatuses(resolved.map(r => ({
+              session_id,
+              platform_message_id: r.platform_message_id,
+              status: 'read',
+              emoji: null,
+              updated_at: now,
+            })));
+            logger.info({ count: resolved.length, session_id }, "Watermark-resolved read statuses persisted");
+          }
+        }
+      } catch (e) {
+        logger.warn({ e, session_id }, "read_watermark resolution failed (message_platform_ids table may not exist)");
+      }
+    } else if (event_type === 'reaction' && message_id) {
+      await upsertStatuses([{ session_id, platform_message_id: message_id, status: 'reaction', emoji: emoji ?? null, updated_at: now }]);
     }
 
     res.json({ ok: true, event_type, session_id });

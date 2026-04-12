@@ -770,9 +770,12 @@ const Conversation = () => {
     if (!sessionId) return;
     const channel = supabase
       .channel(`msg_status:${sessionId}`)
-      .on('broadcast', { event: 'delivered' }, (payload: { payload?: { message_id?: string } }) => {
-        const msgId = payload?.payload?.message_id;
-        if (msgId) markDelivered(msgId);
+      .on('broadcast', { event: 'delivered' }, (payload: { payload?: { message_id?: string; message_ids?: string[] } }) => {
+        // message_ids contains all concrete FB delivery mids when multiple messages
+        // were delivered in one webhook; message_id is the first/primary one.
+        const { message_id, message_ids } = payload?.payload ?? {};
+        const ids = message_ids ?? (message_id ? [message_id] : []);
+        ids.forEach(id => markDelivered(id));
       })
       .on('broadcast', { event: 'read' }, (payload: { payload?: { message_id?: string } }) => {
         const msgId = payload?.payload?.message_id;
