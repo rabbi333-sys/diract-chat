@@ -232,21 +232,21 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
 // when `raw` is provided so that n8n can forward the webhook verbatim.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/webhook/events", async (req: Request, res: Response): Promise<void> => {
-  // ── Shared-secret authentication ──────────────────────────────────────────
-  // Set WEBHOOK_SECRET env var to protect this endpoint from unauthenticated calls.
+  // ── Shared-secret authentication (required) ───────────────────────────────
+  // WEBHOOK_SECRET env var MUST be configured before this endpoint is usable.
   // Callers (e.g. n8n) must include: X-Webhook-Secret: <secret>
-  // If WEBHOOK_SECRET is not configured, the endpoint accepts all requests but
-  // logs a warning — useful during development/testing.
+  // Returning 500 when unconfigured prevents forged event injection in any env.
   const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
-  if (WEBHOOK_SECRET) {
-    const provided = req.headers['x-webhook-secret'] as string | undefined;
-    if (!provided || provided !== WEBHOOK_SECRET) {
-      logger.warn({ ip: req.ip }, "Webhook event rejected: invalid or missing X-Webhook-Secret header");
-      res.status(401).json({ error: "Unauthorized: invalid X-Webhook-Secret header" });
-      return;
-    }
-  } else {
-    logger.warn("WEBHOOK_SECRET env var not set — /webhook/events is unauthenticated. Set it in production.");
+  if (!WEBHOOK_SECRET) {
+    logger.error("WEBHOOK_SECRET env var is not set — /webhook/events is disabled until configured");
+    res.status(500).json({ error: "Server misconfiguration: WEBHOOK_SECRET env var must be set before using /webhook/events" });
+    return;
+  }
+  const provided = req.headers['x-webhook-secret'] as string | undefined;
+  if (!provided || provided !== WEBHOOK_SECRET) {
+    logger.warn({ ip: req.ip }, "Webhook event rejected: invalid or missing X-Webhook-Secret header");
+    res.status(401).json({ error: "Unauthorized: invalid X-Webhook-Secret header" });
+    return;
   }
 
   // ── Resolve Supabase credentials from server-side config only (no SSRF risk) ─
@@ -314,9 +314,28 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
       : [];
     if (!event_type && fbMessaging.length > 0) {
       const fbMsg = fbMessaging[0];
-      if (fbMsg.delivery)  event_type = 'delivered';
-      else if (fbMsg.read) event_type = 'read';
-      else if (fbMsg.reaction) {
+      if (fbMsg.delivery) {
+        event_type = 'delivered';
+        // FB delivery: watermark is the max timestamp of delivered msgs (ms)
+        const deliveryObj = fbMsg.delivery as Record<string, unknown> | undefined;
+        if (!message_id && deliveryObj?.watermark) {
+          // Encode watermark as a special synthetic message_id for correlation
+          message_id = `fb_watermark:${deliveryObj.watermark}`;
+          (body as Record<string, unknown>).watermark = deliveryObj.watermark;
+        }
+      } else if (fbMsg.read) {
+        // FB/IG read: use watermark-based event so frontend can mark all msgs
+        // before this timestamp as read without needing a per-message ID.
+        const readObj = fbMsg.read as Record<string, unknown> | undefined;
+        const watermark = readObj?.watermark;
+        if (watermark) {
+          event_type = 'read_watermark';
+          message_id = `fb_watermark:${watermark}`;
+          (body as Record<string, unknown>).watermark = watermark;
+        } else {
+          event_type = 'read';
+        }
+      } else if (fbMsg.reaction) {
         const rxn = fbMsg.reaction as Record<string, string> | undefined;
         event_type = 'reaction';
         message_id = rxn?.mid;
@@ -337,7 +356,10 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
     : `msg_status:${session_id}`;
 
   const broadcastUrl = `${supabase_url.replace(/\/$/, "")}/realtime/v1/api/broadcast`;
-  const payload: Record<string, unknown> = { message_id, emoji };
+  // For watermark-based read events, include the raw watermark timestamp
+  // so the frontend can mark all messages before it as read.
+  const watermarkMs: number | undefined = (body as Record<string, unknown>).watermark as number | undefined;
+  const payload: Record<string, unknown> = { message_id, emoji, ...(watermarkMs != null ? { watermark: watermarkMs } : {}) };
 
   try {
     const broadcastRes = await fetch(broadcastUrl, {

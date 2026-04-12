@@ -34,6 +34,8 @@ export interface ChatMessage {
   timestamp: string;
   recipient?: string;
   replyTo?: ChatMessage;
+  /** Platform message ID extracted from DB row (set when stored by n8n or our insert) */
+  platform_message_id?: string;
   _sending?: boolean;           // true while API call in-flight (legacy compat)
   _status?: 'sending' | 'sent' | 'delivered' | 'read'; // extended status
   _platformMsgId?: string;      // WA wamid or FB/IG mid — set after successful platform send

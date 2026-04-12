@@ -31,6 +31,8 @@ export type NormalizedMessage = {
   message_text: string;
   timestamp: string;
   recipient?: string;
+  /** Platform message ID (wamid for WA, mid for FB/IG) — extracted from DB row when stored */
+  platform_message_id?: string;
 };
 
 export type SessionInfo = {
@@ -68,6 +70,22 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     timestamp = String(rawTs);
   }
 
+  // Extract platform_message_id from multiple common field names.
+  // Covers: direct columns, n8n additional_kwargs, and metadata JSON objects.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const platform_message_id: string | undefined = (() => {
+    const direct =
+      raw.platform_message_id ??
+      raw.wamid ??
+      raw.mid ??
+      (raw.metadata && typeof raw.metadata === 'object' ? (raw.metadata as Record<string, unknown>).platform_message_id : undefined) ??
+      (raw.message && typeof raw.message === 'object'
+        ? ((raw.message as Record<string, any>).data?.additional_kwargs?.platform_message_id ??
+           (raw.message as Record<string, any>).additional_kwargs?.platform_message_id)
+        : undefined);
+    return direct ? String(direct) : undefined;
+  })();
+
   // n8n / LangChain format: { message: { type, data: { content } } }
   if (raw.message && typeof raw.message === "object") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,7 +97,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     const data = msg.data as Record<string, any> | undefined;
     const text = String(data?.content ?? msg.content ?? msg.output ?? msg.text ?? msg.body ?? "");
     if (!text.trim()) return null;
-    return { id, session_id, sender: isHuman ? "User" : isAgent ? "Agent" : "AI", message_text: text, timestamp, recipient };
+    return { id, session_id, sender: isHuman ? "User" : isAgent ? "Agent" : "AI", message_text: text, timestamp, recipient, platform_message_id };
   }
 
   // Normalized: { sender, message_text }
@@ -89,7 +107,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     const isAgent = ["agent", "human_agent", "operator"].includes(s);
     const text = String(raw.message_text ?? "");
     if (!text.trim()) return null;
-    return { id, session_id, sender: isHuman ? "User" : isAgent ? "Agent" : "AI", message_text: text, timestamp, recipient };
+    return { id, session_id, sender: isHuman ? "User" : isAgent ? "Agent" : "AI", message_text: text, timestamp, recipient, platform_message_id };
   }
 
   // Role-based: { role, content }
@@ -98,7 +116,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
     const isHuman = ["user", "human", "customer"].includes(role);
     const text = String(raw.content ?? raw.text ?? raw.body ?? "");
     if (!text.trim()) return null;
-    return { id, session_id, sender: isHuman ? "User" : "AI", message_text: text, timestamp, recipient };
+    return { id, session_id, sender: isHuman ? "User" : "AI", message_text: text, timestamp, recipient, platform_message_id };
   }
 
   // Generic fallback
@@ -106,7 +124,7 @@ export function normalizeRow(raw: Record<string, any>): NormalizedMessage | null
   const isHuman = ["user", "human", "customer", "inbound"].includes(typeStr);
   const text = String(raw.content ?? raw.text ?? raw.body ?? raw.message_text ?? raw.message ?? "");
   if (!text.trim() || text === "{}") return null;
-  return { id, session_id, sender: isHuman ? "User" : "AI", message_text: text, timestamp, recipient };
+  return { id, session_id, sender: isHuman ? "User" : "AI", message_text: text, timestamp, recipient, platform_message_id };
 }
 
 function buildSessions(msgs: NormalizedMessage[]): SessionInfo[] {

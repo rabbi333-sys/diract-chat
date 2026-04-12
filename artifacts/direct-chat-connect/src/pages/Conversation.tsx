@@ -39,6 +39,37 @@ function msgIndexKey(text: string, ts: string) {
   return `${text.slice(0, 50)}|${ts.slice(0, 16)}`;
 }
 
+/**
+ * Persist an outbound platform message ID to the Supabase cross-device index table.
+ * This allows the msgIndex to survive localStorage clearing and work across devices.
+ * Required table DDL (run once in Supabase):
+ *   CREATE TABLE message_platform_ids (
+ *     session_id           TEXT NOT NULL,
+ *     platform_message_id  TEXT NOT NULL,
+ *     msg_text_prefix      TEXT NOT NULL,
+ *     sent_at_minute       TEXT NOT NULL,
+ *     PRIMARY KEY (session_id, platform_message_id)
+ *   );
+ */
+async function persistPlatformIdToSupabase(
+  sessionId: string,
+  platformMsgId: string,
+  msgText: string,
+  msgTs: string
+): Promise<void> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any)
+      .from('message_platform_ids')
+      .upsert({
+        session_id: sessionId,
+        platform_message_id: platformMsgId,
+        msg_text_prefix: msgText.slice(0, 50),
+        sent_at_minute: msgTs.slice(0, 16),
+      }, { onConflict: 'session_id,platform_message_id' });
+  } catch { /* graceful — table may not exist yet */ }
+}
+
 const QUICK_REPLIES = [
   'Thank you! Is there anything else you need?',
   'Let me check, please wait a moment',
@@ -588,6 +619,10 @@ const Conversation = () => {
     // Index: compositeKey(text, ts) → platformMsgId so DB messages can look up status
     if (platformMsgId && msgText && msgTs) {
       setMsgIndex(prev => ({ ...prev, [msgIndexKey(msgText, msgTs)]: platformMsgId }));
+      // Also persist to Supabase for cross-device, cross-localStorage durability
+      if (sessionId) {
+        void persistPlatformIdToSupabase(sessionId, platformMsgId, msgText, msgTs);
+      }
     }
   };
 
@@ -622,27 +657,50 @@ const Conversation = () => {
     setMsgStatuses(localStatuses);
     setMsgIndex(loadMsgIndex(sessionId));
 
-    // Hydrate historical statuses from Supabase message_status table
-    // Merge remote statuses UNDER local ones (local wins to avoid race conditions)
+    // Hydrate historical statuses and cross-device msgIndex from Supabase tables.
+    // Both operations are merged under local state (local wins on conflict).
     void (async () => {
       try {
-        const { data } = await (supabase as unknown as { from: (t: string) => { select: (c: string) => { eq: (col: string, val: string) => Promise<{ data: Array<Record<string, string>> | null }> } } })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sb = supabase as any;
+
+        // 1. Hydrate message statuses from message_status table
+        const { data: statusData } = await sb
           .from('message_status')
           .select('platform_message_id, status')
           .eq('session_id', sessionId);
-        if (!data || !Array.isArray(data) || data.length === 0) return;
-        const remote: Record<string, 'sent' | 'delivered' | 'read'> = {};
-        for (const row of data) {
-          if (row.platform_message_id && row.status && row.status !== 'reaction') {
-            remote[row.platform_message_id] = row.status as 'sent' | 'delivered' | 'read';
+        if (statusData && Array.isArray(statusData) && statusData.length > 0) {
+          const remote: Record<string, 'sent' | 'delivered' | 'read'> = {};
+          for (const row of statusData as Array<Record<string, string>>) {
+            if (row.platform_message_id && row.status && row.status !== 'reaction') {
+              remote[row.platform_message_id] = row.status as 'sent' | 'delivered' | 'read';
+            }
+          }
+          if (Object.keys(remote).length > 0) {
+            setMsgStatuses(prev => ({ ...remote, ...prev }));
           }
         }
-        if (Object.keys(remote).length > 0) {
-          // Merge: local in-session statuses take priority over stored remote ones
-          setMsgStatuses(prev => ({ ...remote, ...prev }));
+
+        // 2. Hydrate cross-device msgIndex from message_platform_ids table.
+        //    This allows status/reaction lookups to work on any device, even if
+        //    localStorage was cleared or the user opened the session fresh.
+        const { data: idxData } = await sb
+          .from('message_platform_ids')
+          .select('platform_message_id, msg_text_prefix, sent_at_minute')
+          .eq('session_id', sessionId);
+        if (idxData && Array.isArray(idxData) && idxData.length > 0) {
+          const remoteIdx: Record<string, string> = {};
+          for (const row of idxData as Array<Record<string, string>>) {
+            if (row.platform_message_id && row.msg_text_prefix && row.sent_at_minute) {
+              remoteIdx[msgIndexKey(row.msg_text_prefix, row.sent_at_minute)] = row.platform_message_id;
+            }
+          }
+          if (Object.keys(remoteIdx).length > 0) {
+            setMsgIndex(prev => ({ ...remoteIdx, ...prev }));
+          }
         }
       } catch {
-        // message_status table may not exist — no-op, localStorage statuses still apply
+        // Tables may not exist — localStorage statuses and index still apply
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -698,6 +756,45 @@ const Conversation = () => {
         const msgId = payload?.payload?.message_id;
         if (msgId) markRead(msgId);
       })
+      .on('broadcast', { event: 'read_watermark' }, (payload: { payload?: { watermark?: number; message_id?: string } }) => {
+        // FB/IG read receipts carry a watermark (Unix ms) indicating all messages
+        // delivered before that time have been read by the recipient.
+        const raw = payload?.payload;
+        const watermark: number | undefined =
+          raw?.watermark ??
+          // Fallback: parse from the synthetic 'fb_watermark:xxxxx' message_id
+          (raw?.message_id?.startsWith('fb_watermark:')
+            ? Number(raw.message_id.replace('fb_watermark:', ''))
+            : undefined);
+        if (!watermark || isNaN(watermark)) return;
+        // Collect platform IDs for messages before the watermark while updating status
+        const platIdsToRead: string[] = [];
+        setLocalMessages(prev => prev.map(m => {
+          if (
+            (m.sender === 'Agent' || m.sender === 'AI') &&
+            new Date(m.timestamp).getTime() <= watermark
+          ) {
+            // Resolve platform ID using all available sources
+            const platId =
+              m._platformMsgId ||
+              m.platform_message_id ||
+              msgIndex[msgIndexKey(m.message_text, m.timestamp || '')];
+            if (platId) platIdsToRead.push(platId);
+            return { ...m, _status: 'read' as const };
+          }
+          return m;
+        }));
+        // Update msgStatuses for the resolved platform IDs
+        if (platIdsToRead.length > 0) {
+          setMsgStatuses(prev => {
+            const next = { ...prev };
+            for (const platId of platIdsToRead) {
+              next[platId] = 'read';
+            }
+            return next;
+          });
+        }
+      })
       .on('broadcast', { event: 'reaction' }, (payload: { payload?: { message_id?: string; emoji?: string } }) => {
         const { message_id, emoji } = payload?.payload ?? {};
         if (!message_id || !emoji) return;
@@ -749,12 +846,15 @@ const Conversation = () => {
 
   // ── Emoji reactions ────────────────────────────────────────────────────────
   const handleReact = useCallback(async (msg: ChatMessageType, emoji: string) => {
-    // Resolve the real platform message ID:
+    // Resolve the real platform message ID — checked in priority order:
     // 1. _platformMsgId — set on optimistic messages right after send
-    // 2. msgIndex lookup — covers DB-fetched messages whose timestamp + text
-    //    was indexed at send time via markSent
+    // 2. platform_message_id — extracted directly from the DB row by normalizeRow
+    //    (available when n8n stores wamid/mid in the message record)
+    // 3. msgIndex lookup — cross-device index persisted to Supabase message_platform_ids
+    //    table and also kept in localStorage; covers outbound DB-fetched messages
     const resolvedPlatId =
       msg._platformMsgId ||
+      msg.platform_message_id ||
       msgIndex[msgIndexKey(msg.message_text, msg.timestamp || '')];
 
     // Storage key for reactions — prefer platformId so UI and webhook events share it
@@ -1347,12 +1447,15 @@ const Conversation = () => {
           )}
 
           {groupedMessages.map(({ msg, isFirst, isLast }) => {
-            // Resolve platform message ID for status/reaction lookup.
-            // For optimistic local messages, _platformMsgId is set after send.
-            // For DB-fetched messages it is undefined, so fall back to the
-            // compositeKey index which maps text+timestamp → platformMsgId.
+            // Resolve platform message ID for status/reaction lookup — in priority order:
+            // 1. _platformMsgId — set after a successful platform send (optimistic flow)
+            // 2. platform_message_id — extracted from DB row by normalizeRow
+            //    (set when n8n stores wamid/mid in the chat history record)
+            // 3. msgIndex lookup — cross-device index (Supabase message_platform_ids
+            //    table + localStorage) mapping text+timestamp → platformMsgId
             const resolvedPlatId =
               msg._platformMsgId ||
+              msg.platform_message_id ||
               msgIndex[msgIndexKey(msg.message_text, msg.timestamp || '')];
             const statusKey = resolvedPlatId || String(msg.id);
             return (
