@@ -52,14 +52,13 @@ async function generateAnalyticsPDF(
   viewMode: ViewMode,
   summary: SummaryType,
   filteredOrders: { status: string; total_price: unknown }[],
-  refs: { kpi: HTMLElement | null; revChart: HTMLElement | null; statusChart: HTMLElement | null },
+  chartData: ChartRow[],
   setDownloading: (v: boolean) => void,
 ) {
   setDownloading(true);
   try {
-    const [{ jsPDF }, html2canvas] = await Promise.all([
+    const [{ jsPDF }] = await Promise.all([
       import('jspdf'),
-      import('html2canvas').then(m => m.default),
     ]);
 
     // ── Constants ─────────────────────────────────────────────
@@ -99,15 +98,9 @@ async function generateAnalyticsPDF(
     const bold   = (s: number) => { pdf.setFont('helvetica', 'bold');   pdf.setFontSize(s); };
     const norm   = (s: number) => { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(s); };
 
-    const h2c = (el: HTMLElement) =>
-      html2canvas(el, { scale: 2.5, useCORS: true, backgroundColor: '#ffffff', logging: false });
-
-    const addImg = (canvas: HTMLCanvasElement, yPos: number, maxH: number, xOff = 0, wOff = 0) => {
-      const imgW  = CW - wOff;
-      const ratio = canvas.height / canvas.width;
-      const imgH  = Math.min(imgW * ratio, maxH);
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', M + xOff, yPos, imgW, imgH);
-      return imgH;
+    // ── Native drawing helpers ────────────────────────────────
+    const roundRect = (x: number, yy: number, w: number, h: number, r: number, style: string) => {
+      pdf.roundedRect(x, yy, w, h, r, r, style);
     };
 
     const sectionHead = (title: string, yy: number) => {
@@ -140,13 +133,45 @@ async function generateAnalyticsPDF(
     stroke(C.border); pdf.setLineWidth(0.3); pdf.line(M, y, W - M, y);
     y += 9;
 
-    // ── KPI Cards Screenshot ───────────────────────────────────
-    if (refs.kpi) {
-      y = sectionHead('Key Performance Indicators', y);
-      const canvas = await h2c(refs.kpi);
-      const h = addImg(canvas, y, 90);
-      y += h + 12;
-    }
+    // ── KPI Cards — native drawing ─────────────────────────────
+    y = sectionHead('Key Performance Indicators', y);
+    const kpiCards = [
+      { label: 'REVENUE',    value: tk(summary.revenue),                    change: summary.revenueChange,           sub: 'Total in period',  accent: C.amber  },
+      { label: 'ORDERS',     value: summary.total.toString(),                change: summary.totalChange,             sub: 'Total in period',  accent: C.blue   },
+      { label: 'PENDING',    value: summary.statuses.pending.count.toString(),    change: summary.statuses.pending.change,    sub: 'Awaiting action', accent: C.amber  },
+      { label: 'DELIVERED',  value: summary.statuses.delivered.count.toString(),  change: summary.statuses.delivered.change,  sub: `${summary.total > 0 ? Math.round(summary.statuses.delivered.count / summary.total * 100) : 0}% success rate`, accent: C.emerald },
+      { label: 'CONFIRMED',  value: summary.statuses.confirmed.count.toString(),  change: summary.statuses.confirmed.change,  sub: `${summary.total > 0 ? Math.round(summary.statuses.confirmed.count / summary.total * 100) : 0}% of orders`, accent: C.blue   },
+      { label: 'PROCESSING', value: summary.statuses.processing.count.toString(), change: summary.statuses.processing.change, sub: `${summary.total > 0 ? Math.round(summary.statuses.processing.count / summary.total * 100) : 0}% of orders`, accent: C.violet },
+      { label: 'SHIPPED',    value: summary.statuses.shipped.count.toString(),    change: summary.statuses.shipped.change,    sub: `${summary.total > 0 ? Math.round(summary.statuses.shipped.count / summary.total * 100) : 0}% of orders`, accent: C.cyan   },
+      { label: 'CANCELLED',  value: summary.statuses.cancelled.count.toString(),  change: summary.statuses.cancelled.change,  sub: `${summary.total > 0 ? Math.round(summary.statuses.cancelled.count / summary.total * 100) : 0}% of orders`, accent: C.red    },
+    ];
+    const cardW = (CW - 4) / 2;
+    const cardH = 24;
+    const cardGap = 4;
+    kpiCards.forEach((card, idx) => {
+      const col = idx % 2;
+      const row = Math.floor(idx / 2);
+      const cx = M + col * (cardW + cardGap);
+      const cy = y + row * (cardH + cardGap);
+      // Card background
+      fill(C.white); stroke(C.border); pdf.setLineWidth(0.25);
+      roundRect(cx, cy, cardW, cardH, 2, 'FD');
+      // Accent left bar
+      fill(card.accent); pdf.rect(cx, cy, 2.5, cardH, 'F');
+      // Label
+      color(C.muted); norm(7); pdf.text(card.label, cx + 5.5, cy + 6);
+      // Value
+      color(card.accent); bold(12); pdf.text(card.value, cx + 5.5, cy + 14.5);
+      // Change badge
+      if (card.change !== 0) {
+        const sign = card.change > 0;
+        color(sign ? C.green : C.red); bold(7);
+        pdf.text(`${sign ? '+' : ''}${card.change}%`, cx + cardW - 4, cy + 6.5, { align: 'right' });
+      }
+      // Sub label
+      color(C.muted); norm(6.5); pdf.text(card.sub, cx + 5.5, cy + 21);
+    });
+    y += 4 * (cardH + cardGap) + 6;
 
     // ── Status Breakdown Table ─────────────────────────────────
     y = sectionHead('Order Status Breakdown', y);
@@ -222,13 +247,103 @@ async function generateAnalyticsPDF(
 
     y += 14;
 
-    // ── Revenue Chart ──────────────────────────────────────────
-    if (refs.revChart) {
-      if (y > 205) { pdf.addPage(); y = 20; }
+    // ── Revenue Chart — native drawing ─────────────────────────
+    if (chartData.length > 0) {
+      if (y > 185) { pdf.addPage(); y = 20; }
       y = sectionHead('Sales Revenue Trend', y);
-      const canvas = await h2c(refs.revChart);
-      const h = addImg(canvas, y, 78);
-      y += h + 14;
+
+      const revenues = chartData.map(d => d.revenue);
+      const maxRev = Math.max(...revenues, 1);
+      const areaX = M + 22;
+      const areaY = y + 2;
+      const areaW = CW - 22;
+      const areaH = 52;
+
+      // Chart background
+      fill(C.bg); stroke(C.border); pdf.setLineWidth(0.2);
+      roundRect(M, y - 2, CW, areaH + 16, 2, 'FD');
+
+      // Y-axis gridlines & labels (5 levels)
+      const yLevels = 4;
+      for (let i = 0; i <= yLevels; i++) {
+        const val = Math.round((maxRev / yLevels) * (yLevels - i));
+        const gy = areaY + (areaH / yLevels) * i;
+        // Gridline
+        stroke(C.border); pdf.setLineWidth(0.15);
+        pdf.line(areaX, gy, areaX + areaW, gy);
+        // Y label
+        color(C.muted); norm(6);
+        const label = val >= 1000 ? `${(val / 1000).toFixed(1)}k` : val.toString();
+        pdf.text(label, areaX - 2, gy + 1.5, { align: 'right' });
+      }
+
+      if (chartData.length === 1) {
+        // Single point — draw a horizontal reference line + dot
+        const px = areaX + areaW / 2;
+        const py = areaY + areaH * (1 - revenues[0] / maxRev);
+        // Dashed area fill
+        fill([219, 234, 254] as RGB); pdf.setLineWidth(0);
+        pdf.rect(areaX, py, areaW, areaY + areaH - py, 'F');
+        // Horizontal line
+        stroke(C.blue); pdf.setLineWidth(0.8);
+        pdf.line(areaX, py, areaX + areaW, py);
+        // Dot
+        fill(C.white); stroke(C.blue); pdf.setLineWidth(1.2); pdf.circle(px, py, 2.5, 'FD');
+        fill(C.blue); pdf.circle(px, py, 1.2, 'F');
+        // X label
+        color(C.muted); norm(6.5);
+        pdf.text(chartData[0].label, px, areaY + areaH + 5.5, { align: 'center' });
+        // Value label
+        color(C.blue); bold(7);
+        pdf.text(tk(revenues[0]), px, py - 3, { align: 'center' });
+      } else {
+        // Build point positions
+        const pts = chartData.map((d, i) => ({
+          x: areaX + (i / (chartData.length - 1)) * areaW,
+          y: areaY + areaH * (1 - d.revenue / maxRev),
+          rev: d.revenue,
+          label: d.label,
+        }));
+
+        // Area fill using pdf.lines() polygon
+        fill([219, 234, 254] as RGB);
+        const segs: number[][] = [];
+        segs.push([pts[0].x - areaX, pts[0].y - (areaY + areaH)]);
+        for (let i = 1; i < pts.length; i++) {
+          segs.push([pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y]);
+        }
+        segs.push([0, areaY + areaH - pts[pts.length - 1].y]);
+        pdf.lines(segs, areaX, areaY + areaH, [1, 1], 'F', true);
+
+        // Line segments
+        stroke(C.blue); pdf.setLineWidth(1);
+        for (let i = 0; i < pts.length - 1; i++) {
+          pdf.line(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
+        }
+
+        // Dots + X labels
+        pts.forEach((p, i) => {
+          fill(C.white); stroke(C.blue); pdf.setLineWidth(0.8); pdf.circle(p.x, p.y, 1.8, 'FD');
+          fill(C.blue); pdf.circle(p.x, p.y, 0.8, 'F');
+          const step = Math.max(1, Math.ceil(pts.length / 8));
+          if (i % step === 0 || i === pts.length - 1) {
+            color(C.muted); norm(6);
+            pdf.text(p.label, p.x, areaY + areaH + 5.5, { align: 'center' });
+          }
+        });
+
+        // Peak value label
+        const peakIdx = revenues.indexOf(Math.max(...revenues));
+        const peak = pts[peakIdx];
+        color(C.blue); bold(6.5);
+        pdf.text(tk(peak.rev), peak.x, peak.y - 3, { align: 'center' });
+      }
+
+      // X-axis baseline
+      stroke(C.border); pdf.setLineWidth(0.3);
+      pdf.line(areaX, areaY + areaH, areaX + areaW, areaY + areaH);
+
+      y += areaH + 22;
     }
 
     // ── Footers ────────────────────────────────────────────────
@@ -502,7 +617,7 @@ const OrderAnalytics = () => {
             <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} /> Refresh
           </button>
           <button
-            onClick={() => generateAnalyticsPDF(viewMode, summary, filteredOrders, { kpi: kpiRef.current, revChart: revChartRef.current, statusChart: stChartRef.current }, setIsDownloading)}
+            onClick={() => generateAnalyticsPDF(viewMode, summary, filteredOrders, chartData, setIsDownloading)}
             disabled={isDownloading}
             className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#0F1111] dark:text-foreground px-4 py-1.5 rounded border border-[#FFA41C] bg-gradient-to-b from-[#FFD78C] to-[#F5A623] dark:from-amber-500 dark:to-amber-600 hover:from-[#F5C26B] hover:to-[#E8951E] transition-all disabled:opacity-60 shadow-sm"
           >
