@@ -1,26 +1,28 @@
 /**
  * useRealtimeUpdates — Unified real-time / smart-polling sync hook
  *
- * Adapts its strategy to the active database type:
- *
+ * Strategy by DB type:
  *  Supabase   → raw Phoenix WebSocket to Supabase Realtime v2
- *               (bypasses the JS SDK's service_role ban)
- *  MongoDB    → SSE to /api/realtime/stream (server-side change stream)
- *  Redis      → SSE to /api/realtime/stream (server-side pub/sub)
+ *  MongoDB    → SSE to /api/realtime/stream (change stream)
+ *  Redis      → SSE to /api/realtime/stream (pub/sub)
  *  PostgreSQL │
- *  MySQL      → Smart polling every 15–20 s, paused when the tab is hidden
+ *  MySQL      → Smart polling every 15 s — auto-pauses when tab is hidden
  *
- * Returns { connected, mode } for the LiveSyncBadge:
- *   mode = 'realtime' → green dot
- *   mode = 'polling'  → yellow dot
- *   mode = 'none'     → red dot (or hidden if no DB is configured)
+ * Returns { connected, mode, paused }:
+ *   mode='realtime' + connected → Live (green)
+ *   mode='polling'  + connected + !paused → Polling (yellow)
+ *   mode='polling'  + paused   → Paused (amber) — tab is inactive
+ *   connected=false            → Disconnected (red)
+ *
+ * On new INSERT: appends the message directly to the React Query
+ * ['chat-history', sessionId] cache — no network round-trip.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getStoredConnection, normalizeRow } from '@/lib/externalDb';
 import { getActiveConnection } from '@/lib/db-config';
-import { appendToMsgCache } from '@/hooks/useChatHistory';
+import type { ChatMessage } from '@/hooks/useChatHistory';
 
 export type SyncMode = 'realtime' | 'polling' | 'none';
 
@@ -28,36 +30,58 @@ type NewMessageCallback = (sessionId: string) => void;
 
 export function useRealtimeUpdates(
   onNewMessage?: NewMessageCallback
-): { connected: boolean; mode: SyncMode } {
+): { connected: boolean; mode: SyncMode; paused: boolean } {
   const queryClient = useQueryClient();
   const cbRef = useRef(onNewMessage);
   cbRef.current = onNewMessage;
 
   const [connected, setConnected] = useState(false);
-  const [mode, setMode] = useState<SyncMode>('none');
+  const [mode, setMode]           = useState<SyncMode>('none');
+  const [paused, setPaused]       = useState(false);
 
   const handleNewRow = useCallback(
     (rawRow: Record<string, unknown>) => {
       const normalized = normalizeRow(rawRow);
       if (!normalized) return;
-      appendToMsgCache(normalized);
+
+      const chatMsg: ChatMessage = {
+        id: normalized.id,
+        session_id: normalized.session_id,
+        sender: normalized.sender,
+        message_text: normalized.message_text,
+        timestamp: normalized.timestamp,
+        recipient: normalized.recipient,
+      };
+
+      // Append to the existing React Query cache — no DB round-trip
+      queryClient.setQueriesData<ChatMessage[]>(
+        { queryKey: ['chat-history', normalized.session_id], exact: false },
+        (old) => {
+          if (!Array.isArray(old)) return old;
+          if (old.some((m) => String(m.id) === String(chatMsg.id))) return old;
+          return [...old, chatMsg];
+        }
+      );
+
+      // Sessions sidebar + analytics need a fresh count
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
       queryClient.invalidateQueries({ queryKey: ['chart-data'] });
-      queryClient.invalidateQueries({ queryKey: ['chat-history', normalized.session_id] });
+
       cbRef.current?.(normalized.session_id);
     },
     [queryClient]
   );
 
   useEffect(() => {
-    const active  = getActiveConnection();
-    const legacy  = getStoredConnection();
-    const dbType  = active?.dbType ?? legacy?.db_type ?? null;
+    const active = getActiveConnection();
+    const legacy = getStoredConnection();
+    const dbType = active?.dbType ?? legacy?.db_type ?? null;
 
     if (!dbType) {
       setMode('none');
       setConnected(false);
+      setPaused(false);
       return;
     }
 
@@ -67,11 +91,11 @@ export function useRealtimeUpdates(
       const key   = (active?.serviceRoleKey ?? active?.anonKey ?? legacy?.service_role_key ?? '').trim();
       const table = legacy?.table_name?.trim() || 'n8n_chat_histories';
 
-      if (!url || !key) { setMode('none'); setConnected(false); return; }
+      if (!url || !key) { setMode('none'); setConnected(false); setPaused(false); return; }
 
-      const wsHost    = url.replace(/^https?:\/\//, '');
-      const wsUrl     = `wss://${wsHost}/realtime/v1/websocket?apikey=${encodeURIComponent(key)}&vsn=1.0.0`;
-      const topic     = `realtime:cm-${table}`;
+      const wsHost = url.replace(/^https?:\/\//, '');
+      const wsUrl  = `wss://${wsHost}/realtime/v1/websocket?apikey=${encodeURIComponent(key)}&vsn=1.0.0`;
+      const topic  = `realtime:cm-${table}`;
 
       let ws: WebSocket | null = null;
       let hb: ReturnType<typeof setInterval>  | null = null;
@@ -109,8 +133,7 @@ export function useRealtimeUpdates(
         catch { if (!dead) rt = setTimeout(go, 5_000); return; }
 
         ws.onopen = () => {
-          setConnected(true);
-          setMode('realtime');
+          setConnected(true); setMode('realtime'); setPaused(false);
           join();
           hb = setInterval(() => tx({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: nref() }), 25_000);
         };
@@ -130,8 +153,7 @@ export function useRealtimeUpdates(
         };
 
         ws.onclose = () => {
-          setConnected(false);
-          setMode('none');
+          setConnected(false); setMode('none');
           if (hb) { clearInterval(hb); hb = null; }
           if (!dead) rt = setTimeout(go, 3_000);
         };
@@ -142,8 +164,7 @@ export function useRealtimeUpdates(
       go();
       return () => {
         dead = true;
-        setConnected(false);
-        setMode('none');
+        setConnected(false); setMode('none'); setPaused(false);
         if (hb) clearInterval(hb);
         if (rt) clearTimeout(rt);
         try { ws?.close(); } catch { /* ignore */ }
@@ -153,7 +174,7 @@ export function useRealtimeUpdates(
     // ── MONGODB / REDIS ─ SSE from API server ───────────────────────────────
     if (dbType === 'mongodb' || dbType === 'redis') {
       const conn = active;
-      if (!conn) { setMode('none'); setConnected(false); return; }
+      if (!conn) { setMode('none'); setConnected(false); setPaused(false); return; }
 
       const p = new URLSearchParams({ dbType: conn.dbType });
       if (conn.connectionString) p.set('connectionString', conn.connectionString);
@@ -170,18 +191,14 @@ export function useRealtimeUpdates(
       const go = () => {
         if (dead) return;
         es = new EventSource(`/api/realtime/stream?${p.toString()}`);
-
-        es.onopen = () => { setConnected(true); setMode('realtime'); };
-
+        es.onopen = () => { setConnected(true); setMode('realtime'); setPaused(false); };
         es.addEventListener('message', (e) => {
           try { handleNewRow(JSON.parse(e.data) as Record<string, unknown>); }
           catch { /* ignore */ }
         });
-
         es.addEventListener('error', () => {
           es?.close();
-          setConnected(false);
-          setMode('none');
+          setConnected(false); setMode('none');
           if (!dead) rt = setTimeout(go, 5_000);
         });
       };
@@ -189,23 +206,23 @@ export function useRealtimeUpdates(
       go();
       return () => {
         dead = true;
-        setConnected(false);
-        setMode('none');
+        setConnected(false); setMode('none'); setPaused(false);
         if (rt) clearTimeout(rt);
         es?.close();
       };
     }
 
-    // ── POSTGRESQL / MYSQL ─ Smart polling (tab-active only) ────────────────
+    // ── POSTGRESQL / MYSQL ─ Smart polling (pauses when tab is hidden) ───────
     if (dbType === 'postgresql' || dbType === 'mysql') {
       setMode('polling');
       setConnected(true);
+      setPaused(document.hidden);
 
-      const INTERVAL = 17_000; // 17 s — between 15–20 s as specified
+      const INTERVAL = 15_000;
       let timer: ReturnType<typeof setInterval> | null = null;
 
       const poll = () => {
-        if (document.hidden) return; // pause when tab is invisible
+        if (document.hidden) return;
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
         queryClient.invalidateQueries({ queryKey: ['analytics'] });
         queryClient.invalidateQueries({ queryKey: ['chart-data'] });
@@ -213,21 +230,27 @@ export function useRealtimeUpdates(
 
       timer = setInterval(poll, INTERVAL);
 
-      // Fire immediately when tab becomes visible again
-      const onVisible = () => { if (!document.hidden) poll(); };
-      document.addEventListener('visibilitychange', onVisible);
+      const onVisibility = () => {
+        if (document.hidden) {
+          setPaused(true);
+        } else {
+          setPaused(false);
+          poll(); // immediate catch-up on tab resume
+        }
+      };
+      document.addEventListener('visibilitychange', onVisibility);
 
       return () => {
-        setConnected(false);
-        setMode('none');
+        setConnected(false); setMode('none'); setPaused(false);
         if (timer) clearInterval(timer);
-        document.removeEventListener('visibilitychange', onVisible);
+        document.removeEventListener('visibilitychange', onVisibility);
       };
     }
 
     setMode('none');
     setConnected(false);
+    setPaused(false);
   }, [handleNewRow]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { connected, mode };
+  return { connected, mode, paused };
 }

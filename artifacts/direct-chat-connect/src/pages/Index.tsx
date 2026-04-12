@@ -90,7 +90,7 @@ const Index = () => {
   useChartData('daily');
 
   // ── Live sync — Realtime / SSE / Smart-polling depending on db type ────────
-  const { connected: syncConnected, mode: syncMode } = useRealtimeUpdates((sessionId) => {
+  const { connected: syncConnected, mode: syncMode, paused: syncPaused } = useRealtimeUpdates((sessionId) => {
     const currentPath = window.location.pathname;
     if (!currentPath.includes(sessionId)) {
       toast('New message received', { duration: 3000 });
@@ -429,7 +429,7 @@ const Index = () => {
       <div className="flex-1 flex flex-col pt-14 md:pt-0 overflow-hidden relative">
         {/* Desktop top-right toolbar: Live Sync badge + AI toggle + Theme */}
         <div className={cn("hidden items-center gap-3 absolute top-3 right-4 z-10", activeNav !== 'Orders' && "md:flex")}>
-          <LiveSyncBadge connected={syncConnected} mode={syncMode} />
+          <LiveSyncBadge connected={syncConnected} mode={syncMode} paused={syncPaused} />
           <button
             onClick={toggleGlobalAi}
             disabled={globalAiPending}

@@ -2,10 +2,10 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fetchNameFromMeta, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
+import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fetchNameFromMeta, fetchMessages, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage } from '@/components/ChatMessage';
-import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp } from 'lucide-react';
 import { useAiControl } from '@/hooks/useAiControl';
 import { useTeamRole } from '@/hooks/useTeamRole';
 import { Button } from '@/components/ui/button';
@@ -115,6 +115,59 @@ const Conversation = () => {
   const [replyText, setReplyText] = useState('');
   const [localMessages, setLocalMessages] = useState<ChatMessageType[]>([]);
   const [replyingTo, setReplyingTo] = useState<ChatMessageType | null>(null);
+
+  // ── Load More (older messages pagination) ───────────────────────────────────
+  // olderMessages = pages fetched via "Load More", prepended to the DB messages
+  const [olderMessages, setOlderMessages] = useState<ChatMessageType[]>([]);
+  const [loadMoreOffset, setLoadMoreOffset] = useState(30);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const isLoadingMoreRef = useRef(false); // prevent auto-scroll when loading older
+  // hasMore: show "Load More" if initial page was exactly 30, or last load-more was exactly 30
+  const [hasMore, setHasMore] = useState(false);
+  // Set hasMore once the initial fetch resolves
+  useEffect(() => {
+    if (!isLoading && messages) {
+      setHasMore((messages.length + olderMessages.length) >= 30 && messages.length >= 30);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (!sessionId || isLoadingMore || !hasMore) return;
+    isLoadingMoreRef.current = true;
+    setIsLoadingMore(true);
+    try {
+      // Save scroll position so we can restore it after prepend
+      const container = scrollContainerRef.current;
+      const prevScrollHeight = container?.scrollHeight ?? 0;
+
+      const older = await fetchMessages(sessionId, 30, loadMoreOffset);
+      if (older.length > 0) {
+        setOlderMessages(prev => {
+          // Deduplicate by id
+          const existingIds = new Set([...prev].map(m => String(m.id)));
+          const fresh = older.filter(m => !existingIds.has(String(m.id)));
+          return [...fresh, ...prev];
+        });
+        setLoadMoreOffset(n => n + older.length);
+        setHasMore(older.length >= 30);
+        // Restore scroll position after DOM update (so user doesn't jump to top)
+        requestAnimationFrame(() => {
+          if (container) {
+            container.scrollTop = container.scrollHeight - prevScrollHeight;
+          }
+          isLoadingMoreRef.current = false;
+        });
+      } else {
+        setHasMore(false);
+        isLoadingMoreRef.current = false;
+      }
+    } catch {
+      isLoadingMoreRef.current = false;
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [sessionId, isLoadingMore, hasMore, loadMoreOffset]);
 
   // Panel toggles
   const [showEmoji, setShowEmoji] = useState(false);
@@ -241,14 +294,14 @@ const Conversation = () => {
     return true;
   });
 
-  const allMessages = [...(messages || []), ...dedupedLocal];
+  // olderMessages prepended so the full list is chronological
+  const allMessages = [...olderMessages, ...(messages || []), ...dedupedLocal];
 
   const scrollToBottom = useCallback((instant = false) => {
     const el = scrollContainerRef.current;
     if (!el) return;
     if (instant) {
       el.scrollTop = el.scrollHeight;
-      // Second pass after a tick in case images haven't loaded yet
       setTimeout(() => { el.scrollTop = el.scrollHeight; }, 80);
     } else {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
@@ -256,11 +309,13 @@ const Conversation = () => {
   }, []);
 
   useEffect(() => {
+    // Never auto-scroll when loading older messages — we restore position manually
+    if (isLoadingMoreRef.current) return;
     if (!hasInitialScrolled.current && allMessages.length > 0) {
       hasInitialScrolled.current = true;
-      scrollToBottom(true);
+      scrollToBottom(true); // instant jump on first load
     } else if (hasInitialScrolled.current) {
-      scrollToBottom(false);
+      scrollToBottom(false); // smooth scroll for new real-time messages
     }
   }, [allMessages.length, scrollToBottom]);
 
@@ -630,6 +685,23 @@ const Conversation = () => {
       {/* ── Messages ─────────────────────────────────────────────────────────── */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
         <div className="px-2 md:px-3 py-3 space-y-0 max-w-3xl mx-auto">
+
+          {/* Load More button — appears at top when older messages exist */}
+          {hasMore && (
+            <div className="flex justify-center pb-3">
+              <button
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-muted border border-border/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-all disabled:opacity-50"
+              >
+                {isLoadingMore
+                  ? <><Loader2 size={11} className="animate-spin" /> Loading…</>
+                  : <><ChevronUp size={11} /> Load older messages</>
+                }
+              </button>
+            </div>
+          )}
+
           {allMessages.length > 0 && (
             <div className="flex items-center gap-3 py-2 mb-1">
               <div className="flex-1 h-px bg-border/30" />

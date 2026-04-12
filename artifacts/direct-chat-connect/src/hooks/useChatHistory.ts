@@ -521,31 +521,48 @@ export const useChartData = (
   });
 };
 
-// ─── Standalone fetch (reused by useChatHistory + prefetch) ───────────────────
-export async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
+// ─── Standalone fetch (reused by useChatHistory + load-more) ──────────────────
+// Returns messages in chronological order (oldest first).
+// Server returns newest-first (DESC) and we reverse here so pagination is correct:
+//   offset=0  → most recent 30 messages (reversed = chronological)
+//   offset=30 → the 30 before that (reversed = chronological, prepend to display)
+export async function fetchMessages(
+  sessionId: string,
+  limit = 30,
+  offset = 0
+): Promise<ChatMessage[]> {
   const { legacy, main } = getActiveConn();
 
   // Non-Supabase via API server
   if (main && shouldUseApiServer(main)) {
     const creds = buildSessionsCreds(main);
-    const { messages } = await apiPost<{ messages: ChatMessage[] }>('/api/sessions/messages', { creds, sessionId });
-    return messages;
+    const { messages } = await apiPost<{ messages: ChatMessage[]; hasMore: boolean }>(
+      '/api/sessions/messages',
+      { creds, sessionId, limit, offset }
+    );
+    // Server already returns DESC; reverse so oldest message is first
+    return (messages ?? []).reverse();
   }
 
   // Supabase via new connection
   if (main && main.dbType === 'supabase' && main.url && (main.serviceRoleKey || main.anonKey)) {
-    const fakeConn = { db_type: 'supabase' as const, supabase_url: main.url, service_role_key: main.serviceRoleKey || main.anonKey, host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '' };
-    const msgs = await queryExternalSupabase(fakeConn, 'messages', sessionId);
-    return msgs.filter((m) => m.session_id === sessionId) as ChatMessage[];
+    const fakeConn = {
+      db_type: 'supabase' as const,
+      supabase_url: main.url,
+      service_role_key: main.serviceRoleKey || main.anonKey,
+      host: '', port: '', username: '', password: '', database: '', connection_string: '', table_name: '',
+    };
+    const msgs = await queryExternalSupabase(fakeConn, 'messages', sessionId, limit, offset);
+    return (msgs.filter((m) => m.session_id === sessionId) as ChatMessage[]).reverse();
   }
 
   // Legacy Supabase connection
   if (legacy && legacy.db_type === 'supabase' && legacy.supabase_url && legacy.service_role_key) {
-    const msgs = await queryExternalSupabase(legacy, 'messages', sessionId);
-    return msgs.filter((m) => m.session_id === sessionId) as ChatMessage[];
+    const msgs = await queryExternalSupabase(legacy, 'messages', sessionId, limit, offset);
+    return (msgs.filter((m) => m.session_id === sessionId) as ChatMessage[]).reverse();
   }
 
-  // Edge function fallback
+  // Edge function fallback (no pagination — returns up to 500)
   const { data, error } = await supabase.functions.invoke('get-chat-history', {
     method: 'POST',
     body: { type: 'messages', session_id: sessionId, connection: legacy ? { ...legacy, is_active: true } : null },
@@ -555,7 +572,17 @@ export async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
   return (data?.messages ?? []) as ChatMessage[];
 }
 
-// ─── useChatHistory ───────────────────────────────────────────────────────────
+// ─── fetchMessages with hasMore flag ─────────────────────────────────────────
+export async function fetchMessagesPaged(
+  sessionId: string,
+  limit = 30,
+  offset = 0
+): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
+  const msgs = await fetchMessages(sessionId, limit, offset);
+  return { messages: msgs, hasMore: msgs.length >= limit };
+}
+
+// ─── useChatHistory (initial 30 messages, newest-first reversed to chronological) ─
 export const useChatHistory = (sessionId?: string) => {
   const dbKey = useDbConnectionKey();
   return useQuery({
@@ -565,8 +592,8 @@ export const useChatHistory = (sessionId?: string) => {
     staleTime: Infinity,
     gcTime: 10 * 60_000,
     refetchInterval: false,
-    placeholderData: (prev: any) => prev, // show previous data immediately while refetching
-    queryFn: () => fetchMessages(sessionId!),
+    placeholderData: (prev: any) => prev,
+    queryFn: () => fetchMessages(sessionId!, 30, 0),
   });
 };
 

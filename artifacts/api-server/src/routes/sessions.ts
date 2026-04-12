@@ -254,18 +254,26 @@ async function fetchAllMessages(c: SessionsCreds): Promise<NormalizedMessage[]> 
   return [];
 }
 
-// ─── Fetch messages for one session ──────────────────────────────────────────
+// ─── Fetch messages for one session (newest-first, paginated) ────────────────
 
-async function fetchSessionMessages(c: SessionsCreds, sessionId: string): Promise<NormalizedMessage[]> {
+async function fetchSessionMessages(c: SessionsCreds, sessionId: string, limit = 30, offset = 0): Promise<NormalizedMessage[]> {
   const tbl = c.tableName || "sessions";
 
   if (c.dbType === "postgresql" || c.dbType === "supabase") {
-    const rows = await pgQueryRaw(c, `SELECT * FROM ${tbl} WHERE session_id = $1 ORDER BY id ASC LIMIT 500`, [sessionId]);
+    const rows = await pgQueryRaw(
+      c,
+      `SELECT * FROM ${tbl} WHERE session_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3`,
+      [sessionId, limit, offset]
+    );
     return rows.map(normalizeRow).filter(Boolean) as NormalizedMessage[];
   }
 
   if (c.dbType === "mysql") {
-    const rows = await mysqlQueryRaw(c, `SELECT * FROM ${tbl} WHERE session_id = ? ORDER BY id ASC LIMIT 500`, [sessionId]);
+    const rows = await mysqlQueryRaw(
+      c,
+      `SELECT * FROM ${tbl} WHERE session_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [sessionId, limit, offset]
+    );
     return rows.map(normalizeRow).filter(Boolean) as NormalizedMessage[];
   }
 
@@ -274,7 +282,13 @@ async function fetchSessionMessages(c: SessionsCreds, sessionId: string): Promis
     await client.connect();
     try {
       const db = client.db(c.dbName || "meta_automation");
-      const rows = await db.collection(tbl).find({ session_id: sessionId }).sort({ _id: 1 }).limit(500).toArray();
+      const rows = await db
+        .collection(tbl)
+        .find({ session_id: sessionId })
+        .sort({ _id: -1 })
+        .skip(offset)
+        .limit(limit)
+        .toArray();
       return rows.map((r) => normalizeRow({ ...r, id: String(r._id ?? "") })).filter(Boolean) as NormalizedMessage[];
     } finally {
       await client.close();
@@ -286,12 +300,17 @@ async function fetchSessionMessages(c: SessionsCreds, sessionId: string): Promis
     await r.connect();
     try {
       const items = await r.lrange(`session:${sessionId}`, 0, -1).catch(() => [] as string[]);
-      return items.map((item) => {
-        try {
-          const parsed = JSON.parse(item);
-          return normalizeRow({ ...parsed, session_id: parsed.session_id ?? sessionId });
-        } catch { return null; }
-      }).filter(Boolean) as NormalizedMessage[];
+      const all = items
+        .map((item) => {
+          try {
+            const parsed = JSON.parse(item);
+            return normalizeRow({ ...parsed, session_id: parsed.session_id ?? sessionId });
+          } catch { return null; }
+        })
+        .filter(Boolean) as NormalizedMessage[];
+      // Sort newest-first, then apply offset/limit
+      all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+      return all.slice(offset, offset + limit);
     } finally {
       r.disconnect();
     }
@@ -322,15 +341,23 @@ router.post("/sessions/list", async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/sessions/messages — messages for a specific session
+// POST /api/sessions/messages — messages for a specific session (paginated)
 router.post("/sessions/messages", async (req: Request, res: Response) => {
-  const { creds, sessionId } = req.body as { creds: SessionsCreds; sessionId: string };
+  const { creds, sessionId, limit = 30, offset = 0 } = req.body as {
+    creds: SessionsCreds;
+    sessionId: string;
+    limit?: number;
+    offset?: number;
+  };
   if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds.dbType" });
   if (!sessionId) return void res.status(400).json({ error: "Missing sessionId" });
 
+  const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 200);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+
   try {
-    const messages = await fetchSessionMessages(creds, sessionId);
-    res.json({ messages });
+    const messages = await fetchSessionMessages(creds, sessionId, safeLimit, safeOffset);
+    res.json({ messages, hasMore: messages.length >= safeLimit });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("does not exist") || msg.includes("42P01") || msg.toLowerCase().includes("no collection")) {

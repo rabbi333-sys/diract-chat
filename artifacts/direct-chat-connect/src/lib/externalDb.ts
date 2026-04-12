@@ -280,7 +280,9 @@ async function autoExtractAndSaveNames(rows: Record<string, unknown>[]): Promise
 export async function queryExternalSupabase(
   conn: StoredConnection,
   type: string,
-  sessionId?: string | null
+  sessionId?: string | null,
+  limit = 30,
+  offset = 0
 ): Promise<NormalizedMessage[]> {
   const url = conn.supabase_url?.trim();
   const key = conn.service_role_key?.trim();
@@ -293,7 +295,8 @@ export async function queryExternalSupabase(
 
   let params: string;
   if (sessionId && type === 'messages') {
-    params = `select=*&session_id=eq.${encodeURIComponent(sessionId)}&order=id.asc&limit=500`;
+    // Fetch newest-first; caller reverses to get chronological order
+    params = `select=*&session_id=eq.${encodeURIComponent(sessionId)}&order=id.desc&limit=${limit}&offset=${offset}`;
   } else {
     params = 'select=*&order=id.desc&limit=2000';
   }
