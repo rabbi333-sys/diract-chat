@@ -28,7 +28,7 @@ import {
   useLoadPromptDirect,
   type N8nSettings,
 } from '@/hooks/useN8n';
-import { getActiveConnection, onDbChange } from '@/lib/db-config';
+import { getActiveConnection, onDbChange, type MainDbType } from '@/lib/db-config';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -132,6 +132,61 @@ function GuideStep({ num, title, children }: { num: number; title: string; child
   );
 }
 
+function CodeBlock({ value, lang: _lang, dark }: { value: string; lang?: string; dark?: boolean }) {
+  return (
+    <div className="relative">
+      <pre
+        className={cn(
+          'text-[10px] rounded-lg p-3 overflow-x-auto leading-relaxed font-mono pr-14 whitespace-pre-wrap break-all',
+          dark
+            ? 'bg-zinc-900 dark:bg-black/50 text-emerald-400 border border-zinc-700/60'
+            : 'bg-muted/60 border border-border text-foreground'
+        )}
+      >
+        {value}
+      </pre>
+      <div className="absolute top-2 right-2">
+        <CopyButton value={value} />
+      </div>
+    </div>
+  );
+}
+
+function ConfigTable({ rows }: { rows: { label: string; value: string }[] }) {
+  return (
+    <div className="space-y-1.5 text-[11px]">
+      {rows.map((r) => (
+        <div key={r.label} className="flex items-start gap-2">
+          <span className="text-muted-foreground w-24 flex-shrink-0 pt-0.5">{r.label}</span>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <code className="font-mono text-[10px] bg-muted px-2 py-1 rounded text-foreground break-all flex-1">
+              {r.value}
+            </code>
+            <CopyButton value={r.value} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ExpressionStep({ expression, note }: { expression: string; note?: string }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-muted-foreground">
+        Open <strong>AI Agent</strong> node → <strong>Options</strong> → <strong>System Message</strong>. Paste:
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="font-mono text-[10px] bg-muted px-2 py-1.5 rounded text-foreground flex-1 break-all">
+          {expression}
+        </code>
+        <CopyButton value={expression} label="expression" />
+      </div>
+      {note && <p className="text-[10px] text-muted-foreground italic">{note}</p>}
+    </div>
+  );
+}
+
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -171,6 +226,10 @@ export const N8nPromptSettings = () => {
   const [renameVal, setRenameVal] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [guideDbTab, setGuideDbTab] = useState<MainDbType>(() => {
+    const conn = getActiveConnection();
+    return (conn?.dbType as MainDbType) ?? 'supabase';
+  });
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // ── Auto-sync Supabase creds ───────────────────────────────────────────────
@@ -549,89 +608,193 @@ export const N8nPromptSettings = () => {
         </button>
 
         {guideOpen && (
-          <div className="px-4 pb-4 space-y-5 border-t border-violet-500/20">
-            <div className="pt-3" />
+          <div className="border-t border-violet-500/20">
 
-            <GuideStep num={1} title="Create the Supabase table">
-              <p className="text-[11px] text-muted-foreground">In your Supabase project → <strong>SQL Editor</strong>, run:</p>
-              <div className="relative">
-                <pre className="text-[10px] bg-muted/60 border border-border rounded-lg p-3 overflow-x-auto text-foreground font-mono leading-relaxed pr-16">
-                  {SQL_CREATE_TABLE}
-                </pre>
-                <div className="absolute top-2 right-2">
-                  <CopyButton value={SQL_CREATE_TABLE} label="SQL" />
-                </div>
-              </div>
-            </GuideStep>
+            {/* ── DB Type Tabs ── */}
+            <div className="flex gap-0.5 px-4 pt-3 pb-0 overflow-x-auto">
+              {([
+                { value: 'supabase',    label: 'Supabase',    icon: '⚡' },
+                { value: 'postgresql',  label: 'PostgreSQL',  icon: '🐘' },
+                { value: 'mysql',       label: 'MySQL',       icon: '🐬' },
+                { value: 'mongodb',     label: 'MongoDB',     icon: '🍃' },
+                { value: 'redis',       label: 'Redis',       icon: '🔴' },
+              ] as { value: MainDbType; label: string; icon: string }[]).map((db) => (
+                <button
+                  key={db.value}
+                  onClick={() => setGuideDbTab(db.value)}
+                  className={cn(
+                    'flex items-center gap-1 px-3 py-1.5 text-[11px] font-medium rounded-t-lg transition-colors whitespace-nowrap border border-b-0',
+                    guideDbTab === db.value
+                      ? 'bg-background border-violet-500/30 text-violet-600 dark:text-violet-400'
+                      : 'bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                  )}
+                >
+                  <span>{db.icon}</span> {db.label}
+                </button>
+              ))}
+            </div>
 
-            <GuideStep num={2} title='Add "Fetch Prompt" HTTP Request node in n8n'>
-              <p className="text-[11px] text-muted-foreground">
-                Add an <strong>HTTP Request</strong> node named{' '}
-                <code className="font-mono text-[10px] bg-muted px-1 rounded">Fetch Prompt</code> between the <em>Chat Trigger</em> and <em>AI Agent</em> nodes:
-              </p>
-              <div className="space-y-2 text-[11px]">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground w-20 flex-shrink-0">Method</span>
-                  <code className="font-mono text-[10px] bg-muted px-2 py-0.5 rounded text-foreground">GET</code>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-muted-foreground w-20 flex-shrink-0 pt-1">URL</span>
-                  <div className="flex items-start gap-2 flex-1 min-w-0">
-                    <code className="font-mono text-[10px] bg-muted px-2 py-1 rounded text-foreground break-all flex-1">{fetchUrl}</code>
-                    <CopyButton value={fetchUrl} label="URL" />
-                  </div>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-muted-foreground w-20 flex-shrink-0 pt-1">Header 1</span>
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <code className="font-mono text-[10px] bg-muted px-2 py-1 rounded text-foreground break-all flex-1">{`apikey: ${anonKey}`}</code>
-                    <CopyButton value={`apikey: ${anonKey}`} label="apikey header" />
-                  </div>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-muted-foreground w-20 flex-shrink-0 pt-1">Header 2</span>
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <code className="font-mono text-[10px] bg-muted px-2 py-1 rounded text-foreground break-all flex-1">{`Authorization: Bearer ${anonKey}`}</code>
-                    <CopyButton value={`Authorization: Bearer ${anonKey}`} label="auth header" />
-                  </div>
-                </div>
-              </div>
+            {/* ── Tab Content ── */}
+            <div className="px-4 pb-4 pt-4 space-y-5 border-t border-violet-500/30">
 
-              {/* cURL equivalent */}
-              <div className="mt-3 space-y-1.5">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Test with cURL
-                </p>
-                <div className="relative">
-                  <pre className="text-[10px] bg-zinc-900 dark:bg-black/40 text-emerald-400 border border-zinc-700/60 rounded-lg p-3 overflow-x-auto leading-relaxed font-mono pr-16 whitespace-pre-wrap break-all">
-{`curl -s \\
-  -H "apikey: ${anonKey}" \\
-  -H "Authorization: Bearer ${anonKey}" \\
-  "${fetchUrl}"`}
-                  </pre>
-                  <div className="absolute top-2 right-2">
-                    <CopyButton
+              {/* ════ SUPABASE ════ */}
+              {guideDbTab === 'supabase' && (<>
+                <GuideStep num={1} title="Create the table in Supabase SQL Editor">
+                  <p className="text-[11px] text-muted-foreground">In your Supabase project → <strong>SQL Editor</strong>, run:</p>
+                  <CodeBlock value={SQL_CREATE_TABLE} lang="sql" />
+                </GuideStep>
+
+                <GuideStep num={2} title='Add "Fetch Prompt" HTTP Request node in n8n'>
+                  <p className="text-[11px] text-muted-foreground">
+                    Add an <strong>HTTP Request</strong> node named <code className="font-mono text-[10px] bg-muted px-1 rounded">Fetch Prompt</code> between <em>Chat Trigger</em> and <em>AI Agent</em>:
+                  </p>
+                  <ConfigTable rows={[
+                    { label: 'Method', value: 'GET' },
+                    { label: 'URL',    value: fetchUrl },
+                    { label: 'Header 1', value: `apikey: ${anonKey}` },
+                    { label: 'Header 2', value: `Authorization: Bearer ${anonKey}` },
+                  ]} />
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Test with cURL</p>
+                    <CodeBlock
+                      dark
                       value={`curl -s \\\n  -H "apikey: ${anonKey}" \\\n  -H "Authorization: Bearer ${anonKey}" \\\n  "${fetchUrl}"`}
-                      label="cURL"
+                      lang="bash"
                     />
                   </div>
-                </div>
-              </div>
-            </GuideStep>
+                </GuideStep>
 
-            <GuideStep num={3} title="Set the AI Agent System Message">
-              <p className="text-[11px] text-muted-foreground">
-                Open <strong>AI Agent</strong> node → <strong>Options</strong> → <strong>System Message</strong>. Paste:
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="font-mono text-[10px] bg-muted px-2 py-1.5 rounded text-foreground flex-1 break-all">{N8N_EXPRESSION}</code>
-                <CopyButton value={N8N_EXPRESSION} label="expression" />
-              </div>
+                <GuideStep num={3} title="Set the AI Agent System Message">
+                  <ExpressionStep expression={N8N_EXPRESSION} />
+                </GuideStep>
+              </>)}
+
+              {/* ════ POSTGRESQL ════ */}
+              {guideDbTab === 'postgresql' && (<>
+                <GuideStep num={1} title="Create the table in PostgreSQL">
+                  <p className="text-[11px] text-muted-foreground">Run this SQL in your PostgreSQL database (via psql, pgAdmin, or any SQL client):</p>
+                  <CodeBlock lang="sql" value={`CREATE TABLE IF NOT EXISTS n8n_bot_settings (\n  id            TEXT PRIMARY KEY,\n  workflow_id   TEXT,\n  node_id       TEXT,\n  system_prompt TEXT,\n  updated_at    TIMESTAMP DEFAULT NOW()\n);`} />
+                  <p className="text-[11px] text-muted-foreground">Then insert the initial row:</p>
+                  <CodeBlock lang="sql" value={`INSERT INTO n8n_bot_settings (id, system_prompt)\nVALUES ('default', 'Your prompt here')\nON CONFLICT (id) DO NOTHING;`} />
+                </GuideStep>
+
+                <GuideStep num={2} title='Add "Fetch Prompt" Postgres node in n8n'>
+                  <p className="text-[11px] text-muted-foreground">
+                    In n8n, add a <strong>Postgres</strong> node named <code className="font-mono text-[10px] bg-muted px-1 rounded">Fetch Prompt</code>. Set your DB credentials in n8n's credential manager, then configure:
+                  </p>
+                  <ConfigTable rows={[
+                    { label: 'Operation', value: 'Execute Query' },
+                    { label: 'Query', value: `SELECT system_prompt FROM n8n_bot_settings WHERE id = 'default' LIMIT 1` },
+                  ]} />
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Test with psql</p>
+                    <CodeBlock dark lang="bash" value={`psql -h YOUR_HOST -U YOUR_USER -d YOUR_DB \\\n  -c "SELECT system_prompt FROM n8n_bot_settings WHERE id='default';"`} />
+                  </div>
+                </GuideStep>
+
+                <GuideStep num={3} title="Set the AI Agent System Message">
+                  <ExpressionStep expression={N8N_EXPRESSION} />
+                </GuideStep>
+              </>)}
+
+              {/* ════ MYSQL ════ */}
+              {guideDbTab === 'mysql' && (<>
+                <GuideStep num={1} title="Create the table in MySQL">
+                  <p className="text-[11px] text-muted-foreground">Run this SQL in your MySQL database:</p>
+                  <CodeBlock lang="sql" value={`CREATE TABLE IF NOT EXISTS n8n_bot_settings (\n  id            VARCHAR(255) PRIMARY KEY,\n  workflow_id   TEXT,\n  node_id       TEXT,\n  system_prompt LONGTEXT,\n  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n    ON UPDATE CURRENT_TIMESTAMP\n);`} />
+                  <p className="text-[11px] text-muted-foreground">Then insert the initial row:</p>
+                  <CodeBlock lang="sql" value={`INSERT IGNORE INTO n8n_bot_settings (id, system_prompt)\nVALUES ('default', 'Your prompt here');`} />
+                </GuideStep>
+
+                <GuideStep num={2} title='Add "Fetch Prompt" MySQL node in n8n'>
+                  <p className="text-[11px] text-muted-foreground">
+                    In n8n, add a <strong>MySQL</strong> node named <code className="font-mono text-[10px] bg-muted px-1 rounded">Fetch Prompt</code>. Set your DB credentials in n8n's credential manager, then configure:
+                  </p>
+                  <ConfigTable rows={[
+                    { label: 'Operation', value: 'Execute Query' },
+                    { label: 'Query', value: `SELECT system_prompt FROM n8n_bot_settings WHERE id = 'default' LIMIT 1` },
+                  ]} />
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Test with MySQL CLI</p>
+                    <CodeBlock dark lang="bash" value={`mysql -h YOUR_HOST -u YOUR_USER -p YOUR_DB \\\n  -e "SELECT system_prompt FROM n8n_bot_settings WHERE id='default';"`} />
+                  </div>
+                </GuideStep>
+
+                <GuideStep num={3} title="Set the AI Agent System Message">
+                  <ExpressionStep expression={N8N_EXPRESSION} />
+                </GuideStep>
+              </>)}
+
+              {/* ════ MONGODB ════ */}
+              {guideDbTab === 'mongodb' && (<>
+                <GuideStep num={1} title="Insert the settings document in MongoDB">
+                  <p className="text-[11px] text-muted-foreground">Run this in your MongoDB shell or Compass to create the initial document:</p>
+                  <CodeBlock lang="js" value={`db.n8n_bot_settings.insertOne({\n  _id: "default",\n  system_prompt: "Your prompt here",\n  updated_at: new Date()\n})`} />
+                  <p className="text-[11px] text-muted-foreground">Or update an existing document:</p>
+                  <CodeBlock lang="js" value={`db.n8n_bot_settings.updateOne(\n  { _id: "default" },\n  { $set: { system_prompt: "Your prompt" } },\n  { upsert: true }\n)`} />
+                </GuideStep>
+
+                <GuideStep num={2} title='Add "Fetch Prompt" MongoDB node in n8n'>
+                  <p className="text-[11px] text-muted-foreground">
+                    In n8n, add a <strong>MongoDB</strong> node named <code className="font-mono text-[10px] bg-muted px-1 rounded">Fetch Prompt</code>. Set your connection string in n8n's credential manager, then configure:
+                  </p>
+                  <ConfigTable rows={[
+                    { label: 'Operation', value: 'Find' },
+                    { label: 'Collection', value: 'n8n_bot_settings' },
+                    { label: 'Query', value: '{ "_id": "default" }' },
+                    { label: 'Projection', value: '{ "system_prompt": 1, "_id": 0 }' },
+                    { label: 'Limit', value: '1' },
+                  ]} />
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Test with mongosh</p>
+                    <CodeBlock dark lang="bash" value={`mongosh "YOUR_CONNECTION_STRING" \\\n  --eval 'db.n8n_bot_settings.findOne({_id:"default"},{system_prompt:1})'`} />
+                  </div>
+                </GuideStep>
+
+                <GuideStep num={3} title="Set the AI Agent System Message">
+                  <ExpressionStep expression={`{{ $('Fetch Prompt').first().json[0].system_prompt }}`} />
+                </GuideStep>
+              </>)}
+
+              {/* ════ REDIS ════ */}
+              {guideDbTab === 'redis' && (<>
+                <GuideStep num={1} title="Store the prompt in Redis">
+                  <p className="text-[11px] text-muted-foreground">Set the key in Redis using the CLI or any Redis client:</p>
+                  <CodeBlock dark lang="bash" value={`redis-cli SET n8n:system_prompt "You are a helpful AI agent..."`} />
+                  <p className="text-[11px] text-muted-foreground">Or in your app / Redis Insight, set:</p>
+                  <ConfigTable rows={[
+                    { label: 'Key', value: 'n8n:system_prompt' },
+                    { label: 'Value', value: 'Your full system prompt text' },
+                    { label: 'Type', value: 'String' },
+                  ]} />
+                </GuideStep>
+
+                <GuideStep num={2} title='Add "Fetch Prompt" Redis node in n8n'>
+                  <p className="text-[11px] text-muted-foreground">
+                    In n8n, add a <strong>Redis</strong> node named <code className="font-mono text-[10px] bg-muted px-1 rounded">Fetch Prompt</code>. Set your Redis credentials in n8n's credential manager, then configure:
+                  </p>
+                  <ConfigTable rows={[
+                    { label: 'Operation', value: 'Get' },
+                    { label: 'Key', value: 'n8n:system_prompt' },
+                  ]} />
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Test with redis-cli</p>
+                    <CodeBlock dark lang="bash" value={`redis-cli -h YOUR_HOST -p YOUR_PORT GET n8n:system_prompt`} />
+                  </div>
+                </GuideStep>
+
+                <GuideStep num={3} title="Set the AI Agent System Message">
+                  <ExpressionStep expression={`{{ $('Fetch Prompt').first().json.value }}`} note="Redis GET returns the value in a .value field." />
+                </GuideStep>
+              </>)}
+
+              {/* Shared success note */}
               <div className="flex items-start gap-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-700 dark:text-emerald-400">
                 <CheckCircle2 size={12} className="mt-0.5 flex-shrink-0" />
-                <span>Done! Every "Deploy to n8n" click instantly updates what your bot says — no workflow edits needed.</span>
+                <span>Setup complete! Every time you update and deploy a prompt from this page, your n8n bot picks it up immediately — no workflow edits needed.</span>
               </div>
-            </GuideStep>
+
+            </div>
           </div>
         )}
       </div>
