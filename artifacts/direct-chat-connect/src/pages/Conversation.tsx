@@ -6,7 +6,7 @@ import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fe
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage, parseSegments } from '@/components/ChatMessage';
 import { PlatformAvatar } from '@/components/SessionList';
-import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp, Paperclip, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Keyboard } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp, Paperclip, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Keyboard, Play } from 'lucide-react';
 import { detectPlatform, storePlatform, PLATFORM_CONFIG, Platform } from '@/lib/platformDetect';
 import { useAiControl } from '@/hooks/useAiControl';
 import { useTeamRole } from '@/hooks/useTeamRole';
@@ -929,10 +929,60 @@ const Conversation = () => {
     inputRef.current?.focus();
 
     (async () => {
-      // 1. Send caption text first (if any)
-      if (text) {
+      const hasFiles = files.length > 0;
+
+      if (hasFiles) {
+        // When media is staged: send files first.
+        // WhatsApp: caption is embedded in the first media message.
+        // FB/IG: caption is sent as a separate text after all media.
+        const isWa = sessionPlatform === 'whatsapp' || (!sessionPlatform && !!waConn && !fbConn && !igConn);
+        const [firstFile, ...restFiles] = files;
+        // First file gets caption (WA embeds it; FB/IG ignores, sends separately below)
+        await handleFileSelected(firstFile, text || undefined);
+        for (const file of restFiles) {
+          await handleFileSelected(file);
+        }
+        // For non-WA platforms: send caption text as a follow-up message after media
+        if (text && !isWa) {
+          const id = nextId();
+          const sentTs = new Date().toISOString();
+          addOptimistic(id, text, rt);
+          insertMessageToExternalDb(getStoredConnection(), {
+            session_id: sessionId || '',
+            sender: 'Agent',
+            message_text: text,
+            timestamp: sentTs,
+            recipient,
+          });
+          try {
+            let platformMsgId: string | undefined;
+            if (sessionPlatform === 'instagram') {
+              if (!igConn) throw new Error('Instagram connection not configured');
+              const r = await fbPost(igConn, recipient, { text });
+              platformMsgId = r?.message_id;
+            } else if (sessionPlatform === 'facebook') {
+              if (!fbConn) throw new Error('Facebook connection not configured');
+              const r = await fbPost(fbConn, recipient, { text });
+              platformMsgId = r?.message_id;
+            } else {
+              const metaConn = fbConn || igConn;
+              if (!metaConn) throw new Error('No messaging connection configured');
+              const r = await fbPost(metaConn, recipient, { text });
+              platformMsgId = r?.message_id;
+            }
+            storePlatform(recipient, sessionPlatform);
+            markSent(id, platformMsgId, text, sentTs);
+            await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
+            queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            revertOptimistic(id);
+          } catch (err: unknown) {
+            revertOptimistic(id);
+            toast.error(err instanceof Error ? err.message : 'Failed to send');
+          }
+        }
+      } else if (text) {
+        // Text-only message
         const id = nextId();
-        // Capture once so addOptimistic, DB insert, and markSent use the same timestamp
         const sentTs = new Date().toISOString();
         addOptimistic(id, text, rt);
         insertMessageToExternalDb(getStoredConnection(), {
@@ -957,7 +1007,6 @@ const Conversation = () => {
             const r = await waPost(waConn, recipient, { type: 'text', text: { body: text } });
             platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
           } else {
-            // unknown: try available connections in priority order
             if (waConn) {
               const r = await waPost(waConn, recipient, { type: 'text', text: { body: text } });
               platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
@@ -970,7 +1019,6 @@ const Conversation = () => {
             } else throw new Error('No messaging connection configured');
           }
           storePlatform(recipient, sessionPlatform);
-          // Pass text + sentTs so markSent can build the compositeKey→platformMsgId index
           markSent(id, platformMsgId, text, sentTs);
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
           queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -980,16 +1028,12 @@ const Conversation = () => {
           toast.error(err instanceof Error ? err.message : 'Failed to send');
         }
       }
-
-      // 2. Send each staged image sequentially
-      for (const file of files) {
-        await handleFileSelected(file);
-      }
     })();
   };
 
   // ── Send image from file picker ─────────────────────────────────────────────
-  const handleFileSelected = useCallback(async (file: File) => {
+  // caption: shown on WhatsApp alongside the media; ignored on FB/IG (text sent separately)
+  const handleFileSelected = useCallback(async (file: File, caption?: string) => {
     if (!activeConn) { toast.error('Add a connection in Settings first'); return; }
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
@@ -1023,7 +1067,9 @@ const Conversation = () => {
         if (!waConn) throw new Error('WhatsApp connection not configured');
         const mediaId = await waUploadFile(waConn, file, file.name, file.type);
         const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
-        const r = await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
+        // WhatsApp supports caption on image & video (not audio)
+        const captionField = caption && (isImage || isVideo) ? { caption } : {};
+        const r = await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId, ...captionField } });
         platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
       } else if (sessionPlatform === 'instagram') {
         if (!igConn) throw new Error('Instagram connection not configured');
@@ -1040,7 +1086,8 @@ const Conversation = () => {
         if (waConn) {
           const mediaId = await waUploadFile(waConn, file, file.name, file.type);
           const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
-          const r = await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
+          const captionField = caption && (isImage || isVideo) ? { caption } : {};
+          const r = await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId, ...captionField } });
           platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
         } else {
           const metaConn = fbConn || igConn;
@@ -1318,15 +1365,17 @@ const Conversation = () => {
           const files = Array.from(e.target.files || []);
           e.target.value = '';
           if (!files.length) return;
-          const images = files.filter(f => f.type.startsWith('image/'));
-          const others = files.filter(f => !f.type.startsWith('image/'));
-          // Non-image files (video/audio) → send immediately
-          others.forEach(f => handleFileSelected(f));
-          // Image files → stage in thumbnail strip
-          if (images.length) {
-            const previews = images.map(f => URL.createObjectURL(f));
-            setPendingFiles(prev => [...prev, ...images]);
+          const stageable = files.filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+          const audio = files.filter(f => f.type.startsWith('audio/'));
+          // Audio → send immediately (no caption support)
+          audio.forEach(f => handleFileSelected(f));
+          // Images & videos → stage in thumbnail strip for caption
+          if (stageable.length) {
+            const previews = stageable.map(f => URL.createObjectURL(f));
+            setPendingFiles(prev => [...prev, ...stageable]);
             setPendingPreviews(prev => [...prev, ...previews]);
+            // Auto-focus text input so user can type a caption right away
+            setTimeout(() => inputRef.current?.focus(), 50);
           }
         }}
       />
@@ -1595,21 +1644,33 @@ const Conversation = () => {
             </div>
           )}
 
-          {/* Staged image thumbnails */}
+          {/* Staged media thumbnails (images & videos) */}
           {pendingPreviews.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap mb-2 px-0.5 animate-in slide-in-from-bottom-1 duration-150">
-              {pendingPreviews.map((src, i) => (
-                <div key={i} className="relative w-[60px] h-[60px] rounded-xl overflow-hidden border border-border/60 group flex-shrink-0 bg-muted">
-                  <img src={src} alt="" className="w-full h-full object-cover" />
-                  <button
-                    onClick={() => removePendingFile(i)}
-                    className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X size={10} />
-                  </button>
-                </div>
-              ))}
-              {/* Add more images button */}
+              {pendingPreviews.map((src, i) => {
+                const isVid = pendingFiles[i]?.type.startsWith('video/');
+                return (
+                  <div key={i} className="relative w-[60px] h-[60px] rounded-xl overflow-hidden border border-border/60 group flex-shrink-0 bg-muted">
+                    {isVid ? (
+                      <>
+                        <video src={src} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                          <Play size={18} className="text-white fill-white" />
+                        </div>
+                      </>
+                    ) : (
+                      <img src={src} alt="" className="w-full h-full object-cover" />
+                    )}
+                    <button
+                      onClick={() => removePendingFile(i)}
+                      className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Add more media button */}
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="w-[60px] h-[60px] rounded-xl border-2 border-dashed border-border/60 flex items-center justify-center text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors flex-shrink-0"
@@ -1669,7 +1730,7 @@ const Conversation = () => {
               <div className="flex-1">
                 <textarea
                   ref={inputRef}
-                  placeholder="Aa"
+                  placeholder={pendingFiles.length > 0 ? 'Add a caption…' : 'Aa'}
                   value={replyText}
                   onChange={e => { setReplyText(e.target.value); if (e.target.value) handleTyping(); }}
                   onBlur={() => stopTypingIndicator()}
