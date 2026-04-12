@@ -339,24 +339,16 @@ const Conversation = () => {
   // Media viewer (lightbox + video modal)
   const [mediaViewer, setMediaViewer] = useState<{ url: string; type: 'image' | 'video'; allImages: string[] } | null>(null);
 
-  // ── Emoji reactions (persisted to localStorage) ────────────────────────────
-  const [reactions, setReactions] = useState<Record<string, string[]>>(() => {
-    try {
-      const raw = localStorage.getItem(LS_REACTIONS_PREFIX + sessionId);
-      return raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
-    } catch { return {}; }
-  });
+  // ── Emoji reactions ─────────────────────────────────────────────────────────
+  // Start empty; populated by the sessionId-change effect below (covers both
+  // initial mount and conversation navigation without remount).
+  const [reactions, setReactions] = useState<Record<string, string[]>>({});
 
-  // ── Message status map — keyed by platformMsgId; loaded from and persisted to
-  //    localStorage so DB messages can show delivered/read after page refresh ──
-  const [msgStatuses, setMsgStatuses] = useState<Record<string, 'sent' | 'delivered' | 'read'>>(() =>
-    sessionId ? loadStatusStore(sessionId) : {}
-  );
-  // ── Message index — compositeKey(text, ts) → platformMsgId —  allows DB
-  //    messages (which don't carry platformMsgId) to find their status entry ──
-  const [msgIndex, setMsgIndex] = useState<Record<string, string>>(() =>
-    sessionId ? loadMsgIndex(sessionId) : {}
-  );
+  // ── Message status map — keyed by platformMsgId ──────────────────────────
+  const [msgStatuses, setMsgStatuses] = useState<Record<string, 'sent' | 'delivered' | 'read'>>({});
+
+  // ── Message index — compositeKey(text, ts) → platformMsgId ───────────────
+  const [msgIndex, setMsgIndex] = useState<Record<string, string>>({});
 
   // ── Typing indicator (send) ────────────────────────────────────────────────
   const [typingActive, setTypingActive] = useState(false);
@@ -608,6 +600,53 @@ const Conversation = () => {
     setLocalMessages(prev => prev.map(m => String(m.id) === String(id) ? { ...m, _status: 'read' as const } : m));
     setMsgStatuses(prev => ({ ...prev, [String(id)]: 'read' }));
   };
+
+  // ── Per-session store lifecycle ────────────────────────────────────────────
+  // Runs on initial mount AND whenever sessionId changes (conversation navigation).
+  // 1. Loads per-session stores from localStorage (instant, synchronous).
+  // 2. Hydrates msgStatuses from Supabase message_status table for historical
+  //    delivery/read events that were persisted by the webhook backend.
+  //    Requires a `message_status` table with PK (session_id, platform_message_id).
+  //    Falls back gracefully if the table does not exist.
+  useEffect(() => {
+    if (!sessionId) return;
+
+    // Reset + reload from localStorage for this session
+    setReactions(() => {
+      try {
+        const raw = localStorage.getItem(LS_REACTIONS_PREFIX + sessionId);
+        return raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+      } catch { return {}; }
+    });
+    const localStatuses = loadStatusStore(sessionId);
+    setMsgStatuses(localStatuses);
+    setMsgIndex(loadMsgIndex(sessionId));
+
+    // Hydrate historical statuses from Supabase message_status table
+    // Merge remote statuses UNDER local ones (local wins to avoid race conditions)
+    void (async () => {
+      try {
+        const { data } = await (supabase as unknown as { from: (t: string) => { select: (c: string) => { eq: (col: string, val: string) => Promise<{ data: Array<Record<string, string>> | null }> } } })
+          .from('message_status')
+          .select('platform_message_id, status')
+          .eq('session_id', sessionId);
+        if (!data || !Array.isArray(data) || data.length === 0) return;
+        const remote: Record<string, 'sent' | 'delivered' | 'read'> = {};
+        for (const row of data) {
+          if (row.platform_message_id && row.status && row.status !== 'reaction') {
+            remote[row.platform_message_id] = row.status as 'sent' | 'delivered' | 'read';
+          }
+        }
+        if (Object.keys(remote).length > 0) {
+          // Merge: local in-session statuses take priority over stored remote ones
+          setMsgStatuses(prev => ({ ...remote, ...prev }));
+        }
+      } catch {
+        // message_status table may not exist — no-op, localStorage statuses still apply
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   // Persist reactions to localStorage whenever they change
   useEffect(() => {

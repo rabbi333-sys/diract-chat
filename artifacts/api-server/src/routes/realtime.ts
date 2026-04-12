@@ -343,6 +343,47 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
     }
 
     logger.info({ event_type, session_id, message_id }, "Broadcast sent");
+
+    // ── Durable persistence: upsert into message_status table ────────────────
+    // Required table DDL (run once in your Supabase project):
+    //   CREATE TABLE message_status (
+    //     session_id           TEXT NOT NULL,
+    //     platform_message_id  TEXT NOT NULL,
+    //     status               TEXT NOT NULL,   -- 'delivered' | 'read' | 'reaction'
+    //     emoji                TEXT,
+    //     updated_at           TIMESTAMPTZ DEFAULT NOW(),
+    //     PRIMARY KEY (session_id, platform_message_id)
+    //   );
+    // If the table does not yet exist the upsert error is logged and ignored —
+    // broadcast-only mode still works for in-session real-time updates.
+    if (event_type !== 'typing' && message_id) {
+      const restUrl = `${supabase_url.replace(/\/$/, '')}/rest/v1/message_status`;
+      try {
+        const upsertRes = await fetch(restUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': anon_key,
+            'Authorization': `Bearer ${anon_key}`,
+            'Prefer': 'resolution=merge-duplicates,return=minimal',
+          },
+          body: JSON.stringify({
+            session_id,
+            platform_message_id: message_id,
+            status: event_type,
+            emoji: emoji ?? null,
+            updated_at: new Date().toISOString(),
+          }),
+        });
+        if (!upsertRes.ok) {
+          const upsertErr = await upsertRes.text();
+          logger.warn({ upsertErr, event_type, session_id }, "message_status upsert failed (table may not exist yet)");
+        }
+      } catch (upsertErr) {
+        logger.warn({ upsertErr }, "message_status upsert error (table may not exist yet)");
+      }
+    }
+
     res.json({ ok: true, event_type, session_id });
   } catch (err) {
     logger.error({ err }, "Failed to broadcast webhook event");
