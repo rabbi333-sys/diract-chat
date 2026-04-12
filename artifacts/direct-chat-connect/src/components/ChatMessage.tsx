@@ -18,7 +18,7 @@ type Segment =
   | { type: 'voice-placeholder' }
   | { type: 'image-placeholder' }
   | { type: 'video-placeholder' }
-  | { type: 'document'; url: string; name: string };
+  | { type: 'document'; url: string; name: string; size?: number };
 
 function parseSegments(text: string): Segment[] {
   const trimmed = text.trim();
@@ -28,22 +28,26 @@ function parseSegments(text: string): Segment[] {
   if (trimmed.startsWith('blob-video:')) return [{ type: 'video', url: trimmed.slice('blob-video:'.length) }];
   if (trimmed.startsWith('blob-audio:')) return [{ type: 'audio', url: trimmed.slice('blob-audio:'.length) }];
 
-  // Document optimistic: blob-doc:<filename>|||<blobUrl>
+  // Document optimistic: blob-doc:<name>|||<sizeBytes>|||<blobUrl>
+  // (legacy without size: blob-doc:<name>|||<blobUrl>)
   if (trimmed.startsWith('blob-doc:')) {
-    const rest = trimmed.slice('blob-doc:'.length);
-    const sep = rest.indexOf('|||');
-    const name = sep >= 0 ? rest.slice(0, sep) : 'Document';
-    const url  = sep >= 0 ? rest.slice(sep + 3) : rest;
-    return [{ type: 'document', url, name }];
+    const rest  = trimmed.slice('blob-doc:'.length);
+    const parts = rest.split('|||');
+    const name  = parts[0] || 'Document';
+    const size  = parts.length >= 3 ? parseInt(parts[1], 10) : undefined;
+    const url   = parts.length >= 3 ? parts.slice(2).join('|||') : (parts[1] || '');
+    return [{ type: 'document', url, name, size: size && isFinite(size) ? size : undefined }];
   }
 
-  // Document stored: doc-data:<filename>|||data:application/...
+  // Document stored: doc-data:<name>|||<sizeBytes>|||data:application/...
+  // (legacy without size: doc-data:<name>|||data:application/...)
   if (trimmed.startsWith('doc-data:')) {
-    const rest = trimmed.slice('doc-data:'.length);
-    const sep = rest.indexOf('|||');
-    const name = sep >= 0 ? rest.slice(0, sep) : 'Document';
-    const url  = sep >= 0 ? rest.slice(sep + 3) : '';
-    return [{ type: 'document', url, name }];
+    const rest  = trimmed.slice('doc-data:'.length);
+    const parts = rest.split('|||');
+    const name  = parts[0] || 'Document';
+    const size  = parts.length >= 3 ? parseInt(parts[1], 10) : undefined;
+    const url   = parts.length >= 3 ? parts.slice(2).join('|||') : (parts[1] || '');
+    return [{ type: 'document', url, name, size: size && isFinite(size) ? size : undefined }];
   }
 
   // Plain blob: URLs = optimistic voice recordings (legacy / stopAndSendVoice)
@@ -179,7 +183,13 @@ const AudioPlayer = ({ url, isRight }: { url: string; isRight: boolean }) => {
 };
 
 // ─── File/document card ───────────────────────────────────────────────────────
-const FileCard = ({ url, name, isRight }: { url: string; name: string; isRight: boolean }) => {
+const fmtSize = (bytes: number) => {
+  if (bytes < 1024)           return `${bytes} B`;
+  if (bytes < 1024 * 1024)    return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const FileCard = ({ url, name, size, isRight }: { url: string; name: string; size?: number; isRight: boolean }) => {
   const ext = name.split('.').pop()?.toLowerCase() || '';
   const isPdf   = ext === 'pdf';
   const isWord  = ['doc', 'docx'].includes(ext);
@@ -187,6 +197,7 @@ const FileCard = ({ url, name, isRight }: { url: string; name: string; isRight: 
   const iconBg  = isPdf ? 'bg-red-500' : isWord ? 'bg-blue-500' : isExcel ? 'bg-emerald-600' : 'bg-slate-500';
   const Icon    = isExcel ? FileSpreadsheet : (isPdf || isWord) ? FileText : File;
   const canDownload = !!(url && (url.startsWith('data:') || url.startsWith('blob:')));
+  const meta = [ext.toUpperCase() || 'FILE', size ? fmtSize(size) : null].filter(Boolean).join(' · ');
   return (
     <div className="flex items-center gap-2.5 py-1.5 min-w-[200px] max-w-[260px]">
       <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0', iconBg)}>
@@ -194,7 +205,7 @@ const FileCard = ({ url, name, isRight }: { url: string; name: string; isRight: 
       </div>
       <div className="flex-1 min-w-0">
         <p className={cn('text-xs font-semibold truncate', isRight ? 'text-white' : 'text-foreground')}>{name}</p>
-        <p className={cn('text-[10px] uppercase font-medium tracking-wide', isRight ? 'text-white/60' : 'text-muted-foreground')}>{ext || 'file'}</p>
+        <p className={cn('text-[10px] font-medium tracking-wide', isRight ? 'text-white/60' : 'text-muted-foreground')}>{meta}</p>
       </div>
       {canDownload && (
         <a href={url} download={name} title="Download"
@@ -422,7 +433,7 @@ function renderSegment(
       return <VoicePlaceholder key={i} isRight={isRight} />;
 
     case 'document':
-      return <FileCard key={i} url={seg.url} name={seg.name} isRight={isRight} />;
+      return <FileCard key={i} url={seg.url} name={seg.name} size={seg.size} isRight={isRight} />;
 
     case 'image':
       return imgError[seg.url] ? (

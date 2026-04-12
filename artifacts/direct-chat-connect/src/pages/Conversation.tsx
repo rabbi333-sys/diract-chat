@@ -641,14 +641,14 @@ const Conversation = () => {
   const handleDocSelected = useCallback(async (file: File) => {
     if (!activeConn) { toast.error('Add a connection in Settings first'); return; }
     const blobUrl = URL.createObjectURL(file);
-    const localText = `blob-doc:${file.name}|||${blobUrl}`;
+    const localText = `blob-doc:${file.name}|||${file.size}|||${blobUrl}`;
     const id = nextId();
     addOptimistic(id, localText, replyingTo);
     setReplyingTo(null);
     setUploadingId(id);
     try {
       const dataUrl = await fileToDataUrl(file);
-      const storedText = `doc-data:${file.name}|||${dataUrl}`;
+      const storedText = `doc-data:${file.name}|||${file.size}|||${dataUrl}`;
       await insertMessageToExternalDb(getStoredConnection(), {
         session_id: sessionId || '',
         sender: 'Agent',
