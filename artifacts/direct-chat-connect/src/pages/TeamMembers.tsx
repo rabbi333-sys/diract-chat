@@ -7,7 +7,7 @@ import {
   Check, UserPlus, Copy, Trash2, ChevronDown,
   ShieldCheck, Loader2, Link2, Users, Database, Clock,
   MoreHorizontal, UserCheck, UserX, ShieldOff,
-  ClipboardCopy, Plus, Zap, ChevronRight,
+  ClipboardCopy, Plus, Zap, ChevronRight, ArrowLeft,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -1008,7 +1008,7 @@ const TeamMembers = () => {
               )}
             >
               {formOpen ? (
-                <><span className="text-base leading-none">×</span> Cancel</>
+                <><ArrowLeft size={15} /> Back</>
               ) : (
                 <><UserPlus size={15} /> Invite Member</>
               )}
