@@ -161,10 +161,11 @@ async function pgQueryRaw(c: SessionsCreds, sql: string, params: unknown[] = [])
   return rows as Record<string, unknown>[];
 }
 
-async function mysqlQueryRaw(c: SessionsCreds, sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
+type MySqlParam = string | number | boolean | null | Date | Buffer;
+
+async function mysqlQueryRaw(c: SessionsCreds, sql: string, params: MySqlParam[] = []): Promise<Record<string, unknown>[]> {
   const pool = getMysqlPool(c);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [rows] = await pool.execute(sql, params as any[]);
+  const [rows] = await pool.execute(sql, params);
   return rows as Record<string, unknown>[];
 }
 

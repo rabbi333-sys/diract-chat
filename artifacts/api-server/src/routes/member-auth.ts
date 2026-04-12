@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
-import type { Collection } from "mongodb";
+import type { Collection, Filter, Document } from "mongodb";
 import type { Redis } from "ioredis";
 import {
   getPgPool,
@@ -91,10 +91,11 @@ END $$;
 // MySQL helpers (pooled)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function mysqlQuery<T>(c: DbCreds, sql: string, params: unknown[] = []): Promise<T[]> {
+type MySqlParam = string | number | boolean | null | Date | Buffer;
+
+async function mysqlQuery<T>(c: DbCreds, sql: string, params: MySqlParam[] = []): Promise<T[]> {
   const pool = getMysqlPool(asSC(c));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [rows] = await pool.execute(sql, params as any[]);
+  const [rows] = await pool.execute(sql, params);
   return rows as T[];
 }
 
@@ -336,7 +337,8 @@ router.post("/member-auth/invites/update", async (req: Request, res: Response) =
       await mysqlQuery(creds, `UPDATE team_invites SET ${setClauses} WHERE id = ?`, [...fields.map(([, v]) => v), id]);
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => {
-        await col.updateOne({ id }, { $set: Object.fromEntries(fields) });
+        const filter: Filter<Document> = { $or: [{ id }, { _id: id }] };
+        await col.updateOne(filter, { $set: Object.fromEntries(fields) });
       });
     } else if (creds.dbType === "redis") {
       await redisOp(creds, async (r) => {
@@ -376,7 +378,8 @@ router.post("/member-auth/invites/delete", async (req: Request, res: Response) =
       await mysqlQuery(creds, "DELETE FROM team_invites WHERE id = ?", [id]);
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => {
-        await col.deleteOne({ id });
+        const filter: Filter<Document> = { $or: [{ id }, { _id: id }] };
+        await col.deleteOne(filter);
       });
     } else if (creds.dbType === "redis") {
       await redisOp(creds, async (r) => {
