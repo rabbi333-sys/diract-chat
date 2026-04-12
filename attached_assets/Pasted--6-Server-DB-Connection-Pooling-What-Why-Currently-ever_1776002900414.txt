@@ -1,0 +1,60 @@
+#6 - Server DB Connection Pooling
+What & Why
+Currently, every single API request (fetch messages, send reply, check AI status, etc.) creates a brand new database connection and immediately destroys it after use. For PostgreSQL it creates a pg.Pool with max:1 then calls pool.end(). For MySQL it calls createConnection() then conn.end(). For MongoDB it creates a new MongoClient() then client.close(). For Redis it creates a new Redis() then r.disconnect().
+This means:
+Every request pays the full TCP handshake + TLS overhead (~100-300ms latency added)
+Under load, connection count spikes and hits Supabase's limit (60 connections), causing crashes
+No requests can share connections even if they target the same database
+The fix: keep one shared connection pool per database config. Reuse it across all requests. Only create a new pool when the database config actually changes.
+Done looks like
+Fetching messages is noticeably faster (no connection setup overhead per request)
+App does not crash under concurrent load (multiple users or tabs)
+A pool or persistent client is created once per active DB config, reused for all subsequent requests
+When the DB config changes (user switches database), the old pool is drained/closed and a new one is created
+MongoDB and Redis clients are similarly kept alive and reused
+Out of scope
+Frontend changes
+Pagination or lazy loading (separate task)
+Changing the DB config storage mechanism
+Tasks
+Singleton pool manager — Create a module in api-server/src/lib/ that holds one live pool/client per DB type (pg, mysql, mongo, redis), keyed by a hash of the connection config. Expose getPool(config) helpers that return the existing pool if config hasn't changed, or create and cache a new one.
+Wire sessions.ts to use pool manager — Replace the inline new pg.Pool / pool.end(), mysql.createConnection / conn.end(), new MongoClient / client.close(), new Redis / r.disconnect() patterns in sessions.ts with calls to the pool manager helpers.
+Handle config change invalidation — When POST /api/db-config is called with new credentials, close/drain the existing pool for that type and remove it from cache so the next request creates a fresh pool.
+Relevant files
+artifacts/api-server/src/routes/sessions.ts:191-260
+artifacts/api-server/src/routes/db-config.ts
+artifacts/api-server/src/lib/server-db-config.ts
+
+
+#7 - Lazy Loading: Session List & Message Pagination
+What & Why
+Two related performance problems cause the app to feel slow and hang on load:
+Problem 1 — Session list fetches too much data: On app open, useChatHistory.ts fetches up to 2000 messages from the database just to build the session list (session names, last message preview, timestamps). Then SessionList.tsx also background pre-fetches full message history for every session in the list. This means opening the app with 50 active chats could trigger 50+ database queries simultaneously.
+Problem 2 — No scroll-based message pagination in the UI: The backend already supports limit and offset for message fetching (default limit=30), but ChatView.tsx does not implement "load more on scroll up". All messages for a session are loaded at once when clicked, which hangs the UI for sessions with hundreds of messages.
+The fix: fetch only what is visible. Session list shows just a summary (last message + unread count). Full messages only load when the user opens that conversation. Older messages only load when the user scrolls up.
+Done looks like
+App opens and the session list appears quickly — no waiting for 2000 messages to download
+Each session item shows: contact name, last message preview, timestamp, platform icon — nothing more is fetched until clicked
+Clicking a session loads the most recent 30 messages instantly (already cached from session list query)
+Scrolling up in a conversation loads the next 30 older messages (infinite scroll upward)
+"Loading older messages…" indicator appears at the top while fetching
+Background pre-fetching is removed or limited to the top 3 sessions only (most likely to be opened)
+LocalStorage message cache still works (avoids re-fetching on revisit within the TTL window)
+Out of scope
+DB connection pooling (separate task)
+Analytics / chart data pre-warming (leave as-is)
+Changing the realtime update mechanism
+Tasks
+Session-summary-only API — Add a lightweight /api/sessions/summaries endpoint (or modify the existing list endpoint) that returns only the last message per session plus unread count, without fetching all message history. For Supabase, use a DISTINCT ON (session_id) or equivalent query; for other DBs use GROUP BY with MAX(created_at).
+Update useSessions to use summary data — Change the Supabase direct-fetch path in useChatHistory.ts to call the new summary query instead of fetching 2000 messages. Update buildSessionsFromMessages so it works from summary rows only.
+Remove/limit background pre-fetch in SessionList — In SessionList.tsx, remove the staggered pre-fetch loop that fires for every session. Replace with pre-fetch for only the top 3 sessions (first in the sorted list) so clicking them feels instant.
+Infinite scroll in ChatView — Add a scroll listener at the top of the message list in ChatView.tsx. When the user scrolls to within ~200px of the top, fetch the next page (offset += 30) and prepend the older messages. Show a loading spinner at the top during fetch. Disable fetch if all messages are already loaded.
+Relevant files
+artifacts/direct-chat-connect/src/hooks/useChatHistory.ts
+artifacts/direct-chat-connect/src/components/SessionList.tsx:101-242
+artifacts/direct-chat-connect/src/components/ChatView.tsx
+artifacts/api-server/src/routes/sessions.ts
+Dependencies
+DB connection pooling — no new connection per request
+
+
