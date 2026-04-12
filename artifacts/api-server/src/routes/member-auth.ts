@@ -338,6 +338,9 @@ router.post("/member-auth/invites/update", async (req: Request, res: Response) =
       await mysqlQuery(creds, `UPDATE team_invites SET ${setClauses} WHERE id = ?`, [...values, id]);
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => {
+        // Filter by the app-level `id` UUID field (set on every insert).
+        // MongoDB's auto-generated `_id` is an ObjectId and can never equal a
+        // UUID string, so `_id` matching would always be a no-op.
         await col.updateOne({ id }, { $set: Object.fromEntries(fields) });
       });
     } else if (creds.dbType === "redis") {
@@ -378,7 +381,7 @@ router.post("/member-auth/invites/delete", async (req: Request, res: Response) =
       await mysqlQuery(creds, "DELETE FROM team_invites WHERE id = ?", [id]);
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => {
-        await col.deleteOne({ id });
+        await col.deleteOne({ id }); // `id` is the app-level UUID field; _id is an ObjectId and never matches a UUID
       });
     } else if (creds.dbType === "redis") {
       await redisOp(creds, async (r) => {

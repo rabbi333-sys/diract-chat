@@ -13,6 +13,7 @@ import pg from "pg";
 import mysql from "mysql2/promise";
 import { MongoClient } from "mongodb";
 import Redis from "ioredis";
+import { createHash } from "crypto";
 
 export type SessionsCreds = {
   dbType: "postgresql" | "mysql" | "mongodb" | "redis" | "supabase";
@@ -26,20 +27,24 @@ export type SessionsCreds = {
   tableName?: string;
 };
 
+function hash(s: string): string {
+  return createHash("sha256").update(s).digest("hex");
+}
+
 function pgKey(c: SessionsCreds): string {
-  return `pg|${c.dbType}|${c.supabaseUrl ?? ""}|${c.host ?? ""}|${c.port ?? ""}|${c.dbUsername ?? ""}|${c.dbPassword ?? ""}|${c.dbName ?? ""}`;
+  return hash(`pg|${c.dbType}|${c.supabaseUrl ?? ""}|${c.host ?? ""}|${c.port ?? ""}|${c.dbUsername ?? ""}|${c.dbPassword ?? ""}|${c.dbName ?? ""}`);
 }
 
 function mysqlKey(c: SessionsCreds): string {
-  return `mysql|${c.host ?? ""}|${c.port ?? ""}|${c.dbUsername ?? ""}|${c.dbPassword ?? ""}|${c.dbName ?? ""}`;
+  return hash(`mysql|${c.host ?? ""}|${c.port ?? ""}|${c.dbUsername ?? ""}|${c.dbPassword ?? ""}|${c.dbName ?? ""}`);
 }
 
 function mongoKey(c: SessionsCreds): string {
-  return `mongo|${c.connectionString ?? ""}|${c.host ?? ""}|${c.port ?? ""}|${c.dbUsername ?? ""}|${c.dbPassword ?? ""}|${c.dbName ?? ""}`;
+  return hash(`mongo|${c.connectionString ?? ""}|${c.host ?? ""}|${c.port ?? ""}|${c.dbUsername ?? ""}|${c.dbPassword ?? ""}|${c.dbName ?? ""}`);
 }
 
 function redisKey(c: SessionsCreds): string {
-  return `redis|${c.connectionString ?? ""}|${c.host ?? ""}|${c.port ?? ""}|${c.dbPassword ?? ""}|${c.dbName ?? ""}`;
+  return hash(`redis|${c.connectionString ?? ""}|${c.host ?? ""}|${c.port ?? ""}|${c.dbPassword ?? ""}|${c.dbName ?? ""}`);
 }
 
 export function buildPgConnStr(c: SessionsCreds): string {
