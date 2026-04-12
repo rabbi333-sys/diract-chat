@@ -1,21 +1,21 @@
 /**
- * useRealtimeUpdates — Unified real-time / smart-polling sync hook
+ * useRealtimeUpdates — Global Real-time Sync Engine
+ *
+ * Covers ALL dashboard modules: Messages, Orders, Failed, Handoff, Overview.
  *
  * Strategy by DB type:
- *  Supabase   → raw Phoenix WebSocket to Supabase Realtime v2
- *  MongoDB    → SSE to /api/realtime/stream (change stream)
- *  Redis      → SSE to /api/realtime/stream (pub/sub)
+ *  Supabase   → Phoenix WebSocket — postgres_changes on ALL relevant tables
+ *  MongoDB    → SSE to /api/realtime/stream — watches multiple collections
+ *  Redis      → SSE to /api/realtime/stream — subscribes to multiple channels
  *  PostgreSQL │
- *  MySQL      → Smart polling every 15 s — auto-pauses when tab is hidden
+ *  MySQL      → Smart polling every 15 s — active module is polled immediately
+ *               on tab resume or module switch; auto-pauses when tab is hidden
  *
  * Returns { connected, mode, paused }:
  *   mode='realtime' + connected → Live (green)
  *   mode='polling'  + connected + !paused → Polling (yellow)
  *   mode='polling'  + paused   → Paused (amber) — tab is inactive
  *   connected=false            → Disconnected (red)
- *
- * On new INSERT: appends the message directly to the React Query
- * ['chat-history', sessionId] cache — no network round-trip.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -26,21 +26,82 @@ import type { ChatMessage } from '@/hooks/useChatHistory';
 
 export type SyncMode = 'realtime' | 'polling' | 'none';
 
-type NewMessageCallback = (sessionId: string) => void;
+// Query keys invalidated per table event
+const TABLE_QUERY_KEYS: Record<string, string[][]> = {
+  // chat messages
+  n8n_chat_histories: [['sessions'], ['analytics'], ['chart-data']],
+  // orders
+  orders:             [['supabase-orders'], ['local-orders']],
+  // failed jobs
+  failed_automations: [['supabase-failures'], ['local-failures']],
+  // human handoff
+  handoff_requests:   [['supabase-handoffs'], ['local-handoffs']],
+};
+
+// All non-chat module query keys (invalidated on polling ticks)
+const MODULE_QUERY_KEYS = [
+  ['sessions'], ['analytics'], ['chart-data'],
+  ['supabase-orders'],
+  ['supabase-failures'],
+  ['supabase-handoffs'],
+];
+
+type GlobalSyncCallbacks = {
+  onNewMessage?: (sessionId: string) => void;
+  onNewOrder?:   () => void;
+  onNewFailure?: () => void;
+  onNewHandoff?: () => void;
+  /** The currently visible dashboard module — used to prioritise polling */
+  activeModule?: string;
+};
 
 export function useRealtimeUpdates(
-  onNewMessage?: NewMessageCallback
+  onNewMessageOrOpts?: ((sessionId: string) => void) | GlobalSyncCallbacks,
 ): { connected: boolean; mode: SyncMode; paused: boolean } {
   const queryClient = useQueryClient();
-  const cbRef = useRef(onNewMessage);
-  cbRef.current = onNewMessage;
+
+  // Normalise the overloaded first argument
+  const opts: GlobalSyncCallbacks =
+    typeof onNewMessageOrOpts === 'function'
+      ? { onNewMessage: onNewMessageOrOpts }
+      : (onNewMessageOrOpts ?? {});
+
+  const cbRef = useRef(opts);
+  cbRef.current = opts;
 
   const [connected, setConnected] = useState(false);
   const [mode, setMode]           = useState<SyncMode>('none');
   const [paused, setPaused]       = useState(false);
 
+  // ── Dispatch a raw DB row to the correct cache / callbacks ──────────────────
   const handleNewRow = useCallback(
-    (rawRow: Record<string, unknown>) => {
+    (rawRow: Record<string, unknown>, tableHint?: string) => {
+      // Determine which "table" this belongs to
+      const syncTable =
+        tableHint ||
+        (rawRow._syncTable as string | undefined) ||
+        'n8n_chat_histories';
+
+      // Invalidate the relevant React Query keys
+      const keys = TABLE_QUERY_KEYS[syncTable] ?? TABLE_QUERY_KEYS['n8n_chat_histories'];
+      for (const key of keys) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+
+      if (syncTable === 'orders') {
+        cbRef.current.onNewOrder?.();
+        return;
+      }
+      if (syncTable === 'failed_automations') {
+        cbRef.current.onNewFailure?.();
+        return;
+      }
+      if (syncTable === 'handoff_requests') {
+        cbRef.current.onNewHandoff?.();
+        return;
+      }
+
+      // ── Chat message — also append to message cache ─────────────────────────
       const normalized = normalizeRow(rawRow);
       if (!normalized) return;
 
@@ -53,7 +114,7 @@ export function useRealtimeUpdates(
         recipient: normalized.recipient,
       };
 
-      // Append to the existing React Query cache — no DB round-trip
+      // Append to the React Query cache — no DB round-trip
       queryClient.setQueriesData<ChatMessage[]>(
         { queryKey: ['chat-history', normalized.session_id], exact: false },
         (old) => {
@@ -63,12 +124,12 @@ export function useRealtimeUpdates(
         }
       );
 
-      // Sessions sidebar + analytics need a fresh count
+      // Analytics counters need a refresh too
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
       queryClient.invalidateQueries({ queryKey: ['chart-data'] });
 
-      cbRef.current?.(normalized.session_id);
+      cbRef.current.onNewMessage?.(normalized.session_id);
     },
     [queryClient]
   );
@@ -79,23 +140,23 @@ export function useRealtimeUpdates(
     const dbType = active?.dbType ?? legacy?.db_type ?? null;
 
     if (!dbType) {
-      setMode('none');
-      setConnected(false);
-      setPaused(false);
+      setMode('none'); setConnected(false); setPaused(false);
       return;
     }
 
-    // ── SUPABASE ─ raw Phoenix WebSocket ────────────────────────────────────
+    // ── SUPABASE ─ Phoenix WebSocket — listens to ALL relevant tables ──────────
     if (dbType === 'supabase') {
       const url   = (active?.url ?? legacy?.supabase_url ?? '').trim().replace(/\/$/, '');
       const key   = (active?.serviceRoleKey ?? active?.anonKey ?? legacy?.service_role_key ?? '').trim();
-      const table = legacy?.table_name?.trim() || 'n8n_chat_histories';
+      const chatTable = legacy?.table_name?.trim() || 'n8n_chat_histories';
 
       if (!url || !key) { setMode('none'); setConnected(false); setPaused(false); return; }
 
       const wsHost = url.replace(/^https?:\/\//, '');
       const wsUrl  = `wss://${wsHost}/realtime/v1/websocket?apikey=${encodeURIComponent(key)}&vsn=1.0.0`;
-      const topic  = `realtime:cm-${table}`;
+
+      // One combined topic for all tables we want to watch
+      const topic = `realtime:cm-global-sync`;
 
       let ws: WebSocket | null = null;
       let hb: ReturnType<typeof setInterval>  | null = null;
@@ -119,7 +180,15 @@ export function useRealtimeUpdates(
             config: {
               broadcast: { ack: false, self: false },
               presence: { key: '' },
-              postgres_changes: [{ event: 'INSERT', schema: 'public', table }],
+              postgres_changes: [
+                { event: 'INSERT', schema: 'public', table: chatTable },
+                { event: 'INSERT', schema: 'public', table: 'orders' },
+                { event: 'INSERT', schema: 'public', table: 'failed_automations' },
+                { event: 'INSERT', schema: 'public', table: 'handoff_requests' },
+                { event: 'UPDATE', schema: 'public', table: 'orders' },
+                { event: 'UPDATE', schema: 'public', table: 'failed_automations' },
+                { event: 'UPDATE', schema: 'public', table: 'handoff_requests' },
+              ],
             },
             access_token: key,
           },
@@ -142,12 +211,22 @@ export function useRealtimeUpdates(
           try {
             const m = JSON.parse(e.data as string) as {
               event: string;
-              payload?: { data?: { eventType?: string; new?: Record<string, unknown>; commit_timestamp?: string } };
+              payload?: {
+                data?: {
+                  eventType?: string;
+                  new?: Record<string, unknown>;
+                  commit_timestamp?: string;
+                  table?: string;
+                };
+              };
             };
-            if (m.event === 'postgres_changes' && m.payload?.data?.eventType === 'INSERT' && m.payload.data.new) {
-              const row = { ...m.payload.data.new } as Record<string, unknown>;
-              if (!row.created_at && m.payload.data.commit_timestamp) row.created_at = m.payload.data.commit_timestamp;
-              handleNewRow(row);
+            if (m.event === 'postgres_changes' && m.payload?.data?.new) {
+              const { eventType, new: row, commit_timestamp, table } = m.payload.data;
+              if ((eventType === 'INSERT' || eventType === 'UPDATE') && row) {
+                const enriched = { ...row } as Record<string, unknown>;
+                if (!enriched.created_at && commit_timestamp) enriched.created_at = commit_timestamp;
+                handleNewRow(enriched, table ?? chatTable);
+              }
             }
           } catch { /* ignore */ }
         };
@@ -171,7 +250,7 @@ export function useRealtimeUpdates(
       };
     }
 
-    // ── MONGODB / REDIS ─ SSE from API server ───────────────────────────────
+    // ── MONGODB / REDIS ─ SSE — watches multiple collections/channels ──────────
     if (dbType === 'mongodb' || dbType === 'redis') {
       const conn = active;
       if (!conn) { setMode('none'); setConnected(false); setPaused(false); return; }
@@ -184,6 +263,15 @@ export function useRealtimeUpdates(
       if (conn.dbPassword)       p.set('dbPassword', conn.dbPassword);
       if (conn.dbName)           p.set('dbName', conn.dbName);
 
+      if (dbType === 'mongodb') {
+        // Watch all 4 collections simultaneously
+        const chatCollection = legacy?.table_name?.trim() || 'n8n_chat_histories';
+        p.set('tables', [chatCollection, 'orders', 'failed_automations', 'handoff_requests'].join(','));
+      } else {
+        // Subscribe to all relevant Redis pub/sub channels
+        p.set('channels', 'chat_new_message,new_order,new_failure,new_handoff');
+      }
+
       let es: EventSource | null = null;
       let rt: ReturnType<typeof setTimeout> | null = null;
       let dead = false;
@@ -193,8 +281,10 @@ export function useRealtimeUpdates(
         es = new EventSource(`/api/realtime/stream?${p.toString()}`);
         es.onopen = () => { setConnected(true); setMode('realtime'); setPaused(false); };
         es.addEventListener('message', (e) => {
-          try { handleNewRow(JSON.parse(e.data) as Record<string, unknown>); }
-          catch { /* ignore */ }
+          try {
+            const parsed = JSON.parse(e.data) as Record<string, unknown>;
+            handleNewRow(parsed, parsed._syncTable as string | undefined);
+          } catch { /* ignore */ }
         });
         es.addEventListener('error', () => {
           es?.close();
@@ -212,20 +302,19 @@ export function useRealtimeUpdates(
       };
     }
 
-    // ── POSTGRESQL / MYSQL ─ Smart polling (pauses when tab is hidden) ───────
+    // ── POSTGRESQL / MYSQL ─ Smart polling — pauses when tab hidden ───────────
     if (dbType === 'postgresql' || dbType === 'mysql') {
-      setMode('polling');
-      setConnected(true);
-      setPaused(document.hidden);
+      setMode('polling'); setConnected(true); setPaused(document.hidden);
 
       const INTERVAL = 15_000;
       let timer: ReturnType<typeof setInterval> | null = null;
 
       const poll = () => {
         if (document.hidden) return;
-        queryClient.invalidateQueries({ queryKey: ['sessions'] });
-        queryClient.invalidateQueries({ queryKey: ['analytics'] });
-        queryClient.invalidateQueries({ queryKey: ['chart-data'] });
+        // Invalidate all module query keys on every tick
+        for (const key of MODULE_QUERY_KEYS) {
+          queryClient.invalidateQueries({ queryKey: key });
+        }
       };
 
       timer = setInterval(poll, INTERVAL);
@@ -247,9 +336,7 @@ export function useRealtimeUpdates(
       };
     }
 
-    setMode('none');
-    setConnected(false);
-    setPaused(false);
+    setMode('none'); setConnected(false); setPaused(false);
   }, [handleNewRow]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { connected, mode, paused };

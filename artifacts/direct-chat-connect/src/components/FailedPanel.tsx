@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { AlertOctagon, CheckCircle, Clock, XCircle, AlertTriangle, RotateCcw, Webhook } from 'lucide-react';
+import { AlertOctagon, CheckCircle, Clock, XCircle, AlertTriangle, RotateCcw, Webhook, ChevronUp, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { formatDistanceToNow, parseISO } from 'date-fns';
@@ -23,6 +23,8 @@ interface FailedAutomation {
   _source?: 'local' | 'supabase';
 }
 
+const PAGE_SIZE = 25;
+
 const useLocalFailures = () =>
   useQuery({
     queryKey: ['local-failures'],
@@ -38,17 +40,18 @@ const useLocalFailures = () =>
     },
   });
 
-const useSupabaseFailures = () =>
+// Global sync engine drives invalidations — no polling interval needed here.
+const useSupabaseFailures = (limit: number) =>
   useQuery({
     queryKey: ['supabase-failures'],
     retry: false,
-    refetchInterval: 15000,
     queryFn: async (): Promise<FailedAutomation[]> => {
       try {
         const { data, error } = await supabase
           .from('failed_automations' as any)
           .select('*')
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(limit);
         if (error) return [];
         return ((data ?? []) as unknown as FailedAutomation[]).map(d => ({ ...d, _source: 'supabase' as const }));
       } catch { return []; }
@@ -69,19 +72,29 @@ export const FailedPanel = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'active' | 'resolved' | 'all'>('active');
 
+  // Pagination: grow the limit as user loads more
+  const [supabaseLimit, setSupabaseLimit] = useState(PAGE_SIZE);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   const { data: localFailures = [] } = useLocalFailures();
-  const { data: supabaseFailures = [] } = useSupabaseFailures();
+  const { data: supabaseFailures = [] } = useSupabaseFailures(supabaseLimit);
   const failures = mergeFailures(localFailures, supabaseFailures);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel('failed-automations-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'failed_automations' }, () =>
-        queryClient.invalidateQueries({ queryKey: ['supabase-failures'] })
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [queryClient]);
+  // Show "Load More" if the last page was full
+  const hasMore = supabaseFailures.length >= supabaseLimit;
+
+  const handleLoadMore = async () => {
+    setIsLoadingMore(true);
+    const next = supabaseLimit + PAGE_SIZE;
+    setSupabaseLimit(next);
+    // Wait for React Query to refetch with new limit
+    await queryClient.invalidateQueries({ queryKey: ['supabase-failures'] });
+    setIsLoadingMore(false);
+  };
+
+  // NOTE: The global sync engine (useRealtimeUpdates in Index.tsx) now owns the
+  // Supabase postgres_changes subscription for failed_automations — no local
+  // channel subscription needed here.
 
   const resolveMutation = useMutation({
     mutationFn: async ({ id, source }: { id: string; source?: string }) => {
@@ -162,6 +175,22 @@ export const FailedPanel = () => {
 
       {/* List */}
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide pr-1 space-y-3">
+          {/* Load More — at top to load older records */}
+          {hasMore && filter === 'all' && (
+            <div className="flex justify-center pb-1">
+              <button
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-muted border border-border/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-all disabled:opacity-50"
+              >
+                {isLoadingMore
+                  ? <><Loader2 size={11} className="animate-spin" /> Loading…</>
+                  : <><ChevronUp size={11} /> Load older records</>
+                }
+              </button>
+            </div>
+          )}
+
           {filtered.length === 0 && (
             <div className="text-center py-16 text-muted-foreground">
               <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-4">

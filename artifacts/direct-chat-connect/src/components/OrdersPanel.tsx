@@ -5,7 +5,7 @@ import { format, isToday, isYesterday, startOfWeek, startOfMonth, isAfter, parse
 import { cn } from '@/lib/utils';
 import {
   Package, Clock, CheckCircle, XCircle, Truck, PackageCheck,
-  Download, Trash2, CalendarDays, X, MoreHorizontal, FileText, Search,
+  Download, Trash2, CalendarDays, X, MoreHorizontal, FileText, Search, ChevronUp, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrderDetailSheet from './OrderDetailSheet';
@@ -47,6 +47,8 @@ interface Order {
   _source?: 'local' | 'supabase';
 }
 
+const ORDERS_PAGE = 25;
+
 const useLocalOrders = () =>
   useQuery({
     queryKey: ['local-orders'],
@@ -62,17 +64,18 @@ const useLocalOrders = () =>
     },
   });
 
-const useSupabaseOrders = () =>
+// Global sync engine drives invalidations — no polling interval needed here.
+const useSupabaseOrders = (limit: number) =>
   useQuery({
     queryKey: ['supabase-orders'],
     retry: false,
-    refetchInterval: 15000,
     queryFn: async (): Promise<Order[]> => {
       try {
         const { data, error } = await supabase
           .from('orders')
           .select('*')
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(limit);
         if (error) return [];
         return ((data ?? []) as unknown as Order[]).map(d => ({ ...d, _source: 'supabase' as const }));
       } catch { return []; }
@@ -88,9 +91,9 @@ function mergeOrders(local: Order[], remote: Order[]): Order[] {
   return result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
-export const useOrders = () => {
+export const useOrders = (limit = ORDERS_PAGE) => {
   const { data: local = [] } = useLocalOrders();
-  const { data: remote = [] } = useSupabaseOrders();
+  const { data: remote = [] } = useSupabaseOrders(limit);
   return { data: mergeOrders(local, remote), isLoading: false };
 };
 
@@ -278,12 +281,26 @@ async function generateInvoice(order: Order) {
 
 const OrdersPanel = () => {
   const queryClient = useQueryClient();
+
+  // Pagination state
+  const [supabaseLimit, setSupabaseLimit] = useState(ORDERS_PAGE);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   const { data: localOrders = [] } = useLocalOrders();
-  const { data: supabaseOrders = [] } = useSupabaseOrders();
+  const { data: supabaseOrders = [] } = useSupabaseOrders(supabaseLimit);
   const orders = useMemo(
     () => mergeOrders(localOrders, supabaseOrders),
     [localOrders, supabaseOrders]
   );
+
+  const hasMore = supabaseOrders.length >= supabaseLimit;
+
+  const handleLoadMore = async () => {
+    setIsLoadingMore(true);
+    setSupabaseLimit(n => n + ORDERS_PAGE);
+    await queryClient.invalidateQueries({ queryKey: ['supabase-orders'] });
+    setIsLoadingMore(false);
+  };
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
@@ -748,6 +765,22 @@ const OrdersPanel = () => {
           </table>
         )}
       </div>
+
+      {/* Load More — below the table */}
+      {hasMore && orders.length > 0 && (
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={handleLoadMore}
+            disabled={isLoadingMore}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-white dark:bg-card border border-[#D5D9D9] dark:border-border text-[#565959] dark:text-muted-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/40 hover:text-[#0F1111] dark:hover:text-foreground transition-all shadow-sm disabled:opacity-50"
+          >
+            {isLoadingMore
+              ? <><Loader2 size={12} className="animate-spin" /> Loading more orders…</>
+              : <><ChevronUp size={12} /> Load more orders</>
+            }
+          </button>
+        </div>
+      )}
 
       <OrderDetailSheet
         orderId={selectedOrderId}

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   AlertTriangle, CheckCircle, Clock, User, Bell, Webhook,
-  MessageSquare,
+  MessageSquare, ChevronUp, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -47,6 +47,8 @@ async function autoDisableAi(session_id: string): Promise<boolean> {
   }
 }
 
+const HANDOFF_PAGE = 25;
+
 // ─── Queries ──────────────────────────────────────────────────────────────────
 const useLocalHandoffs = () => {
   return useQuery({
@@ -66,17 +68,18 @@ const useLocalHandoffs = () => {
   });
 };
 
-const useSupabaseHandoffs = () => {
+// Global sync engine drives invalidations — no interval needed here.
+const useSupabaseHandoffs = (limit: number) => {
   return useQuery({
     queryKey: ['supabase-handoffs'],
     retry: false,
-    refetchInterval: 3000,
     queryFn: async (): Promise<HandoffRequest[]> => {
       try {
         const { data, error } = await supabase
           .from('handoff_requests' as any)
           .select('*')
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(limit);
         if (error) return [];
         return ((data ?? []) as unknown as HandoffRequest[]).map(d => ({ ...d, _source: 'supabase' as const }));
       } catch {
@@ -102,9 +105,23 @@ function mergeHandoffs(local: HandoffRequest[], remote: HandoffRequest[]): Hando
 export const HandoffPanel = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Pagination state
+  const [supabaseLimit, setSupabaseLimit] = useState(HANDOFF_PAGE);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   const { data: localHandoffs = [] } = useLocalHandoffs();
-  const { data: supabaseHandoffs = [] } = useSupabaseHandoffs();
+  const { data: supabaseHandoffs = [] } = useSupabaseHandoffs(supabaseLimit);
   const requests = mergeHandoffs(localHandoffs, supabaseHandoffs);
+
+  const hasMore = supabaseHandoffs.length >= supabaseLimit;
+
+  const handleLoadMore = async () => {
+    setIsLoadingMore(true);
+    setSupabaseLimit(n => n + HANDOFF_PAGE);
+    await queryClient.invalidateQueries({ queryKey: ['supabase-handoffs'] });
+    setIsLoadingMore(false);
+  };
   const { data: sessions = [] } = useSessions();
 
   const [filter, setFilter] = useState<'all' | 'pending' | 'resolved'>('pending');
@@ -327,6 +344,23 @@ export const HandoffPanel = () => {
 
       {/* List */}
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide pr-1 space-y-3">
+
+        {/* Load More — loads older handoffs */}
+        {hasMore && filter === 'all' && (
+          <div className="flex justify-center pb-1">
+            <button
+              onClick={handleLoadMore}
+              disabled={isLoadingMore}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-muted border border-border/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-all disabled:opacity-50"
+            >
+              {isLoadingMore
+                ? <><Loader2 size={11} className="animate-spin" /> Loading…</>
+                : <><ChevronUp size={11} /> Load older records</>
+              }
+            </button>
+          </div>
+        )}
+
         {filtered.length === 0 && (
           <div className="text-center py-16 text-muted-foreground">
             <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-4">

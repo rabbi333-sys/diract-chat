@@ -89,12 +89,41 @@ const Index = () => {
   useAnalytics();
   useChartData('daily');
 
-  // ── Live sync — Realtime / SSE / Smart-polling depending on db type ────────
-  const { connected: syncConnected, mode: syncMode, paused: syncPaused } = useRealtimeUpdates((sessionId) => {
-    const currentPath = window.location.pathname;
-    if (!currentPath.includes(sessionId)) {
-      toast('New message received', { duration: 3000 });
-    }
+  // ── Global Real-time Sync Engine ─────────────────────────────────────────────
+  // Covers all modules: Messages, Orders, Failed, Handoff, Overview
+  const { connected: syncConnected, mode: syncMode, paused: syncPaused } = useRealtimeUpdates({
+    activeModule: activeNav.toLowerCase(),
+
+    onNewMessage: (sessionId) => {
+      const currentPath = window.location.pathname;
+      if (!currentPath.includes(sessionId)) {
+        toast('New message received', { duration: 3000 });
+      }
+    },
+
+    onNewOrder: () => {
+      toast.success('New order received', {
+        description: 'A new order has arrived in your inbox',
+        duration: 5000,
+        icon: '🛍️',
+      });
+    },
+
+    onNewFailure: () => {
+      toast.error('Automation failure detected', {
+        description: 'A workflow has reported an error — check the Failed tab',
+        duration: 6000,
+        icon: '⚠️',
+      });
+    },
+
+    onNewHandoff: () => {
+      toast('Human handoff requested', {
+        description: 'A customer needs a human agent — check the Handoff tab',
+        duration: 5000,
+        icon: '🤝',
+      });
+    },
   });
 
   // ── Handle handoff "Open Chat" → live inbox navigation ──────────────────────
