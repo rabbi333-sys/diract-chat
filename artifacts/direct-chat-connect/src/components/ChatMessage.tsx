@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { cn } from '@/lib/utils';
-import { Reply, ExternalLink, Clock, CheckCheck, Mic, ImageIcon, Video, Play, Pause, Download, FileText, File, FileSpreadsheet } from 'lucide-react';
+import { Reply, ExternalLink, Clock, Check, CheckCheck, Mic, ImageIcon, Video, Play, Pause, Download, FileText, File, FileSpreadsheet } from 'lucide-react';
+
+// ─── Reaction emojis ───────────────────────────────────────────────────────────
+export const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '😡'] as const;
 
 // ─── URL / text parsers ────────────────────────────────────────────────────────
 const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|avif|svg)(\?.*)?$/i;
@@ -23,13 +26,10 @@ type Segment =
 export function parseSegments(text: string): Segment[] {
   const trimmed = text.trim();
 
-  // Prefixed blob URLs from file picker optimistic messages
   if (trimmed.startsWith('blob-image:')) return [{ type: 'image', url: trimmed.slice('blob-image:'.length) }];
   if (trimmed.startsWith('blob-video:')) return [{ type: 'video', url: trimmed.slice('blob-video:'.length) }];
   if (trimmed.startsWith('blob-audio:')) return [{ type: 'audio', url: trimmed.slice('blob-audio:'.length) }];
 
-  // Document optimistic: blob-doc:<name>|||<sizeBytes>|||<blobUrl>
-  // (legacy without size: blob-doc:<name>|||<blobUrl>)
   if (trimmed.startsWith('blob-doc:')) {
     const rest  = trimmed.slice('blob-doc:'.length);
     const parts = rest.split('|||');
@@ -39,8 +39,6 @@ export function parseSegments(text: string): Segment[] {
     return [{ type: 'document', url, name, size: size && isFinite(size) ? size : undefined }];
   }
 
-  // Document stored: doc-data:<name>|||<sizeBytes>|||data:application/...
-  // (legacy without size: doc-data:<name>|||data:application/...)
   if (trimmed.startsWith('doc-data:')) {
     const rest  = trimmed.slice('doc-data:'.length);
     const parts = rest.split('|||');
@@ -50,22 +48,18 @@ export function parseSegments(text: string): Segment[] {
     return [{ type: 'document', url, name, size: size && isFinite(size) ? size : undefined }];
   }
 
-  // Plain blob: URLs = optimistic voice recordings (legacy / stopAndSendVoice)
   if (trimmed.startsWith('blob:')) return [{ type: 'audio', url: trimmed }];
 
-  // Base64 data URLs (persisted media from file uploads)
   if (trimmed.startsWith('data:image/'))       return [{ type: 'image', url: trimmed }];
   if (trimmed.startsWith('data:video/'))       return [{ type: 'video', url: trimmed }];
   if (trimmed.startsWith('data:audio/'))       return [{ type: 'audio', url: trimmed }];
   if (trimmed.startsWith('data:application/')) return [{ type: 'document', url: trimmed, name: 'Document' }];
 
-  // Meta placeholder strings
   if (/^\[voice message\]$/i.test(trimmed)) return [{ type: 'voice-placeholder' }];
   if (/^\[image\]$/i.test(trimmed))         return [{ type: 'image-placeholder' }];
   if (/^\[video\]$/i.test(trimmed))         return [{ type: 'video-placeholder' }];
   if (/^\[document\]$/i.test(trimmed))      return [{ type: 'document', url: '', name: 'Document' }];
 
-  // URL parsing
   const parts = text.split(URL_REGEX);
   const result: Segment[] = [];
   for (const part of parts) {
@@ -270,19 +264,71 @@ const VideoPlaceholder = ({ isRight }: { isRight: boolean }) => (
   </div>
 );
 
+// ─── Reaction Picker ──────────────────────────────────────────────────────────
+const ReactionPicker = ({
+  isRight,
+  onSelect,
+}: {
+  isRight: boolean;
+  onSelect: (emoji: string) => void;
+}) => (
+  <div
+    className={cn(
+      'absolute bottom-full mb-1 z-20',
+      'flex items-center gap-0.5 px-1.5 py-1 rounded-full shadow-xl border border-border/50',
+      'bg-background/95 backdrop-blur-sm',
+      'animate-in fade-in-0 zoom-in-90 duration-100',
+      isRight ? 'right-0' : 'left-0',
+    )}
+    onClick={e => e.stopPropagation()}
+  >
+    {REACTION_EMOJIS.map(emoji => (
+      <button
+        key={emoji}
+        title={emoji}
+        onClick={() => onSelect(emoji)}
+        className="w-8 h-8 flex items-center justify-center text-lg rounded-full hover:bg-muted hover:scale-125 transition-all duration-100 active:scale-110"
+      >
+        {emoji}
+      </button>
+    ))}
+  </div>
+);
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface ChatMessageProps {
   message: ChatMessageType;
   onReply?: (msg: ChatMessageType) => void;
   onMediaClick?: (url: string, type: 'image' | 'video') => void;
+  onReact?: (msg: ChatMessageType, emoji: string) => void;
+  reactions?: string[];
   isFirst?: boolean;
   isLast?: boolean;
 }
 
+// ─── Status icon ──────────────────────────────────────────────────────────────
+function StatusIcon({ status }: { status: 'sending' | 'sent' | 'delivered' | 'read' }) {
+  if (status === 'sending')   return <Clock     size={9}  className="text-muted-foreground/40 animate-pulse flex-shrink-0" />;
+  if (status === 'sent')      return <Check     size={10} className="text-violet-400/70 flex-shrink-0" />;
+  if (status === 'delivered') return <CheckCheck size={10} className="text-muted-foreground/60 flex-shrink-0" />;
+  if (status === 'read')      return <CheckCheck size={10} className="text-sky-400 flex-shrink-0" />;
+  return null;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
-export const ChatMessage = ({ message, onReply, onMediaClick, isFirst = true, isLast = true }: ChatMessageProps) => {
+export const ChatMessage = ({
+  message,
+  onReply,
+  onMediaClick,
+  onReact,
+  reactions = [],
+  isFirst = true,
+  isLast = true,
+}: ChatMessageProps) => {
   const [imgError, setImgError] = useState<Record<string, boolean>>({});
   const [hover, setHover] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isRight = message.sender === 'Agent' || message.sender === 'AI';
   const content = message.message_text?.trim();
@@ -290,7 +336,6 @@ export const ChatMessage = ({ message, onReply, onMediaClick, isFirst = true, is
 
   const segments = parseSegments(content);
 
-  // Pure-media messages get transparent background
   const isMediaOnly = segments.every(s =>
     s.type === 'image' || s.type === 'audio' || s.type === 'video' || s.type === 'document' ||
     s.type === 'voice-placeholder' || s.type === 'image-placeholder' || s.type === 'video-placeholder'
@@ -303,6 +348,15 @@ export const ChatMessage = ({ message, onReply, onMediaClick, isFirst = true, is
     } catch { return ''; }
   })();
 
+  // Resolve display status from _status or legacy _sending
+  const msgStatus: 'sending' | 'sent' | 'delivered' | 'read' | null = (() => {
+    if (!isRight) return null;
+    if (message._status) return message._status;
+    if (message._sending === true)  return 'sending';
+    if (message._sending === false) return 'sent';
+    return null;
+  })();
+
   // Messenger-style corner rounding
   const rightRadius = cn('rounded-tl-[18px]', isFirst ? 'rounded-tr-[18px]' : 'rounded-tr-[5px]', 'rounded-br-[5px] rounded-bl-[18px]');
   const leftRadius  = cn('rounded-tr-[18px]', isFirst ? 'rounded-tl-[18px]' : 'rounded-tl-[5px]', 'rounded-bl-[5px] rounded-br-[18px]');
@@ -311,8 +365,17 @@ export const ChatMessage = ({ message, onReply, onMediaClick, isFirst = true, is
     ? { background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)', boxShadow: '0 2px 12px rgba(109,40,217,0.25)' }
     : {};
 
-  const isSending = isRight && message._sending === true;
-  const isSent    = isRight && message._sending === false;
+  const handleLongPressStart = () => {
+    longPressTimer.current = setTimeout(() => setPickerOpen(true), 500);
+  };
+  const handleLongPressEnd = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+  };
+
+  const handleReactSelect = (emoji: string) => {
+    setPickerOpen(false);
+    onReact?.(message, emoji);
+  };
 
   return (
     <div
@@ -323,7 +386,7 @@ export const ChatMessage = ({ message, onReply, onMediaClick, isFirst = true, is
         'animate-in fade-in-0 slide-in-from-bottom-1 duration-150',
       )}
       onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseLeave={() => { setHover(false); setPickerOpen(false); }}
     >
       {/* Left-side avatar */}
       {!isRight && (
@@ -338,7 +401,7 @@ export const ChatMessage = ({ message, onReply, onMediaClick, isFirst = true, is
       )}
 
       {/* Reply button — left of right-aligned bubble */}
-      {onReply && hover && isRight && (
+      {onReply && hover && isRight && !pickerOpen && (
         <button
           onClick={() => onReply(message)}
           className="flex-shrink-0 mb-1 p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-all self-center opacity-0 group-hover:opacity-100"
@@ -363,47 +426,76 @@ export const ChatMessage = ({ message, onReply, onMediaClick, isFirst = true, is
           </div>
         )}
 
-        {/* Main bubble */}
-        <div
-          data-testid={`bubble-${isRight ? 'agent' : 'ai'}-${message.id}`}
-          className={cn(
-            'relative overflow-hidden',
-            isMediaOnly
-              ? 'rounded-2xl p-2 bg-transparent border-0 shadow-none'
-              : cn(
-                  'px-3.5 py-2 text-sm leading-relaxed',
-                  isRight ? rightRadius : leftRadius,
-                  !isRight && 'bg-muted/80 dark:bg-white/10 border border-border/40',
-                )
+        {/* Main bubble — with reaction picker anchor */}
+        <div className="relative">
+          {/* Reaction picker (shows on hover click or long-press) */}
+          {onReact && pickerOpen && (
+            <ReactionPicker isRight={isRight} onSelect={handleReactSelect} />
           )}
-          style={isMediaOnly ? {} : (isRight ? bubbleStyle : {})}
-        >
-          {/* For media-only messages, wrap with bubble style applied to inner content */}
-          {isMediaOnly && isRight && (
-            <div className="rounded-2xl p-2.5" style={bubbleStyle}>
-              {segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError, onMediaClick))}
+
+          <div
+            data-testid={`bubble-${isRight ? 'agent' : 'ai'}-${message.id}`}
+            className={cn(
+              'relative overflow-hidden cursor-default select-none',
+              isMediaOnly
+                ? 'rounded-2xl p-2 bg-transparent border-0 shadow-none'
+                : cn(
+                    'px-3.5 py-2 text-sm leading-relaxed',
+                    isRight ? rightRadius : leftRadius,
+                    !isRight && 'bg-muted/80 dark:bg-white/10 border border-border/40',
+                  )
+            )}
+            style={isMediaOnly ? {} : (isRight ? bubbleStyle : {})}
+            onMouseEnter={() => onReact && hover && setPickerOpen(true)}
+            onMouseLeave={() => setPickerOpen(false)}
+            onTouchStart={onReact ? handleLongPressStart : undefined}
+            onTouchEnd={onReact ? handleLongPressEnd : undefined}
+            onTouchMove={onReact ? handleLongPressEnd : undefined}
+          >
+            {isMediaOnly && isRight && (
+              <div className="rounded-2xl p-2.5" style={bubbleStyle}>
+                {segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError, onMediaClick))}
+              </div>
+            )}
+            {isMediaOnly && !isRight && (
+              <div className="rounded-2xl p-2.5 bg-muted/80 dark:bg-white/10 border border-border/40">
+                {segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError, onMediaClick))}
+              </div>
+            )}
+            {!isMediaOnly && segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError, onMediaClick))}
+          </div>
+
+          {/* Reaction badge — shows below the bubble */}
+          {reactions.length > 0 && (
+            <div
+              className={cn(
+                'flex items-center gap-0.5 mt-0.5',
+                isRight ? 'justify-end' : 'justify-start',
+              )}
+            >
+              <div className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-background border border-border/50 shadow-sm text-sm leading-none">
+                {[...new Set(reactions)].map((emoji, i) => (
+                  <span key={i}>{emoji}</span>
+                ))}
+                {reactions.length > 1 && (
+                  <span className="text-[10px] text-muted-foreground font-medium ml-0.5">{reactions.length}</span>
+                )}
+              </div>
             </div>
           )}
-          {isMediaOnly && !isRight && (
-            <div className="rounded-2xl p-2.5 bg-muted/80 dark:bg-white/10 border border-border/40">
-              {segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError, onMediaClick))}
-            </div>
-          )}
-          {!isMediaOnly && segments.map((seg, i) => renderSegment(seg, i, isRight, imgError, setImgError, onMediaClick))}
         </div>
 
         {/* Timestamp + send status */}
         {isLast && (
           <div className={cn('flex items-center gap-1 px-1 mt-0.5', isRight ? 'flex-row-reverse' : 'flex-row')}>
             {time && <span className="text-[10px] text-muted-foreground/40 font-medium">{time}</span>}
-            {isSending && <Clock size={9} className="text-muted-foreground/40 animate-pulse flex-shrink-0" />}
-            {isSent    && <CheckCheck size={10} className="text-violet-400/70 flex-shrink-0" />}
+            {msgStatus && <StatusIcon status={msgStatus} />}
           </div>
         )}
       </div>
 
       {/* Reply button — right of left-aligned bubble */}
-      {onReply && hover && !isRight && (
+      {onReply && hover && !isRight && !pickerOpen && (
         <button
           onClick={() => onReply(message)}
           className="flex-shrink-0 mb-1 p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-all self-center opacity-0 group-hover:opacity-100"

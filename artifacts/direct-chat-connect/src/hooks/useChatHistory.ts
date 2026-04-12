@@ -34,7 +34,8 @@ export interface ChatMessage {
   timestamp: string;
   recipient?: string;
   replyTo?: ChatMessage;
-  _sending?: boolean; // true while API call in-flight, false = delivered
+  _sending?: boolean;    // true while API call in-flight (legacy compat)
+  _status?: 'sending' | 'sent' | 'delivered' | 'read'; // extended status
 }
 
 export interface SessionInfo {

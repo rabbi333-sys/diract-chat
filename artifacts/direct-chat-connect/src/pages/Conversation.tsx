@@ -6,7 +6,7 @@ import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fe
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage, parseSegments } from '@/components/ChatMessage';
 import { PlatformAvatar } from '@/components/SessionList';
-import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp, Paperclip, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp, Paperclip, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Keyboard } from 'lucide-react';
 import { detectPlatform, storePlatform, PLATFORM_CONFIG, Platform } from '@/lib/platformDetect';
 import { useAiControl } from '@/hooks/useAiControl';
 import { useTeamRole } from '@/hooks/useTeamRole';
@@ -16,6 +16,8 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+const LS_REACTIONS_PREFIX = 'cm_reactions_';
+
 const QUICK_REPLIES = [
   'Thank you! Is there anything else you need?',
   'Let me check, please wait a moment',
@@ -56,6 +58,27 @@ async function fbPost(conn: PlatformConnection, recipient: string, message: obje
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || 'Facebook error');
   return data;
+}
+
+// Send typing indicator to platform (best-effort — silently ignores failures)
+async function sendTypingAction(
+  conn: PlatformConnection,
+  platform: Platform,
+  recipient: string,
+  action: 'typing_on' | 'typing_off',
+): Promise<void> {
+  try {
+    if (platform === 'whatsapp') {
+      // WhatsApp Business API does not officially support typing indicators — skip
+      return;
+    }
+    // Facebook & Instagram: sender_action via /me/messages
+    await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${conn.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: { id: recipient }, sender_action: action }),
+    });
+  } catch { /* best-effort — ignore network errors */ }
 }
 
 // Upload file to WhatsApp media → returns media_id
@@ -281,6 +304,23 @@ const Conversation = () => {
   // Media viewer (lightbox + video modal)
   const [mediaViewer, setMediaViewer] = useState<{ url: string; type: 'image' | 'video'; allImages: string[] } | null>(null);
 
+  // ── Emoji reactions (persisted to localStorage) ────────────────────────────
+  const [reactions, setReactions] = useState<Record<string, string[]>>(() => {
+    try {
+      const raw = localStorage.getItem(LS_REACTIONS_PREFIX + sessionId);
+      return raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+    } catch { return {}; }
+  });
+
+  // ── Typing indicator (send) ────────────────────────────────────────────────
+  const [typingActive, setTypingActive] = useState(false);
+  const typingThrottleRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingOffTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Customer typing (receive) ──────────────────────────────────────────────
+  const [customerTyping, setCustomerTyping] = useState(false);
+  const customerTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Refs
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -493,14 +533,123 @@ const Conversation = () => {
   };
 
   const markSent = (id: number) => {
-    setLocalMessages(prev => prev.map(m => m.id === id ? { ...m, _sending: false } : m));
+    setLocalMessages(prev => prev.map(m => m.id === id ? { ...m, _sending: false, _status: 'sent' as const } : m));
   };
+
+  const markDelivered = (id: number | string) => {
+    setLocalMessages(prev => prev.map(m => String(m.id) === String(id) ? { ...m, _status: 'delivered' as const } : m));
+  };
+
+  const markRead = (id: number | string) => {
+    setLocalMessages(prev => prev.map(m => String(m.id) === String(id) ? { ...m, _status: 'read' as const } : m));
+  };
+
+  // Persist reactions to localStorage whenever they change
+  useEffect(() => {
+    if (!sessionId) return;
+    try { localStorage.setItem(LS_REACTIONS_PREFIX + sessionId, JSON.stringify(reactions)); }
+    catch { /* ignore quota errors */ }
+  }, [reactions, sessionId]);
+
+  // Subscribe to Supabase realtime for customer typing events
+  useEffect(() => {
+    if (!sessionId) return;
+    const channel = supabase
+      .channel(`typing:${sessionId}`)
+      .on('broadcast', { event: 'typing' }, () => {
+        setCustomerTyping(true);
+        if (customerTypingTimerRef.current) clearTimeout(customerTypingTimerRef.current);
+        customerTypingTimerRef.current = setTimeout(() => setCustomerTyping(false), 5000);
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+      if (customerTypingTimerRef.current) clearTimeout(customerTypingTimerRef.current);
+    };
+  }, [sessionId]);
+
+  // Subscribe to Supabase realtime for message status updates (delivered/read)
+  useEffect(() => {
+    if (!sessionId) return;
+    const channel = supabase
+      .channel(`msg_status:${sessionId}`)
+      .on('broadcast', { event: 'delivered' }, (payload: { payload?: { message_id?: string } }) => {
+        const msgId = payload?.payload?.message_id;
+        if (msgId) markDelivered(msgId);
+      })
+      .on('broadcast', { event: 'read' }, (payload: { payload?: { message_id?: string } }) => {
+        const msgId = payload?.payload?.message_id;
+        if (msgId) markRead(msgId);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   // ── Remove a staged image ──────────────────────────────────────────────────
   const removePendingFile = useCallback((index: number) => {
     setPendingPreviews(prev => { URL.revokeObjectURL(prev[index]); return prev.filter((_, i) => i !== index); });
     setPendingFiles(prev => prev.filter((_, i) => i !== index));
   }, []);
+
+  // ── Typing indicator (agent → customer) ───────────────────────────────────
+  const handleTyping = useCallback(() => {
+    if (!activeConn || !recipient || sessionPlatform === 'whatsapp') return;
+    // Throttle: send typing_on at most once per 3 seconds
+    if (!typingThrottleRef.current) {
+      sendTypingAction(activeConn, sessionPlatform, recipient, 'typing_on');
+      setTypingActive(true);
+      typingThrottleRef.current = setTimeout(() => {
+        typingThrottleRef.current = null;
+      }, 3000);
+    }
+    // Auto-send typing_off 5 seconds after last keystroke
+    if (typingOffTimerRef.current) clearTimeout(typingOffTimerRef.current);
+    typingOffTimerRef.current = setTimeout(() => {
+      if (activeConn) sendTypingAction(activeConn, sessionPlatform, recipient, 'typing_off');
+      setTypingActive(false);
+    }, 5000);
+  }, [activeConn, recipient, sessionPlatform]);
+
+  const stopTypingIndicator = useCallback(() => {
+    if (typingOffTimerRef.current) clearTimeout(typingOffTimerRef.current);
+    if (typingThrottleRef.current) clearTimeout(typingThrottleRef.current);
+    typingThrottleRef.current = null;
+    typingOffTimerRef.current = null;
+    if (typingActive && activeConn && recipient) {
+      sendTypingAction(activeConn, sessionPlatform, recipient, 'typing_off');
+    }
+    setTypingActive(false);
+  }, [typingActive, activeConn, recipient, sessionPlatform]);
+
+  // ── Emoji reactions ────────────────────────────────────────────────────────
+  const handleReact = useCallback(async (msg: ChatMessageType, emoji: string) => {
+    const key = String(msg.id);
+    setReactions(prev => {
+      const existing = prev[key] || [];
+      // Toggle: if already reacted with same emoji, remove it; otherwise add
+      const updated = existing.includes(emoji)
+        ? existing.filter(e => e !== emoji)
+        : [...existing, emoji];
+      return { ...prev, [key]: updated };
+    });
+
+    // Best-effort: send reaction to platform
+    try {
+      if (sessionPlatform === 'whatsapp' && waConn) {
+        // WhatsApp reaction requires the platform message ID; we store local ID only
+        // so this is best-effort and will fail gracefully
+        await waPost(waConn, recipient, {
+          type: 'reaction',
+          reaction: { message_id: key, emoji },
+        });
+      } else if (sessionPlatform === 'facebook' && fbConn) {
+        // Facebook reactions require user_message_id — silently skip
+      } else if (sessionPlatform === 'instagram' && igConn) {
+        // Instagram reactions not available via API — UI only
+      }
+    } catch { /* best-effort — ignore */ }
+  }, [sessionPlatform, waConn, fbConn, igConn, recipient]);
 
   // ── Unified send (text + optional staged images) ───────────────────────────
   const handleSend = () => {
@@ -511,7 +660,8 @@ const Conversation = () => {
 
     const rt = replyingTo;
 
-    // Clear inputs instantly
+    // Clear inputs instantly + stop typing indicator
+    stopTypingIndicator();
     setReplyText('');
     setPendingFiles([]);
     setPendingPreviews(prev => { prev.forEach(URL.revokeObjectURL); return []; });
@@ -1029,6 +1179,8 @@ const Conversation = () => {
                 message={msg}
                 onReply={canReply ? setReplyingTo : undefined}
                 onMediaClick={handleMediaClick}
+                onReact={canReply ? handleReact : undefined}
+                reactions={reactions[String(msg.id)]}
                 isFirst={isFirst}
                 isLast={isLast}
               />
@@ -1050,6 +1202,25 @@ const Conversation = () => {
               <p className="text-xs text-muted-foreground/40 mt-1">Messages will appear here when the conversation starts</p>
             </div>
           )}
+          {/* Customer typing indicator — animated dots bubble */}
+          {customerTyping && (
+            <div className="flex items-end gap-2 px-1 mb-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
+              <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center shadow-sm"
+                style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)' }}>
+                <span className="text-base">👤</span>
+              </div>
+              <div className="px-4 py-3 rounded-tl-[18px] rounded-tr-[18px] rounded-br-[18px] rounded-bl-[5px] bg-muted/80 dark:bg-white/10 border border-border/40 flex items-center gap-1">
+                {[0, 1, 2].map(i => (
+                  <span
+                    key={i}
+                    className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
+                    style={{ animationDelay: `${i * 150}ms`, animationDuration: '0.8s' }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           <div ref={scrollEndRef} className="h-2" />
         </div>
       </div>
@@ -1156,7 +1327,7 @@ const Conversation = () => {
             </div>
           ) : canReply ? (
             /* Messenger-style one-row input */
-            <div className="flex items-end gap-1.5">
+            <div className="relative flex items-end gap-1.5">
 
               {/* Left icon group */}
               <div className="flex items-center gap-0.5 flex-shrink-0 pb-1">
@@ -1188,7 +1359,8 @@ const Conversation = () => {
                   ref={inputRef}
                   placeholder="Aa"
                   value={replyText}
-                  onChange={e => setReplyText(e.target.value)}
+                  onChange={e => { setReplyText(e.target.value); if (e.target.value) handleTyping(); }}
+                  onBlur={() => stopTypingIndicator()}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                   rows={1}
                   className="w-full bg-muted/60 dark:bg-white/5 border border-border/40 rounded-[22px] px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all resize-none leading-relaxed"
@@ -1200,6 +1372,14 @@ const Conversation = () => {
                   }}
                 />
               </div>
+
+              {/* Typing active indicator */}
+              {typingActive && (
+                <div className="absolute -top-5 left-16 flex items-center gap-1 text-[10px] text-muted-foreground/50">
+                  <Keyboard size={10} />
+                  <span>Sending typing…</span>
+                </div>
+              )}
 
               {/* Right: emoji + send */}
               <div className="flex items-center gap-0.5 flex-shrink-0 pb-1">
