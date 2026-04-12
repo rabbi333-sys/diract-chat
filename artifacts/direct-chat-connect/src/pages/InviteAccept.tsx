@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
 import { supabase as defaultSupabase } from '@/integrations/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -47,13 +46,11 @@ const InviteAccept = () => {
   const [invite, setInvite] = useState<Invite | null>(null);
   const [nonSupabaseCreds, setNonSupabaseCreds] = useState<DbCreds | null>(null);
 
-  // Form state
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Sub-Admin own DB setup state
   const [saDbType, setSaDbType] = useState<MainDbType>('supabase');
   const [saUrl, setSaUrl] = useState('');
   const [saAnonKey, setSaAnonKey] = useState('');
@@ -66,7 +63,6 @@ const InviteAccept = () => {
   const [saConnStr, setSaConnStr] = useState('');
   const [saConnecting, setSaConnecting] = useState(false);
 
-  // Decoded invite params
   const [params, setParams] = useState<{
     supabaseUrl: string | null;
     supabaseKey: string | null;
@@ -97,7 +93,6 @@ const InviteAccept = () => {
       if (pParam) { try { platformConnsJson = atob(decodeURIComponent(pParam)); } catch { /* ignore */ } }
       if (qParam) { try { n8nSettingsJson = atob(decodeURIComponent(qParam)); } catch { /* ignore */ } }
 
-      // ── Non-Supabase: ?x= param ───────────────────────────────────────────
       const xParam = searchParams.get('x');
       if (xParam) {
         const creds = decodeNonSupabaseCreds(decodeURIComponent(xParam));
@@ -127,7 +122,6 @@ const InviteAccept = () => {
         return;
       }
 
-      // ── Supabase: ?u= ?k= params ──────────────────────────────────────────
       let supabaseUrl: string | null = null;
       let supabaseKey: string | null = null;
       let tableName: string | null = null;
@@ -213,7 +207,7 @@ const InviteAccept = () => {
       db_type: 'supabase',
       supabase_url: url,
       anon_key: anonKey,
-      service_role_key: anonKey, // members use anon key only — privileged ops use SECURITY DEFINER RPCs
+      service_role_key: anonKey,
       table_name: tableName ?? existingLegacy?.table_name ?? 'n8n_chat_histories',
       is_active: true,
     }));
@@ -242,7 +236,6 @@ const InviteAccept = () => {
       const passwordHash = await hashPassword(password);
       const { supabaseUrl, supabaseKey, tableName, platformConnsJson, n8nSettingsJson } = params;
 
-      // ── Non-Supabase path ────────────────────────────────────────────────
       if (nonSupabaseCreds) {
         const result = await proxySubmitInvite(
           nonSupabaseCreds, token,
@@ -253,7 +246,6 @@ const InviteAccept = () => {
           setStage('register');
           return;
         }
-        // Store proxy creds so member-login page can use them
         storeMemberProxyCreds(nonSupabaseCreds);
         setMemberSetup();
         if (platformConnsJson) { try { localStorage.setItem(PLATFORM_CONNS_KEY, platformConnsJson); } catch { /* ignore */ } }
@@ -263,7 +255,6 @@ const InviteAccept = () => {
         return;
       }
 
-      // ── Supabase path ────────────────────────────────────────────────────
       if (!supabaseUrl || !supabaseKey) {
         toast.error('Missing workspace credentials. Please ask your admin for a new invite link.');
         setStage('register');
@@ -309,7 +300,6 @@ const InviteAccept = () => {
     }
   };
 
-  // ── Sub-Admin: save own DB ────────────────────────────────────────────────────
   const SUBADMIN_DB_KEY = 'meta_subadmin_db_creds';
 
   const handleSaveOwnDb = async () => {
@@ -359,59 +349,53 @@ const InviteAccept = () => {
     }
   };
 
-  // ── Loading ──────────────────────────────────────────────────────────────────
   if (stage === 'loading') {
     return (
       <Screen>
-        <Loader2 size={28} className="animate-spin text-primary mx-auto" />
-        <p className="text-sm text-muted-foreground text-center mt-3">Validating invite link…</p>
+        <Loader2 size={32} className="animate-spin mx-auto" style={{ color: '#6366f1' }} />
+        <p className="text-sm text-center mt-3" style={{ color: 'rgba(148,163,184,0.8)' }}>Validating invite link…</p>
       </Screen>
     );
   }
 
-  // ── Error ────────────────────────────────────────────────────────────────────
   if (stage === 'error') {
     const alreadyUsed = error === 'already_used';
     return (
       <Screen>
-        <Card className="w-full max-w-sm">
-          <CardHeader className="text-center pb-2">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 ${
-              alreadyUsed ? 'bg-amber-500/10' : 'bg-red-500/10'
+        <GlassCard>
+          <div className="text-center mb-5">
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 ${
+              alreadyUsed ? 'bg-amber-500/15' : 'bg-red-500/15'
             }`}>
-              <ShieldAlert size={22} className={alreadyUsed ? 'text-amber-500' : 'text-red-500'} />
+              <ShieldAlert size={26} className={alreadyUsed ? 'text-amber-400' : 'text-red-400'} />
             </div>
-            <CardTitle className="text-base">
+            <h2 className="text-lg font-bold text-white">
               {alreadyUsed ? 'Invite Already Used' : 'Invalid Invite'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-sm text-muted-foreground">
+            </h2>
+            <p className="text-sm mt-2" style={{ color: 'rgba(148,163,184,0.8)' }}>
               {alreadyUsed
                 ? 'This invite link has already been used. If you already submitted a request, please sign in.'
                 : error}
             </p>
-            {alreadyUsed
-              ? <Button asChild className="w-full"><Link to="/member-login">Sign In</Link></Button>
-              : <Button onClick={() => navigate('/')} variant="outline" className="w-full">Go to Dashboard</Button>
-            }
-          </CardContent>
-        </Card>
+          </div>
+          {alreadyUsed
+            ? <DarkButton asLink to="/member-login">Sign In</DarkButton>
+            : <DarkButton onClick={() => navigate('/')}>Go to Dashboard</DarkButton>
+          }
+        </GlassCard>
       </Screen>
     );
   }
 
-  // ── Submitting ───────────────────────────────────────────────────────────────
   if (stage === 'submitting') {
     return (
       <Screen>
-        <Loader2 size={28} className="animate-spin text-primary mx-auto" />
-        <p className="text-sm text-muted-foreground text-center mt-3">Submitting your request…</p>
+        <Loader2 size={32} className="animate-spin mx-auto" style={{ color: '#6366f1' }} />
+        <p className="text-sm text-center mt-3" style={{ color: 'rgba(148,163,184,0.8)' }}>Submitting your request…</p>
       </Screen>
     );
   }
 
-  // ── Setup DB (Sub-Admin) ──────────────────────────────────────────────────────
   if (stage === 'setup-db') {
     const saCurrentDbType = DB_TYPES.find(t => t.value === saDbType);
     const saNeedsConnStr = saDbType === 'mongodb' || saDbType === 'redis';
@@ -419,249 +403,426 @@ const InviteAccept = () => {
 
     return (
       <Screen>
-        <Card className="w-full max-w-sm shadow-lg">
-          <CardHeader className="text-center pb-2">
-            <div className="w-12 h-12 rounded-full bg-violet-500/10 flex items-center justify-center mx-auto mb-3">
-              <Database size={22} className="text-violet-600 dark:text-violet-400" />
+        <GlassCard>
+          <div className="text-center mb-5">
+            <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
+              style={{ background: 'rgba(124,58,237,0.15)' }}>
+              <Database size={26} style={{ color: '#a78bfa' }} />
             </div>
-            <CardTitle className="text-xl font-bold">Connect Your Database</CardTitle>
-            <p className="text-sm text-muted-foreground mt-1">
-              As a Sub-Admin, connect your <strong>own database</strong> — you'll see only your data.
+            <h2 className="text-xl font-bold text-white">Connect Your Database</h2>
+            <p className="text-sm mt-1.5" style={{ color: 'rgba(148,163,184,0.8)' }}>
+              As a Sub-Admin, connect your <strong className="text-white">own database</strong> — you'll see only your data.
             </p>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-2">
-            <div className="rounded-lg bg-violet-500/5 border border-violet-500/20 px-3 py-2.5">
-              <p className="text-xs text-violet-700 dark:text-violet-400 leading-relaxed">
-                Your admin will still need to approve your account. After approval, you'll be logged into your own database workspace.
-              </p>
-            </div>
+          </div>
 
-            {/* DB Type */}
+          <div className="rounded-xl px-3.5 py-3 mb-4" style={{
+            background: 'rgba(124,58,237,0.08)',
+            border: '1px solid rgba(124,58,237,0.25)',
+          }}>
+            <p className="text-xs leading-relaxed" style={{ color: '#c4b5fd' }}>
+              Your admin will still need to approve your account. After approval, you'll be logged into your own database workspace.
+            </p>
+          </div>
+
+          <div className="space-y-3">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Database Type</label>
+              <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(148,163,184,0.7)' }}>Database Type</label>
               <div className="relative">
                 <select
                   value={saDbType}
                   onChange={e => setSaDbType(e.target.value as MainDbType)}
-                  className="w-full appearance-none h-9 rounded-xl border border-border/60 bg-muted/30 px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors"
+                  className="w-full appearance-none h-10 rounded-xl px-3 pr-8 text-sm focus:outline-none transition-colors"
+                  style={{
+                    background: 'rgba(30,41,59,0.8)',
+                    border: '1px solid rgba(99,102,241,0.2)',
+                    color: 'rgba(203,213,225,0.9)',
+                  }}
                 >
                   {DB_TYPES.map(t => (
                     <option key={t.value} value={t.value}>{t.icon} {t.label}</option>
                   ))}
                 </select>
-                <ChevronDown size={12} className="absolute right-2.5 top-2.5 text-muted-foreground pointer-events-none" />
+                <ChevronDown size={12} className="absolute right-2.5 top-3.5 pointer-events-none" style={{ color: 'rgba(148,163,184,0.6)' }} />
               </div>
             </div>
 
-            {/* Supabase fields */}
             {saDbType === 'supabase' && (
               <>
-                <div className="space-y-1.5">
-                  <Label>Supabase Project URL</Label>
-                  <Input value={saUrl} onChange={e => setSaUrl(e.target.value)} placeholder="https://xxx.supabase.co" className="h-9 rounded-xl" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Anon Key</Label>
+                <DarkField label="Supabase Project URL">
+                  <DarkInput value={saUrl} onChange={e => setSaUrl(e.target.value)} placeholder="https://xxx.supabase.co" />
+                </DarkField>
+                <DarkField label="Anon Key">
                   <div className="relative">
-                    <Input
+                    <DarkInput
                       type={saShowAnonKey ? 'text' : 'password'}
                       value={saAnonKey}
                       onChange={e => setSaAnonKey(e.target.value)}
                       placeholder="eyJ..."
-                      className="h-9 rounded-xl pr-9"
+                      className="pr-9"
                     />
-                    <button type="button" onClick={() => setSaShowAnonKey(s => !s)} className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground">
+                    <button type="button" onClick={() => setSaShowAnonKey(s => !s)}
+                      className="absolute right-2.5 top-2.5" style={{ color: 'rgba(148,163,184,0.6)' }}>
                       {saShowAnonKey ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
                   </div>
-                </div>
+                </DarkField>
               </>
             )}
 
-            {/* PG / MySQL fields */}
             {saNeedsHostFields && (
               <>
                 <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2 space-y-1.5">
-                    <Label>Host</Label>
-                    <Input value={saHost} onChange={e => setSaHost(e.target.value)} placeholder="localhost" className="h-9 rounded-xl" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Port</Label>
-                    <Input value={saPort} onChange={e => setSaPort(e.target.value)} placeholder={saCurrentDbType?.defaultPort || ''} className="h-9 rounded-xl" />
-                  </div>
+                  <DarkField label="Host" className="col-span-2">
+                    <DarkInput value={saHost} onChange={e => setSaHost(e.target.value)} placeholder="localhost" />
+                  </DarkField>
+                  <DarkField label="Port">
+                    <DarkInput value={saPort} onChange={e => setSaPort(e.target.value)} placeholder={saCurrentDbType?.defaultPort || ''} />
+                  </DarkField>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1.5">
-                    <Label>Username</Label>
-                    <Input value={saUsername} onChange={e => setSaUsername(e.target.value)} placeholder="root" className="h-9 rounded-xl" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Password</Label>
-                    <Input type="password" value={saPassword} onChange={e => setSaPassword(e.target.value)} placeholder="••••••••" className="h-9 rounded-xl" />
-                  </div>
+                  <DarkField label="Username">
+                    <DarkInput value={saUsername} onChange={e => setSaUsername(e.target.value)} placeholder="root" />
+                  </DarkField>
+                  <DarkField label="Password">
+                    <DarkInput type="password" value={saPassword} onChange={e => setSaPassword(e.target.value)} placeholder="••••••••" />
+                  </DarkField>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Database Name</Label>
-                  <Input value={saDbName} onChange={e => setSaDbName(e.target.value)} placeholder="mydb" className="h-9 rounded-xl" />
-                </div>
+                <DarkField label="Database Name">
+                  <DarkInput value={saDbName} onChange={e => setSaDbName(e.target.value)} placeholder="mydb" />
+                </DarkField>
               </>
             )}
 
-            {/* MongoDB / Redis */}
             {saNeedsConnStr && (
-              <div className="space-y-1.5">
-                <Label>Connection String</Label>
-                <Input value={saConnStr} onChange={e => setSaConnStr(e.target.value)} placeholder={saDbType === 'mongodb' ? 'mongodb+srv://...' : 'redis://...'} className="h-9 rounded-xl" />
-              </div>
+              <DarkField label="Connection String">
+                <DarkInput value={saConnStr} onChange={e => setSaConnStr(e.target.value)}
+                  placeholder={saDbType === 'mongodb' ? 'mongodb+srv://...' : 'redis://...'} />
+              </DarkField>
             )}
 
-            <Button onClick={handleSaveOwnDb} disabled={saConnecting} className="w-full mt-1 gap-2 bg-violet-600 hover:bg-violet-700">
+            <GradientButton onClick={handleSaveOwnDb} disabled={saConnecting} className="w-full mt-1">
               {saConnecting ? <><Loader2 size={14} className="animate-spin" /> Connecting…</> : <><Database size={14} /> Save My Database</>}
-            </Button>
+            </GradientButton>
 
             <button
               onClick={() => setStage('done')}
-              className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition-colors py-1"
+              className="w-full text-xs text-center py-1 transition-colors"
+              style={{ color: 'rgba(148,163,184,0.6)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'rgba(203,213,225,0.9)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(148,163,184,0.6)')}
             >
               Skip for now — I'll connect later
             </button>
-          </CardContent>
-        </Card>
+          </div>
+        </GlassCard>
       </Screen>
     );
   }
 
-  // ── Done ──────────────────────────────────────────────────────────────────────
   if (stage === 'done') {
     return (
       <Screen>
-        <Card className="w-full max-w-sm shadow-lg">
-          <CardHeader className="text-center pb-2">
-            <div className="w-14 h-14 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
-              <Clock size={26} className="text-emerald-500" />
+        <GlassCard>
+          <div className="text-center mb-5">
+            <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
+              style={{ background: 'rgba(16,185,129,0.15)' }}>
+              <Clock size={26} style={{ color: '#34d399' }} />
             </div>
-            <CardTitle className="text-lg">Request Submitted!</CardTitle>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-sm text-muted-foreground">
+            <h2 className="text-xl font-bold text-white">Request Submitted!</h2>
+            <p className="text-sm mt-2" style={{ color: 'rgba(148,163,184,0.8)' }}>
               Your request has been sent to your admin for review. Once approved, you can sign in with your email and password.
             </p>
-            <Button asChild className="w-full">
-              <Link to="/member-login">Go to Sign In</Link>
-            </Button>
-          </CardContent>
-        </Card>
+          </div>
+          <DarkButton asLink to="/member-login">Go to Sign In</DarkButton>
+        </GlassCard>
       </Screen>
     );
   }
 
-  // ── Register form ────────────────────────────────────────────────────────────
   const visiblePerms = (invite?.permissions ?? []).filter(p => p in PERMISSION_LABELS);
 
   return (
     <Screen>
-      <Card className="w-full max-w-sm shadow-lg">
-        <CardHeader className="text-center pb-2">
-          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
-            <UserPlus size={22} className="text-primary" />
+      <div className="mb-6 text-center">
+        <div className="inline-flex items-center gap-2 mb-4">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
           </div>
-          <CardTitle className="text-xl font-bold">
-            You're Invited!
-          </CardTitle>
-          <p className="text-sm text-muted-foreground mt-1">
-            Role: <span className="font-semibold text-foreground capitalize">{invite?.role ?? 'Viewer'}</span>
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4 pt-2">
-          {visiblePerms.length > 0 && (
-            <div className="rounded-lg bg-muted/40 border border-border p-3 space-y-1.5">
-              <p className="text-xs font-semibold text-foreground">Pages you can access</p>
-              <div className="flex flex-wrap gap-1">
-                {visiblePerms.map(p => (
-                  <span key={p} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                    {PERMISSION_LABELS[p]}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+        </div>
+        <h1 className="text-3xl font-bold text-white tracking-tight">
+          Chat <span style={{ background: 'linear-gradient(90deg, #3b82f6, #8b5cf6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Monitor</span>
+        </h1>
+        <p className="mt-2 text-sm" style={{ color: 'rgba(148,163,184,0.8)' }}>You've been invited to join</p>
+      </div>
 
-          <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3">
-            <p className="text-xs text-blue-600 dark:text-blue-400">
-              Fill in your details and click "Accept Invitation". Your admin will then approve your access.
-            </p>
+      <GlassCard>
+        <div className="text-center mb-5">
+          <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"
+            style={{ background: 'rgba(99,102,241,0.15)' }}>
+            <UserPlus size={22} style={{ color: '#818cf8' }} />
           </div>
-
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="name">Your Name</Label>
-              <Input
-                id="name"
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="Full name"
-                required
-                autoComplete="name"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="email">Your Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="your@email.com"
-                required
-                autoComplete="email"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="password">Choose a Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="At least 6 characters"
-                required
-                autoComplete="new-password"
-                minLength={6}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="confirm-password">Confirm Password</Label>
-              <Input
-                id="confirm-password"
-                type="password"
-                value={confirmPassword}
-                onChange={e => setConfirmPassword(e.target.value)}
-                placeholder="Repeat your password"
-                required
-                autoComplete="new-password"
-              />
-            </div>
-            <Button type="submit" className="w-full mt-1 gap-2">
-              <ShieldCheck size={15} /> Accept Invitation
-            </Button>
-          </form>
-
-          <p className="text-center text-xs text-muted-foreground">
-            Already approved?{' '}
-            <Link to="/member-login" className="text-primary hover:underline">Sign in here</Link>
+          <h2 className="text-xl font-bold text-white">You're Invited!</h2>
+          <p className="text-sm mt-1" style={{ color: 'rgba(148,163,184,0.8)' }}>
+            Role: <span className="font-semibold text-white capitalize">{invite?.role ?? 'Viewer'}</span>
           </p>
-        </CardContent>
-      </Card>
+        </div>
+
+        {visiblePerms.length > 0 && (
+          <div className="rounded-xl px-3.5 py-3 mb-4" style={{
+            background: 'rgba(30,41,59,0.6)',
+            border: '1px solid rgba(99,102,241,0.15)',
+          }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'rgba(148,163,184,0.7)' }}>Pages you can access</p>
+            <div className="flex flex-wrap gap-1.5">
+              {visiblePerms.map(p => (
+                <span key={p} className="text-[10px] font-semibold px-2.5 py-0.5 rounded-full"
+                  style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.25)' }}>
+                  {PERMISSION_LABELS[p]}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-xl px-3.5 py-3 mb-5" style={{
+          background: 'rgba(59,130,246,0.08)',
+          border: '1px solid rgba(59,130,246,0.2)',
+        }}>
+          <p className="text-xs leading-relaxed" style={{ color: '#93c5fd' }}>
+            Fill in your details and click "Accept Invitation". Your admin will then approve your access.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3.5">
+          <DarkField label="Your Name">
+            <DarkInput
+              id="name"
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Full name"
+              required
+              autoComplete="name"
+            />
+          </DarkField>
+
+          <DarkField label="Your Email">
+            <DarkInput
+              id="email"
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="your@email.com"
+              required
+              autoComplete="email"
+            />
+          </DarkField>
+
+          <DarkField label="Choose a Password">
+            <DarkInput
+              id="password"
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="At least 6 characters"
+              required
+              autoComplete="new-password"
+              minLength={6}
+            />
+          </DarkField>
+
+          <DarkField label="Confirm Password">
+            <DarkInput
+              id="confirm-password"
+              type="password"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              placeholder="Repeat your password"
+              required
+              autoComplete="new-password"
+            />
+          </DarkField>
+
+          <GradientButton type="submit" className="w-full mt-1">
+            <ShieldCheck size={15} /> Accept Invitation
+          </GradientButton>
+        </form>
+
+        <p className="text-center text-xs mt-4" style={{ color: 'rgba(100,116,139,0.8)' }}>
+          Already approved?{' '}
+          <Link to="/member-login" style={{ color: '#818cf8' }} className="hover:underline">Sign in here</Link>
+        </p>
+      </GlassCard>
+
+      <p className="mt-4 text-center text-xs" style={{ color: 'rgba(100,116,139,0.7)' }}>
+        Powered by Chat Monitor
+      </p>
     </Screen>
   );
 };
 
-const Screen = ({ children }: { children: React.ReactNode }) => (
-  <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4 gap-4">
+// ── Shared styled sub-components ─────────────────────────────────────────────
+
+const Screen = ({ children }: { children: React.ReactNode }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animId: number;
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const particles: { x: number; y: number; vx: number; vy: number; size: number; alpha: number; color: string }[] = [];
+    const colors = ['#3b82f6', '#8b5cf6', '#06b6d4', '#6366f1'];
+    for (let i = 0; i < 55; i++) {
+      particles.push({
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: (Math.random() - 0.5) * 0.4,
+        size: Math.random() * 2 + 0.5,
+        alpha: Math.random() * 0.5 + 0.1,
+        color: colors[Math.floor(Math.random() * colors.length)],
+      });
+    }
+
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0) p.x = canvas.width;
+        if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height;
+        if (p.y > canvas.height) p.y = 0;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color + Math.floor(p.alpha * 255).toString(16).padStart(2, '0');
+        ctx.fill();
+      });
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 120) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = `rgba(99,102,241,${0.12 * (1 - dist / 120)})`;
+            ctx.lineWidth = 0.6;
+            ctx.stroke();
+          }
+        }
+      }
+      animId = requestAnimationFrame(draw);
+    };
+    draw();
+
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener('resize', resize);
+    };
+  }, []);
+
+  return (
+    <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden p-4"
+      style={{ background: 'linear-gradient(135deg, #0a0e1a 0%, #0f172a 40%, #0d1b2e 70%, #090d1a 100%)' }}>
+      <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: 'radial-gradient(ellipse 60% 50% at 20% 30%, rgba(99,102,241,0.12) 0%, transparent 70%), radial-gradient(ellipse 50% 40% at 80% 70%, rgba(6,182,212,0.10) 0%, transparent 65%)',
+      }} />
+      <div className="relative z-10 w-full max-w-md">
+        {children}
+      </div>
+    </div>
+  );
+};
+
+const GlassCard = ({ children }: { children: React.ReactNode }) => (
+  <div className="rounded-2xl p-7" style={{
+    background: 'rgba(15,23,42,0.75)',
+    backdropFilter: 'blur(24px)',
+    border: '1px solid rgba(99,102,241,0.18)',
+    boxShadow: '0 0 0 1px rgba(255,255,255,0.04), 0 24px 64px rgba(0,0,0,0.5), 0 0 40px rgba(99,102,241,0.06)',
+  }}>
     {children}
   </div>
 );
+
+const DarkField = ({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) => (
+  <div className={`space-y-1.5 ${className ?? ''}`}>
+    <label className="text-sm font-medium" style={{ color: 'rgba(203,213,225,0.9)' }}>{label}</label>
+    {children}
+  </div>
+);
+
+const DarkInput = ({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => (
+  <input
+    {...props}
+    className={`w-full h-11 rounded-xl px-3.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-colors ${className ?? ''}`}
+    style={{
+      background: 'rgba(30,41,59,0.8)',
+      border: '1px solid rgba(99,102,241,0.2)',
+      ...((props as React.CSSProperties & typeof props).style ?? {}),
+    }}
+  />
+);
+
+const GradientButton = ({
+  children, className, disabled, onClick, type = 'button',
+}: {
+  children: React.ReactNode;
+  className?: string;
+  disabled?: boolean;
+  onClick?: () => void;
+  type?: 'button' | 'submit';
+}) => (
+  <button
+    type={type}
+    disabled={disabled}
+    onClick={onClick}
+    className={`flex items-center justify-center gap-2 h-11 rounded-xl font-semibold text-white text-sm transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed ${className ?? ''}`}
+    style={{
+      background: disabled
+        ? 'rgba(99,102,241,0.5)'
+        : 'linear-gradient(135deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%)',
+      boxShadow: disabled ? 'none' : '0 4px 20px rgba(99,102,241,0.35)',
+    }}
+  >
+    {children}
+  </button>
+);
+
+const DarkButton = ({
+  children, onClick, asLink, to,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  asLink?: boolean;
+  to?: string;
+}) => {
+  const cls = 'flex items-center justify-center w-full h-11 rounded-xl font-semibold text-sm transition-all duration-200';
+  const style = {
+    background: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%)',
+    boxShadow: '0 4px 20px rgba(99,102,241,0.35)',
+    color: 'white',
+  };
+  if (asLink && to) {
+    return <Link to={to} className={cls} style={style}>{children}</Link>;
+  }
+  return <button type="button" onClick={onClick} className={cls} style={style}>{children}</button>;
+};
 
 export default InviteAccept;
