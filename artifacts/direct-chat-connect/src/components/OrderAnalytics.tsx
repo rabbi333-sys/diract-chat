@@ -126,52 +126,19 @@ async function generateAnalyticsPDF(
     };
 
     // ════════════════════════════════════════════════════════
-    // PAGE 1
+    // PAGE 1 — minimal header
     // ════════════════════════════════════════════════════════
+    fill(C.blue); pdf.rect(0, 0, W, 1.5, 'F');
 
-    // Full-width dark header band
-    fill(C.navy); pdf.rect(0, 0, W, 46, 'F');
-    // Blue left accent stripe
-    fill(C.blue); pdf.rect(0, 0, 5, 46, 'F');
-    // Subtle diagonal highlight
-    pdf.setGState(new (pdf as any).GState({ opacity: 0.06 }));
-    fill(C.white); pdf.triangle(W - 60, 0, W, 0, W, 46, 'F');
-    pdf.setGState(new (pdf as any).GState({ opacity: 1 }));
-
-    // Logo badge
-    fill(C.blue); pdf.roundedRect(M + 2, 9, 26, 12, 2, 2, 'F');
-    color(C.white); bold(8); pdf.text('CHAT', M + 15, 14.5, { align: 'center' });
-    norm(6.5); pdf.text('MONITOR', M + 15, 19, { align: 'center' });
-
-    // Report title
-    color(C.white); bold(22); pdf.text('Analytics Report', M + 33, 18);
-    // Subtitle line
-    color([180, 200, 240] as RGB); norm(8.5);
+    let y = 14;
+    color(C.navy); bold(18); pdf.text('Analytics Report', M, y);
+    y += 6;
     const period = viewMode.charAt(0).toUpperCase() + viewMode.slice(1);
-    pdf.text(`${period} Period  |  ${summary.total} orders  |  ${tk(summary.revenue)} revenue  |  ${format(new Date(), 'dd MMM yyyy')}`, M + 33, 27);
-
-    // KPI pill badges in header
-    const pills = [
-      { label: 'Revenue',  val: tk(summary.revenue), c: C.blue  as RGB },
-      { label: 'Orders',   val: `${summary.total}`,  c: [30,90,170] as RGB },
-      { label: 'Pending',  val: `${summary.statuses.pending?.count ?? 0}`,   c: [100,60,0] as RGB },
-      { label: 'Delivered',val: `${summary.statuses.delivered?.count ?? 0}`, c: [0,100,60] as RGB },
-    ];
-    let px = M + 33;
-    pills.forEach(p => {
-      const lw = pdf.getTextWidth(p.label);
-      const vw = pdf.getTextWidth(p.val);
-      const pw = Math.max(lw, vw) + 6;
-      fill([255,255,255,0.12] as unknown as RGB);
-      pdf.setGState(new (pdf as any).GState({ opacity: 0.18 }));
-      fill(C.white); pdf.roundedRect(px, 31, pw, 10, 1.5, 1.5, 'F');
-      pdf.setGState(new (pdf as any).GState({ opacity: 1 }));
-      color(C.blueLt); norm(6); pdf.text(p.label, px + pw / 2, 35.5, { align: 'center' });
-      color(C.white); bold(7); pdf.text(p.val, px + pw / 2, 40, { align: 'center' });
-      px += pw + 3;
-    });
-
-    let y = 56;
+    color(C.muted); norm(8.5);
+    pdf.text(`${period} Period  |  ${summary.total} orders  |  ${tk(summary.revenue)} revenue  |  ${format(new Date(), 'dd MMM yyyy')}`, M, y);
+    y += 4;
+    stroke(C.border); pdf.setLineWidth(0.3); pdf.line(M, y, W - M, y);
+    y += 9;
 
     // ── KPI Cards Screenshot ───────────────────────────────────
     if (refs.kpi) {
@@ -262,34 +229,6 @@ async function generateAnalyticsPDF(
       const canvas = await h2c(refs.revChart);
       const h = addImg(canvas, y, 78);
       y += h + 14;
-    }
-
-    // ── Status Breakdown Chart ─────────────────────────────────
-    if (refs.statusChart) {
-      if (y > 195) { pdf.addPage(); y = 20; }
-      y = sectionHead('Status Breakdown Chart', y);
-      const canvas = await h2c(refs.statusChart);
-      const h = addImg(canvas, y, 85);
-      y += h + 8;
-    }
-
-    // ── Summary totals bar ─────────────────────────────────────
-    if (y < PH - 50) {
-      y += 4;
-      fill(C.navy); pdf.roundedRect(M, y, CW, 16, 2, 2, 'F');
-      color(C.white); bold(8);
-      const tots = [
-        { l: 'TOTAL REVENUE', v: tk(summary.revenue) },
-        { l: 'TOTAL ORDERS',  v: summary.total.toString() },
-        { l: 'DELIVERED',     v: (summary.statuses.delivered?.count ?? 0).toString() },
-        { l: 'CANCELLED',     v: (summary.statuses.cancelled?.count ?? 0).toString() },
-      ];
-      const tw = CW / tots.length;
-      tots.forEach((t, i) => {
-        const tx = M + i * tw + tw / 2;
-        color(C.blueLt); norm(6.5); pdf.text(t.l, tx, y + 6, { align: 'center' });
-        color(C.white); bold(9.5); pdf.text(t.v, tx, y + 13, { align: 'center' });
-      });
     }
 
     // ── Footers ────────────────────────────────────────────────
