@@ -163,12 +163,13 @@ export const SessionList = () => {
   }, [sessions, frozenIds]);
 
   // Determine which platforms have sessions (for showing filter chips)
-  const platformsWithSessions = useMemo(() => {
-    if (!sorted || sorted.length === 0) return [] as Platform[];
-    const seen = new Set<Platform>();
+  type KnownPlatform = 'whatsapp' | 'facebook' | 'instagram';
+  const platformsWithSessions = useMemo<KnownPlatform[]>(() => {
+    if (!sorted || sorted.length === 0) return [];
+    const seen = new Set<KnownPlatform>();
     for (const s of sorted) {
       const p = detectPlatform(s.recipient, platformConns, { sessionId: s.session_id, dbPlatform: s.platform });
-      if (p !== 'unknown') seen.add(p);
+      if (p === 'whatsapp' || p === 'facebook' || p === 'instagram') seen.add(p);
     }
     return (['whatsapp', 'facebook', 'instagram'] as const).filter(p => seen.has(p));
   }, [sorted, platformConns]);
@@ -310,7 +311,7 @@ export const SessionList = () => {
       </div>
 
       {/* ── Platform filter chips ───────────────────────────────────────────── */}
-      {platformsWithSessions.length > 1 && (
+      {platformsWithSessions.length >= 1 && (
         <div className="px-3 md:px-4 pb-2 flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
           <button
             onClick={() => setPlatformFilter('all')}

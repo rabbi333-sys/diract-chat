@@ -38,7 +38,7 @@ export function detectPlatform(
 ): Platform {
   if (!recipient) return 'unknown';
 
-  // 1. DB-level platform field is the most authoritative source
+  // 1. DB-level platform field — highest authority (set by the workflow that received the message)
   if (opts?.dbPlatform) {
     const dbp = opts.dbPlatform.toLowerCase();
     if (dbp === 'whatsapp' || dbp.includes('whatsapp') || dbp.startsWith('wa')) {
@@ -55,7 +55,7 @@ export function detectPlatform(
     }
   }
 
-  // 2. Check localStorage cache (from previous successful sends)
+  // 2. localStorage cache from a previous successful send (already confirmed correct platform)
   const cached = getStoredPlatform(recipient);
   if (cached) return cached;
 
@@ -63,49 +63,55 @@ export function detectPlatform(
   const activeFb = conns.find(c => c.platform === 'facebook' && c.is_active);
   const activeIg = conns.find(c => c.platform === 'instagram' && c.is_active);
 
-  // 3. Session-ID prefix heuristics — common naming conventions used by n8n workflows
-  const sid = (opts?.sessionId ?? '').toLowerCase();
-  if (sid) {
-    if (sid.startsWith('wa_') || sid.startsWith('whatsapp_') || sid.includes('_wa_') || sid.includes('_whatsapp_')) {
-      const p: Platform = activeWa ? 'whatsapp' : 'unknown';
-      if (p !== 'unknown') { storePlatform(recipient, p); return p; }
-    }
-    if ((sid.startsWith('ig_') || sid.startsWith('instagram_') || sid.includes('_ig_') || sid.includes('_instagram_')) && activeIg) {
-      storePlatform(recipient, 'instagram');
-      return 'instagram';
-    }
-    if ((sid.startsWith('fb_') || sid.startsWith('facebook_') || sid.startsWith('messenger_') || sid.includes('_fb_') || sid.includes('_facebook_')) && activeFb) {
-      storePlatform(recipient, 'facebook');
-      return 'facebook';
+  // 3. page_id matching — check if the session_id or recipient contains a configured page_id.
+  // n8n workflows commonly embed the page_id in the session_id (e.g. "1234567890_psid" or "fb_1234567890").
+  const sid = opts?.sessionId ?? '';
+  const allMetaConns = conns.filter(c => (c.platform === 'facebook' || c.platform === 'instagram') && c.is_active);
+  for (const conn of allMetaConns) {
+    if (conn.page_id && conn.page_id.trim()) {
+      const pid = conn.page_id.trim();
+      if (sid.includes(pid) || recipient.includes(pid)) {
+        const p: Platform = conn.platform;
+        storePlatform(recipient, p);
+        return p;
+      }
     }
   }
 
-  // 4. Phone-number heuristic: E.164 or long numeric string → WhatsApp
-  const stripped = recipient.replace(/[\s\-().]/g, '');
-  const isPhoneNumber = /^\+?\d{10,15}$/.test(stripped);
+  // 4. Session-ID prefix heuristics — n8n workflow naming conventions
+  const sidLower = sid.toLowerCase();
+  if (sidLower) {
+    if (sidLower.startsWith('wa_') || sidLower.startsWith('whatsapp_') || sidLower.includes('_wa_')) {
+      if (activeWa) { storePlatform(recipient, 'whatsapp'); return 'whatsapp'; }
+    }
+    if (sidLower.startsWith('ig_') || sidLower.startsWith('instagram_') || sidLower.includes('_ig_')) {
+      if (activeIg) { storePlatform(recipient, 'instagram'); return 'instagram'; }
+    }
+    if (sidLower.startsWith('fb_') || sidLower.startsWith('facebook_') || sidLower.startsWith('messenger_') || sidLower.includes('_fb_')) {
+      if (activeFb) { storePlatform(recipient, 'facebook'); return 'facebook'; }
+    }
+  }
+
+  // 5. Phone-number heuristic: E.164 or 10-15 digit numeric string → WhatsApp
+  const stripped = recipient.replace(/[\s\-().+]/g, '');
+  const isPhoneNumber = /^\+?\d{10,15}$/.test(recipient.replace(/[\s\-()]/g, ''));
 
   let result: Platform;
 
   if (isPhoneNumber && activeWa) {
     result = 'whatsapp';
-  } else if (isPhoneNumber && !activeWa) {
-    // Phone number but no WA connection — could still be WA but undetectable
+  } else if (isPhoneNumber) {
     result = 'unknown';
   } else if (!isPhoneNumber && activeFb && activeIg) {
-    // Both Meta platforms active — use digit count as tiebreaker:
-    // Instagram PSIDs tend to be ≥ 17 digits; Facebook PSIDs tend to be < 17 digits
-    const digits = stripped.replace(/\D/g, '');
-    result = digits.length >= 17 ? 'instagram' : 'facebook';
-  } else if (!isPhoneNumber && activeFb) {
-    result = 'facebook';
-  } else if (!isPhoneNumber && activeIg) {
-    result = 'instagram';
-  } else if (activeWa) {
-    result = 'whatsapp';
+    // Both Meta platforms active — use PSID digit-length as tiebreaker.
+    // IG PSIDs assigned after ~2021 tend to be ≥ 17 digits; FB Messenger PSIDs tend to be ≤ 16 digits.
+    result = stripped.length >= 17 ? 'instagram' : 'facebook';
   } else if (activeFb) {
     result = 'facebook';
   } else if (activeIg) {
     result = 'instagram';
+  } else if (activeWa) {
+    result = 'whatsapp';
   } else {
     result = 'unknown';
   }
