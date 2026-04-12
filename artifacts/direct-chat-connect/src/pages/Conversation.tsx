@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fetchNameFromMeta, fetchMessages, ChatMessage as ChatMessageType } from '@/hooks/useChatHistory';
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage } from '@/components/ChatMessage';
-import { PlatformBadge } from '@/components/SessionList';
+import { PlatformAvatar } from '@/components/SessionList';
 import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp } from 'lucide-react';
 import { detectPlatform, storePlatform, PLATFORM_CONFIG, Platform } from '@/lib/platformDetect';
 import { useAiControl } from '@/hooks/useAiControl';
@@ -699,10 +699,13 @@ const Conversation = () => {
 
           {/* Avatar */}
           <div className="relative flex-shrink-0">
-            <div className={cn('w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shadow bg-gradient-to-br', grad)}>
-              {initials}
-            </div>
-            <PlatformBadge platform={sessionPlatform} size="sm" />
+            {sessionPlatform !== 'unknown' ? (
+              <PlatformAvatar platform={sessionPlatform} sizePx={40} />
+            ) : (
+              <div className={cn('w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shadow bg-gradient-to-br', grad)}>
+                {initials}
+              </div>
+            )}
             <span className={cn('absolute -bottom-0.5 -left-0.5 w-3 h-3 rounded-full border-2 border-background', isSessionActive ? 'bg-emerald-500' : 'bg-zinc-400')} />
           </div>
 
