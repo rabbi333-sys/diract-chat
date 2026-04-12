@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSessions, useRecipientNames, useUpdateRecipientName, useAutoResolveNames, fetchMessages, useDbConnectionKey, SessionInfo } from '@/hooks/useChatHistory';
 import { usePlatformConnections } from '@/hooks/usePlatformConnections';
+import { detectPlatform, Platform, PLATFORM_CONFIG } from '@/lib/platformDetect';
 import { Search, RefreshCw, Pencil, Check, X, MessageCircle, MessagesSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -44,6 +45,38 @@ function sortSessions(sessions: SessionInfo[]): SessionInfo[] {
   });
 }
 
+// ─── Platform badge icon (inline SVG) ─────────────────────────────────────────
+const PlatformBadge = ({ platform }: { platform: Platform }) => {
+  if (platform === 'unknown') return null;
+  const cfg = PLATFORM_CONFIG[platform];
+  return (
+    <span
+      className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center shadow-sm border border-background"
+      style={{ background: cfg.color }}
+      title={cfg.label}
+    >
+      {platform === 'whatsapp' && (
+        <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5">
+          <path d="M14.5 10.75c-.2-.1-.95-.47-1.1-.52-.15-.06-.26-.09-.37.08-.11.17-.42.52-.51.63-.1.11-.19.12-.35.04-.94-.47-1.56-.84-2.18-1.9-.17-.29.17-.27.48-.9.05-.1.03-.2-.01-.27-.04-.08-.37-.9-.51-1.23-.13-.33-.27-.28-.37-.29-.1 0-.21-.02-.32-.02s-.29.04-.44.22c-.15.17-.58.57-.58 1.38s.59 1.6.68 1.71c.08.11 1.16 1.77 2.82 2.48.39.17.7.27.94.35.4.12.76.1 1.04.06.32-.05.98-.4 1.12-.79.14-.39.14-.73.1-.8-.04-.07-.15-.11-.32-.19z" fill="white"/>
+          <path d="M10 2C5.6 2 2 5.6 2 10c0 1.4.4 2.8 1 4l-1.1 3.9L5.9 17c1.2.6 2.5 1 4.1 1 4.4 0 8-3.6 8-8s-3.6-8-8-8zm0 14.5c-1.3 0-2.6-.4-3.6-1l-.3-.2-2.2.6.6-2.2-.2-.3C3.4 12.4 3 11.2 3 10c0-3.9 3.1-7 7-7s7 3.1 7 7-3.1 7-7 7z" fill="white"/>
+        </svg>
+      )}
+      {platform === 'facebook' && (
+        <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5">
+          <path d="M12 6.5h-1.5C10 6.5 10 7 10 7.5V9h2l-.3 2H10v5H8v-5H6V9h2V7.5C8 5.6 9.3 5 11 5h1v1.5z" fill="white"/>
+        </svg>
+      )}
+      {platform === 'instagram' && (
+        <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5">
+          <rect x="3.5" y="3.5" width="13" height="13" rx="3.5" stroke="white" strokeWidth="1.5" fill="none"/>
+          <circle cx="10" cy="10" r="3" stroke="white" strokeWidth="1.5" fill="none"/>
+          <circle cx="14" cy="6" r="1" fill="white"/>
+        </svg>
+      )}
+    </span>
+  );
+};
+
 // ─── SessionList ───────────────────────────────────────────────────────────────
 
 export const SessionList = () => {
@@ -54,6 +87,7 @@ export const SessionList = () => {
   const { data: platformConns = [] } = usePlatformConnections();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'active'>('all');
+  const [platformFilter, setPlatformFilter] = useState<'all' | Platform>('all');
 
   // ── Frozen order: sort only on first load or manual refresh ──────────────
   // Prevents conversations from jumping around during background auto-polls.
@@ -128,12 +162,28 @@ export const SessionList = () => {
     return [...newSessions, ...ordered];
   }, [sessions, frozenIds]);
 
+  // Determine which platforms have sessions (for showing filter chips)
+  const platformsWithSessions = useMemo(() => {
+    if (!sorted || sorted.length === 0) return [] as Platform[];
+    const seen = new Set<Platform>();
+    for (const s of sorted) {
+      const p = detectPlatform(s.recipient, platformConns);
+      if (p !== 'unknown') seen.add(p);
+    }
+    return (['whatsapp', 'facebook', 'instagram'] as const).filter(p => seen.has(p));
+  }, [sorted, platformConns]);
+
   const filtered = sorted.filter((s) => {
     const name = (recipientNames?.[s.recipient] || '').toLowerCase();
     const q = searchQuery.toLowerCase();
     const matchesSearch = name.includes(q) || s.recipient.includes(q);
     // Active tab: only sessions with last message within 5 minutes
     if (activeTab === 'active') return matchesSearch && isWithin5Min(s.last_message_at);
+    // Platform filter
+    if (platformFilter !== 'all') {
+      const p = detectPlatform(s.recipient, platformConns);
+      if (p !== platformFilter) return false;
+    }
     return matchesSearch;
   });
 
@@ -209,7 +259,7 @@ export const SessionList = () => {
       </div>
 
       {/* ── Tabs + Refresh ─────────────────────────────────────────────────── */}
-      <div className="px-3 md:px-4 pb-3 flex items-center gap-2">
+      <div className="px-3 md:px-4 pb-2 flex items-center gap-2">
         <div className="flex bg-muted/40 rounded-2xl p-1 flex-1 gap-1">
           {(['all', 'active'] as const).map((tab) => (
             <button
@@ -248,6 +298,65 @@ export const SessionList = () => {
         </Button>
       </div>
 
+      {/* ── Platform filter chips ───────────────────────────────────────────── */}
+      {platformsWithSessions.length > 1 && (
+        <div className="px-3 md:px-4 pb-2 flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+          <button
+            onClick={() => setPlatformFilter('all')}
+            className={cn(
+              'flex-shrink-0 text-[11px] font-semibold px-3 py-1 rounded-full border transition-all duration-150',
+              platformFilter === 'all'
+                ? 'bg-foreground text-background border-foreground'
+                : 'bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground'
+            )}
+          >
+            All
+          </button>
+          {platformsWithSessions.map((p) => {
+            const cfg = PLATFORM_CONFIG[p];
+            const isActive = platformFilter === p;
+            return (
+              <button
+                key={p}
+                onClick={() => setPlatformFilter(isActive ? 'all' : p)}
+                className={cn(
+                  'flex-shrink-0 flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all duration-150',
+                  isActive
+                    ? 'text-white border-transparent'
+                    : 'bg-transparent text-muted-foreground border-border hover:text-foreground hover:border-foreground/40'
+                )}
+                style={isActive ? { background: cfg.color, borderColor: cfg.color } : {}}
+              >
+                <span
+                  className="w-3 h-3 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: cfg.color }}
+                >
+                  {p === 'whatsapp' && (
+                    <svg viewBox="0 0 20 20" fill="none" className="w-2 h-2">
+                      <path d="M14.5 10.75c-.2-.1-.95-.47-1.1-.52-.15-.06-.26-.09-.37.08-.11.17-.42.52-.51.63-.1.11-.19.12-.35.04-.94-.47-1.56-.84-2.18-1.9-.17-.29.17-.27.48-.9.05-.1.03-.2-.01-.27-.04-.08-.37-.9-.51-1.23-.13-.33-.27-.28-.37-.29-.1 0-.21-.02-.32-.02s-.29.04-.44.22c-.15.17-.58.57-.58 1.38s.59 1.6.68 1.71c.08.11 1.16 1.77 2.82 2.48.39.17.7.27.94.35.4.12.76.1 1.04.06.32-.05.98-.4 1.12-.79.14-.39.14-.73.1-.8-.04-.07-.15-.11-.32-.19z" fill="white"/>
+                      <path d="M10 2C5.6 2 2 5.6 2 10c0 1.4.4 2.8 1 4l-1.1 3.9L5.9 17c1.2.6 2.5 1 4.1 1 4.4 0 8-3.6 8-8s-3.6-8-8-8zm0 14.5c-1.3 0-2.6-.4-3.6-1l-.3-.2-2.2.6.6-2.2-.2-.3C3.4 12.4 3 11.2 3 10c0-3.9 3.1-7 7-7s7 3.1 7 7-3.1 7-7 7z" fill="white"/>
+                    </svg>
+                  )}
+                  {p === 'facebook' && (
+                    <svg viewBox="0 0 20 20" fill="none" className="w-2 h-2">
+                      <path d="M12 6.5h-1.5C10 6.5 10 7 10 7.5V9h2l-.3 2H10v5H8v-5H6V9h2V7.5C8 5.6 9.3 5 11 5h1v1.5z" fill="white"/>
+                    </svg>
+                  )}
+                  {p === 'instagram' && (
+                    <svg viewBox="0 0 20 20" fill="none" className="w-2 h-2">
+                      <rect x="3.5" y="3.5" width="13" height="13" rx="3.5" stroke="white" strokeWidth="2" fill="none"/>
+                      <circle cx="10" cy="10" r="3" stroke="white" strokeWidth="2" fill="none"/>
+                      <circle cx="14" cy="6" r="1" fill="white"/>
+                    </svg>
+                  )}
+                </span>
+                {cfg.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* ── Count Label ────────────────────────────────────────────────────── */}
       {filtered && filtered.length > 0 && (
         <div className="px-4 pb-2">
@@ -265,6 +374,7 @@ export const SessionList = () => {
               key={session.session_id}
               session={session}
               recipientName={recipientNames?.[session.recipient]}
+              platform={detectPlatform(session.recipient, platformConns)}
               onSelect={() => navigate(`/conversation/${session.session_id}?recipient=${session.recipient}`)}
               onPrefetch={() => prefetchSession(session.session_id)}
             />
@@ -299,9 +409,10 @@ interface SessionCardProps {
   onSelect: () => void;
   onPrefetch: () => void;
   recipientName?: string;
+  platform: Platform;
 }
 
-const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCardProps) => {
+const SessionCard = ({ session, onSelect, onPrefetch, recipientName, platform }: SessionCardProps) => {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const updateName = useUpdateRecipientName();
@@ -341,11 +452,13 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName }: SessionCa
         >
           {initials}
         </div>
+        {/* Platform badge — top-right of avatar */}
+        <PlatformBadge platform={platform} />
         {/* Active/offline indicator dot — green if last message < 5 min ago */}
         {isWithin5Min(session.last_message_at) ? (
-          <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background bg-emerald-500 animate-pulse" />
+          <span className="absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 rounded-full border-2 border-background bg-emerald-500 animate-pulse" />
         ) : (
-          <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background bg-muted-foreground/30" />
+          <span className="absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 rounded-full border-2 border-background bg-muted-foreground/30" />
         )}
       </div>
 

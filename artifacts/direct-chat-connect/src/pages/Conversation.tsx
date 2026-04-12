@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -6,6 +6,7 @@ import { useChatHistory, useSessions, useRecipientNames, useAutoResolveNames, fe
 import { getStoredConnection, insertMessageToExternalDb } from '@/lib/externalDb';
 import { ChatMessage } from '@/components/ChatMessage';
 import { ArrowLeft, Send, Loader2, Smile, X, Mic, Square, Info, ImageIcon, BotOff, Bot, RefreshCw, Plus, ChevronUp } from 'lucide-react';
+import { detectPlatform, storePlatform, PLATFORM_CONFIG, Platform } from '@/lib/platformDetect';
 import { useAiControl } from '@/hooks/useAiControl';
 import { useTeamRole } from '@/hooks/useTeamRole';
 import { Button } from '@/components/ui/button';
@@ -206,8 +207,25 @@ const Conversation = () => {
   const waConn = platformConns.find(c => c.platform === 'whatsapp' && c.is_active);
   const fbConn = platformConns.find(c => c.platform === 'facebook' && c.is_active);
   const igConn = platformConns.find(c => c.platform === 'instagram' && c.is_active);
-  const activeConn = waConn || fbConn || igConn;
+
+  // Detect which platform this session belongs to
+  const sessionPlatform: Platform = useMemo(
+    () => detectPlatform(recipient, platformConns),
+    [recipient, platformConns]
+  );
+
+  // Pick the connection that matches the detected platform
+  const activeConn = (() => {
+    switch (sessionPlatform) {
+      case 'whatsapp': return waConn || fbConn || igConn;
+      case 'facebook': return fbConn || igConn || waConn;
+      case 'instagram': return igConn || fbConn || waConn;
+      default: return waConn || fbConn || igConn;
+    }
+  })();
+
   const canReply = !!activeConn && !!recipient;
+  const supportsVoice = sessionPlatform === 'whatsapp' || (sessionPlatform === 'unknown' && !!waConn);
 
   const { aiEnabled, toggle: toggleAi, isPending: aiTogglePending } = useAiControl(sessionId);
 
@@ -385,9 +403,13 @@ const Conversation = () => {
           recipient,
         });
         try {
-          if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
+          if (sessionPlatform === 'instagram' && igConn) await fbPost(igConn, recipient, { text });
+          else if (sessionPlatform === 'facebook' && fbConn) await fbPost(fbConn, recipient, { text });
+          else if (sessionPlatform === 'whatsapp' && waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
+          else if (waConn) await waPost(waConn, recipient, { type: 'text', text: { body: text } });
           else if (fbConn) await fbPost(fbConn, recipient, { text });
           else if (igConn) await fbPost(igConn, recipient, { text });
+          storePlatform(recipient, sessionPlatform);
           markSent(id);
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
           queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -433,14 +455,22 @@ const Conversation = () => {
         timestamp: new Date().toISOString(),
         recipient,
       });
-      if (waConn) {
+      const useWa = (sessionPlatform === 'whatsapp' && waConn) ||
+                    (sessionPlatform === 'unknown' && waConn);
+      const fbOrIg = sessionPlatform === 'instagram' ? (igConn || fbConn) : (fbConn || igConn);
+      if (useWa && waConn) {
         const mediaId = await waUploadFile(waConn, file, file.name, file.type);
         const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
         await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
-      } else if (fbConn) {
-        const attachId = await fbUploadFile(fbConn, file, mediaType);
-        await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+      } else if (fbOrIg) {
+        const attachId = await fbUploadFile(fbOrIg, file, mediaType);
+        await fbPost(fbOrIg, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+      } else if (waConn) {
+        const mediaId = await waUploadFile(waConn, file, file.name, file.type);
+        const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
+        await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
       }
+      storePlatform(recipient, sessionPlatform);
       markSent(id);
       // Remove local blob BEFORE refetching so the optimistic and the DB
       // version never appear at the same time (fixes double-video bug).
@@ -456,7 +486,7 @@ const Conversation = () => {
     } finally {
       setUploadingId(null);
     }
-  }, [activeConn, waConn, fbConn, recipient, replyingTo, sessionId]);
+  }, [activeConn, waConn, fbConn, igConn, recipient, replyingTo, sessionId, sessionPlatform]);
 
   // ── Voice recording ─────────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
@@ -514,19 +544,20 @@ const Conversation = () => {
           timestamp: new Date().toISOString(),
           recipient,
         });
-        if (waConn) {
+        if (waConn && (sessionPlatform === 'whatsapp' || sessionPlatform === 'unknown' || (!fbConn && !igConn))) {
           const ext = mimeType.includes('ogg') ? 'voice.ogg' : 'voice.webm';
           const uploadMime = mimeType.includes('ogg') ? 'audio/ogg' : 'audio/webm';
           const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
           await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
+          storePlatform(recipient, 'whatsapp');
           markSent(id);
           await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
           queryClient.invalidateQueries({ queryKey: ['sessions'] });
           // Remove local blob; DB data URL now shows in its place
           revertOptimistic(id);
           URL.revokeObjectURL(localUrl);
-        } else if (fbConn) {
-          toast.error('Facebook does not support voice send. Use WhatsApp instead.');
+        } else {
+          toast.error('Voice notes are only supported on WhatsApp');
           revertOptimistic(id);
           URL.revokeObjectURL(localUrl);
         }
@@ -538,7 +569,7 @@ const Conversation = () => {
         setUploadingId(null);
       }
     })();
-  }, [recording, activeConn, waConn, fbConn, recipient, replyingTo, sessionId]);
+  }, [recording, activeConn, waConn, fbConn, igConn, recipient, replyingTo, sessionId, sessionPlatform]);
 
   const cancelRecording = useCallback(() => {
     if (!mediaRecorderRef.current) return;
@@ -645,7 +676,7 @@ const Conversation = () => {
 
           {/* Name + status */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <h2 className="font-bold text-foreground text-[15px] truncate leading-tight">{displayName}</h2>
               {nameIsId && (
                 <button
@@ -657,6 +688,35 @@ const Conversation = () => {
                   <RefreshCw size={11} className={fetchingName ? 'animate-spin' : ''} />
                 </button>
               )}
+              {/* Platform chip */}
+              {sessionPlatform !== 'unknown' && (() => {
+                const cfg = PLATFORM_CONFIG[sessionPlatform];
+                return (
+                  <span
+                    className="flex-shrink-0 flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{ background: cfg.color + '22', color: cfg.color }}
+                  >
+                    {sessionPlatform === 'whatsapp' && (
+                      <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5" style={{ color: cfg.color }}>
+                        <path d="M10 2C5.6 2 2 5.6 2 10c0 1.4.4 2.8 1 4l-1.1 3.9L5.9 17c1.2.6 2.5 1 4.1 1 4.4 0 8-3.6 8-8s-3.6-8-8-8zm4.5 8.75c-.2-.1-.95-.47-1.1-.52-.15-.06-.26-.09-.37.08-.11.17-.42.52-.51.63-.1.11-.19.12-.35.04-.94-.47-1.56-.84-2.18-1.9-.17-.29.17-.27.48-.9.05-.1.03-.2-.01-.27-.04-.08-.37-.9-.51-1.23-.13-.33-.27-.28-.37-.29-.1 0-.21-.02-.32-.02s-.29.04-.44.22c-.15.17-.58.57-.58 1.38s.59 1.6.68 1.71c.08.11 1.16 1.77 2.82 2.48.39.17.7.27.94.35.4.12.76.1 1.04.06.32-.05.98-.4 1.12-.79.14-.39.14-.73.1-.8-.04-.07-.15-.11-.32-.19z" fill="currentColor"/>
+                      </svg>
+                    )}
+                    {sessionPlatform === 'facebook' && (
+                      <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5">
+                        <path d="M12 6.5h-1.5C10 6.5 10 7 10 7.5V9h2l-.3 2H10v5H8v-5H6V9h2V7.5C8 5.6 9.3 5 11 5h1v1.5z" fill="currentColor"/>
+                      </svg>
+                    )}
+                    {sessionPlatform === 'instagram' && (
+                      <svg viewBox="0 0 20 20" fill="none" className="w-2.5 h-2.5">
+                        <rect x="3.5" y="3.5" width="13" height="13" rx="3.5" stroke="currentColor" strokeWidth="2" fill="none"/>
+                        <circle cx="10" cy="10" r="3" stroke="currentColor" strokeWidth="2" fill="none"/>
+                        <circle cx="14" cy="6" r="1" fill="currentColor"/>
+                      </svg>
+                    )}
+                    {cfg.label}
+                  </span>
+                );
+              })()}
             </div>
             <p className={cn('text-[11px] font-medium leading-none mt-0.5', isSessionActive ? 'text-emerald-500' : 'text-muted-foreground/50')}>
               {fetchingName ? 'Fetching name…' : isSessionActive ? 'Active now' : 'Offline'}
@@ -857,12 +917,14 @@ const Conversation = () => {
 
               {/* Left icon group */}
               <div className="flex items-center gap-0.5 flex-shrink-0 pb-1">
-                <button
-                  onClick={startRecording}
-                  title="Voice message"
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-primary hover:bg-primary/10 transition-colors">
-                  <Mic size={20} />
-                </button>
+                {supportsVoice && (
+                  <button
+                    onClick={startRecording}
+                    title="Voice message (WhatsApp only)"
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-primary hover:bg-primary/10 transition-colors">
+                    <Mic size={20} />
+                  </button>
+                )}
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   title="Send image / file"
