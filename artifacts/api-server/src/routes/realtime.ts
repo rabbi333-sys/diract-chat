@@ -308,6 +308,12 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
       emoji      = rxn?.emoji;
     }
 
+    // WA typing: value.messages[0].type === 'typing' (WhatsApp typing notifications
+    // are not in the official API but some webhook relays forward them as custom events)
+    if (!event_type && waMessages[0]?.type === 'typing') {
+      event_type = 'typing';
+    }
+
     // FB/IG delivery/read/reaction: entry[0].messaging[0]
     const fbMessaging: Record<string, unknown>[] = Array.isArray(entry0?.messaging)
       ? (entry0!.messaging as Record<string, unknown>[])
@@ -346,6 +352,14 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
         event_type = 'reaction';
         message_id = rxn?.mid;
         emoji      = rxn?.emoji;
+      } else if (
+        // FB/IG typing: sender_action "typing_on" forwarded as a custom webhook event.
+        // Some n8n relays forward typing notifications as messaging events with a
+        // `sender_action` or `typing` field.
+        (fbMsg.sender_action as string | undefined) === 'typing_on' ||
+        (fbMsg as Record<string, unknown>).typing === true
+      ) {
+        event_type = 'typing';
       }
     }
   }
