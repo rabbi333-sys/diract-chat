@@ -279,7 +279,154 @@ async function fetchSessionMessages(c: SessionsCreds, sessionId: string, limit =
   return [];
 }
 
+// ─── Fetch session summaries efficiently (last message per session only) ─────
+
+async function fetchSessionSummaries(c: SessionsCreds): Promise<SessionInfo[]> {
+  const tbl = c.tableName || "sessions";
+
+  if (c.dbType === "postgresql" || c.dbType === "supabase") {
+    try {
+      // DISTINCT ON gets the last row per session in one pass
+      const lastRows = await pgQueryRaw(
+        c,
+        `SELECT DISTINCT ON (session_id) * FROM ${tbl} ORDER BY session_id, id DESC LIMIT 500`
+      );
+      const counts = await pgQueryRaw(
+        c,
+        `SELECT session_id, COUNT(*)::int AS cnt FROM ${tbl} GROUP BY session_id`
+      );
+      const countMap = new Map<string, number>();
+      for (const r of counts) countMap.set(String(r.session_id), Number(r.cnt) || 1);
+      return lastRows
+        .map((r) => normalizeRow(r))
+        .filter(Boolean)
+        .map((m) => ({
+          session_id: m!.session_id,
+          recipient: m!.recipient ?? m!.session_id,
+          last_message_at: m!.timestamp,
+          last_message_text: m!.message_text,
+          message_count: countMap.get(m!.session_id) ?? 1,
+        }))
+        .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at)) as SessionInfo[];
+    } catch {
+      // Fallback to existing method if DISTINCT ON fails (e.g. schema variation)
+      const msgs = await fetchAllMessages(c);
+      return buildSessions(msgs) as SessionInfo[];
+    }
+  }
+
+  if (c.dbType === "mysql") {
+    try {
+      const lastRows = await mysqlQueryRaw(
+        c,
+        `SELECT t.* FROM ${tbl} t
+         INNER JOIN (SELECT session_id, MAX(id) AS max_id FROM ${tbl} GROUP BY session_id) latest
+           ON t.session_id = latest.session_id AND t.id = latest.max_id
+         ORDER BY t.id DESC LIMIT 500`
+      );
+      const counts = await mysqlQueryRaw(
+        c,
+        `SELECT session_id, COUNT(*) AS cnt FROM ${tbl} GROUP BY session_id`
+      );
+      const countMap = new Map<string, number>();
+      for (const r of counts) countMap.set(String(r.session_id), Number(r.cnt) || 1);
+      return lastRows
+        .map((r) => normalizeRow(r))
+        .filter(Boolean)
+        .map((m) => ({
+          session_id: m!.session_id,
+          recipient: m!.recipient ?? m!.session_id,
+          last_message_at: m!.timestamp,
+          last_message_text: m!.message_text,
+          message_count: countMap.get(m!.session_id) ?? 1,
+        }))
+        .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at)) as SessionInfo[];
+    } catch {
+      const msgs = await fetchAllMessages(c);
+      return buildSessions(msgs) as SessionInfo[];
+    }
+  }
+
+  if (c.dbType === "mongodb") {
+    const client = await getMongoClient(c);
+    const db = client.db(c.dbName || "meta_automation");
+    const pipeline = [
+      { $sort: { _id: -1 as -1 } },
+      {
+        $group: {
+          _id: "$session_id",
+          lastDoc: { $first: "$$ROOT" },
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $replaceRoot: {
+          newRoot: { $mergeObjects: ["$lastDoc", { _count: "$count" }] },
+        },
+      },
+      { $sort: { _id: -1 as -1 } },
+      { $limit: 500 },
+    ];
+    const rows = await db.collection(tbl).aggregate(pipeline).toArray();
+    return rows
+      .map((r) => {
+        const norm = normalizeRow({ ...r, id: String(r._id ?? "") });
+        if (!norm) return null;
+        return {
+          session_id: norm.session_id,
+          recipient: norm.recipient ?? norm.session_id,
+          last_message_at: norm.timestamp,
+          last_message_text: norm.message_text,
+          message_count: Number((r as Record<string, unknown>)._count) || 1,
+        } as SessionInfo;
+      })
+      .filter(Boolean) as SessionInfo[];
+  }
+
+  if (c.dbType === "redis") {
+    const r = getRedisClient(c);
+    const sessionKeys = await r.smembers("sessions_index").catch(() => [] as string[]);
+    const keys = sessionKeys.length > 0 ? sessionKeys : (await r.keys("session:*").catch(() => [])).map((k) => k.replace(/^session:/, ""));
+    const results: SessionInfo[] = [];
+    for (const sid of keys.slice(0, 500)) {
+      const len = await r.llen(`session:${sid}`).catch(() => 0);
+      const last = await r.lindex(`session:${sid}`, -1).catch(() => null);
+      if (!last) continue;
+      try {
+        const parsed = JSON.parse(last);
+        const norm = normalizeRow({ ...parsed, session_id: parsed.session_id ?? sid });
+        if (norm) {
+          results.push({
+            session_id: norm.session_id,
+            recipient: norm.recipient ?? norm.session_id,
+            last_message_at: norm.timestamp,
+            last_message_text: norm.message_text,
+            message_count: len,
+          } as SessionInfo);
+        }
+      } catch { /* skip */ }
+    }
+    return results.sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
+  }
+
+  return [];
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
+
+// POST /api/sessions/summaries — last message per session only (fast, no 2000-row scan)
+router.post("/sessions/summaries", async (req: Request, res: Response) => {
+  const { creds } = req.body as { creds: SessionsCreds };
+  if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds.dbType" });
+
+  try {
+    const sessions = await fetchSessionSummaries(creds);
+    res.json({ sessions });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
 
 // POST /api/sessions/list — all sessions grouped
 router.post("/sessions/list", async (req: Request, res: Response) => {

@@ -686,15 +686,18 @@ export const useSessions = (filterDate?: Date | null) => {
     queryFn: async () => {
       const { legacy, main } = getActiveConn();
 
-      // Non-Supabase via API server
+      // Non-Supabase via API server — use summaries endpoint (fast: last msg per session only)
       if (main && shouldUseApiServer(main)) {
         try {
           const creds = buildSessionsCreds(main);
-          const body: Record<string, unknown> = { creds };
-          if (filterDate) body.filterDate = format(filterDate, 'yyyy-MM-dd');
-          const { sessions } = await apiPost<{ sessions: { session_id: string; recipient: string; last_message_at: string; message_count: number; last_message_text?: string }[] }>('/api/sessions/list', body);
+          const { sessions } = await apiPost<{ sessions: { session_id: string; recipient: string; last_message_at: string; message_count: number; last_message_text?: string }[] }>('/api/sessions/summaries', { creds });
+          let filtered = sessions;
+          if (filterDate) {
+            const dateStr = format(filterDate, 'yyyy-MM-dd');
+            filtered = sessions.filter((s) => (s.last_message_at || '').startsWith(dateStr));
+          }
           const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-          const withActive = sessions.map((s) => ({
+          const withActive = filtered.map((s) => ({
             ...s,
             is_active: s.last_message_at >= fiveMinutesAgo,
           })) as SessionInfo[];
