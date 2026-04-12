@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
-import type { Collection, Filter, Document } from "mongodb";
+import type { Collection } from "mongodb";
 import type { Redis } from "ioredis";
 import {
   getPgPool,
@@ -338,8 +338,7 @@ router.post("/member-auth/invites/update", async (req: Request, res: Response) =
       await mysqlQuery(creds, `UPDATE team_invites SET ${setClauses} WHERE id = ?`, [...values, id]);
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => {
-        const filter: Filter<Document> = { $or: [{ id }, { _id: id }] };
-        await col.updateOne(filter, { $set: Object.fromEntries(fields) });
+        await col.updateOne({ id }, { $set: Object.fromEntries(fields) });
       });
     } else if (creds.dbType === "redis") {
       await redisOp(creds, async (r) => {
@@ -379,8 +378,7 @@ router.post("/member-auth/invites/delete", async (req: Request, res: Response) =
       await mysqlQuery(creds, "DELETE FROM team_invites WHERE id = ?", [id]);
     } else if (creds.dbType === "mongodb") {
       await mongoOp(creds, async (col) => {
-        const filter: Filter<Document> = { $or: [{ id }, { _id: id }] };
-        await col.deleteOne(filter);
+        await col.deleteOne({ id });
       });
     } else if (creds.dbType === "redis") {
       await redisOp(creds, async (r) => {
