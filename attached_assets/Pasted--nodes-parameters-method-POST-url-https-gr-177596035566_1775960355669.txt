@@ -1,0 +1,64 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v25.0/me/messages",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "access_token",
+              "value": "EAAjlKR2bH1kBRNlpqKLYXdIXlo1FsPfNWUeg4zSZCcirzOgs5wb9hX7QLZCOmpB0B9wSQhpy2fmuRMJxu2JkWlI8ugBXZAEz2yMhaJwZBOUiaUaYThDq7cQ1fQRSVfEEAn8wZCoT0MAbtBZAnmjTxZCiADJQw8ZAHDfZCv1je3YZCWAue2U2OcwOar8BcXiSM9Bl6z1z52lAjCuZCAMCSZBUAVv5bPw25QZDZD"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3984,
+        1040
+      ],
+      "id": "c9a94f70-6ea7-4a15-be5b-2c41a1f0233a",
+      "name": "HTTP Request18",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.all();\n\n// input থেকে recipient_id নেওয়া\nconst recipientId = inputData[0].json.recipient_id;\n\nconst images = inputData.flatMap(item => item.json.images || []);\n\nif (!images.length) {\n  return [];\n}\n\nconst attachments = images.slice(0, 30).map(url => ({\n  type: \"image\",\n  payload: { url }\n}));\n\nreturn [\n  {\n    json: {\n      messaging_type: \"RESPONSE\",\n      recipient: {\n        id: recipientId\n      },\n      message: {\n        attachments\n      }\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3776,
+        1040
+      ],
+      "id": "de337a4e-0b01-4a95-9870-b4d30bf82bde",
+      "name": "Code in JavaScript12",
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Code in JavaScript12": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request18",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bae75dd4b8e7a37fbcc9a6565a18bb0fccb52c8e5f0d6e6a8d1493bfec8d0912"
+  }
+}
