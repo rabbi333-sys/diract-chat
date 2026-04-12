@@ -749,10 +749,16 @@ const Conversation = () => {
 
   // ── Emoji reactions ────────────────────────────────────────────────────────
   const handleReact = useCallback(async (msg: ChatMessageType, emoji: string) => {
-    const key = String(msg.id);
-    // Use the platform message ID when available; fall back to local ID
-    const platformId = msg._platformMsgId || key;
-    const reactionKey = msg._platformMsgId || key;
+    // Resolve the real platform message ID:
+    // 1. _platformMsgId — set on optimistic messages right after send
+    // 2. msgIndex lookup — covers DB-fetched messages whose timestamp + text
+    //    was indexed at send time via markSent
+    const resolvedPlatId =
+      msg._platformMsgId ||
+      msgIndex[msgIndexKey(msg.message_text, msg.timestamp || '')];
+
+    // Storage key for reactions — prefer platformId so UI and webhook events share it
+    const reactionKey = resolvedPlatId || String(msg.id);
 
     setReactions(prev => {
       const existing = prev[reactionKey] || [];
@@ -763,22 +769,20 @@ const Conversation = () => {
       return { ...prev, [reactionKey]: updated };
     });
 
-    // Platform send: WhatsApp supports sending reactions via the Cloud API.
-    // Facebook Messenger and Instagram do NOT expose a public send-reaction
-    // endpoint, so reactions on those platforms are stored in local state only.
+    // Platform send: WhatsApp supports reactions via Cloud API (message type "reaction").
+    // Facebook Messenger and Instagram do NOT expose a public send-reaction endpoint.
+    // We only call the WA API when resolvedPlatId is a confirmed platform ID (wamid)
+    // — never with numeric local optimistic IDs, which the API would reject.
     try {
-      if (sessionPlatform === 'whatsapp' && waConn && platformId) {
-        // WA Cloud API reaction message type — requires the wamid of the target message.
-        // If platformId is the local optimistic ID (not a real wamid) the API will
-        // return an error which is silently caught; local reaction still persists.
+      if (sessionPlatform === 'whatsapp' && waConn && resolvedPlatId) {
         await waPost(waConn, recipient, {
           type: 'reaction',
-          reaction: { message_id: platformId, emoji },
+          reaction: { message_id: resolvedPlatId, emoji },
         });
       }
-      // Facebook/Instagram: no public reaction-send API — stored in UI/localStorage only.
+      // Facebook/Instagram: no public reaction-send API — UI/localStorage only.
     } catch { /* best-effort — reactions are always stored locally regardless */ }
-  }, [sessionPlatform, waConn, fbConn, igConn, recipient]);
+  }, [sessionPlatform, waConn, recipient, msgIndex]);
 
   // ── Unified send (text + optional staged images) ───────────────────────────
   const handleSend = () => {
@@ -879,42 +883,51 @@ const Conversation = () => {
 
     try {
       const dataUrl = await fileToDataUrl(file);
+      // Capture timestamp once — used in DB insert AND in the status index
+      const sentTs = new Date().toISOString();
       // Await DB write so the data URL is committed before we refetch
       await insertMessageToExternalDb(getStoredConnection(), {
         session_id: sessionId || '',
         sender: 'Agent',
         message_text: dataUrl,
-        timestamp: new Date().toISOString(),
+        timestamp: sentTs,
         recipient,
       });
+      let platformMsgId: string | undefined;
       if (sessionPlatform === 'whatsapp') {
         if (!waConn) throw new Error('WhatsApp connection not configured');
         const mediaId = await waUploadFile(waConn, file, file.name, file.type);
         const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
-        await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
+        const r = await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
+        platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
       } else if (sessionPlatform === 'instagram') {
         if (!igConn) throw new Error('Instagram connection not configured');
         const attachId = await fbUploadFile(igConn, file, mediaType);
-        await fbPost(igConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+        const r = await fbPost(igConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+        platformMsgId = r?.message_id;
       } else if (sessionPlatform === 'facebook') {
         if (!fbConn) throw new Error('Facebook connection not configured');
         const attachId = await fbUploadFile(fbConn, file, mediaType);
-        await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+        const r = await fbPost(fbConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+        platformMsgId = r?.message_id;
       } else {
         // unknown: prefer WA, fall back to Meta
         if (waConn) {
           const mediaId = await waUploadFile(waConn, file, file.name, file.type);
           const waType = isImage ? 'image' : isAudio ? 'audio' : 'video';
-          await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
+          const r = await waPost(waConn, recipient, { type: waType, [waType]: { id: mediaId } });
+          platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
         } else {
           const metaConn = fbConn || igConn;
           if (!metaConn) throw new Error('No messaging connection configured');
           const attachId = await fbUploadFile(metaConn, file, mediaType);
-          await fbPost(metaConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+          const r = await fbPost(metaConn, recipient, { attachment: { type: mediaType, payload: { attachment_id: attachId } } });
+          platformMsgId = r?.message_id;
         }
       }
       storePlatform(recipient, sessionPlatform);
-      markSent(id);
+      // Index dataUrl so DB-fetched version of this message can look up its status
+      markSent(id, platformMsgId, dataUrl, sentTs);
       // Remove local blob BEFORE refetching so the optimistic and the DB
       // version never appear at the same time (fixes double-video bug).
       revertOptimistic(id);
@@ -943,37 +956,46 @@ const Conversation = () => {
     try {
       const dataUrl = await fileToDataUrl(file);
       const storedText = `doc-data:${file.name}|||${file.size}|||${dataUrl}`;
+      // Capture timestamp once for consistency between DB and status index
+      const sentTs = new Date().toISOString();
       await insertMessageToExternalDb(getStoredConnection(), {
         session_id: sessionId || '',
         sender: 'Agent',
         message_text: storedText,
-        timestamp: new Date().toISOString(),
+        timestamp: sentTs,
         recipient,
       });
+      let platformMsgId: string | undefined;
       if (sessionPlatform === 'whatsapp' && waConn) {
         const mediaId = await waUploadFile(waConn, file, file.name, file.type);
-        await waPost(waConn, recipient, { type: 'document', document: { id: mediaId, filename: file.name } });
+        const r = await waPost(waConn, recipient, { type: 'document', document: { id: mediaId, filename: file.name } });
+        platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
       } else if (sessionPlatform === 'facebook' && fbConn) {
         const attachId = await fbUploadFile(fbConn, file, 'file');
-        await fbPost(fbConn, recipient, { attachment: { type: 'file', payload: { attachment_id: attachId } } });
+        const r = await fbPost(fbConn, recipient, { attachment: { type: 'file', payload: { attachment_id: attachId } } });
+        platformMsgId = r?.message_id;
       } else if (sessionPlatform === 'instagram' && igConn) {
         const attachId = await fbUploadFile(igConn, file, 'file');
-        await fbPost(igConn, recipient, { attachment: { type: 'file', payload: { attachment_id: attachId } } });
+        const r = await fbPost(igConn, recipient, { attachment: { type: 'file', payload: { attachment_id: attachId } } });
+        platformMsgId = r?.message_id;
       } else if (sessionPlatform === 'unknown') {
         if (waConn) {
           const mediaId = await waUploadFile(waConn, file, file.name, file.type);
-          await waPost(waConn, recipient, { type: 'document', document: { id: mediaId, filename: file.name } });
+          const r = await waPost(waConn, recipient, { type: 'document', document: { id: mediaId, filename: file.name } });
+          platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
         } else {
           const metaConn = fbConn || igConn;
           if (!metaConn) throw new Error('No messaging connection configured');
           const attachId = await fbUploadFile(metaConn, file, 'file');
-          await fbPost(metaConn, recipient, { attachment: { type: 'file', payload: { attachment_id: attachId } } });
+          const r = await fbPost(metaConn, recipient, { attachment: { type: 'file', payload: { attachment_id: attachId } } });
+          platformMsgId = r?.message_id;
         }
       } else {
         throw new Error('No connection available for this platform');
       }
       storePlatform(recipient, sessionPlatform);
-      markSent(id);
+      // Index storedText so DB-fetched version of this document can look up its status
+      markSent(id, platformMsgId, storedText, sentTs);
       revertOptimistic(id);
       URL.revokeObjectURL(blobUrl);
       await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
@@ -1035,44 +1057,53 @@ const Conversation = () => {
     (async () => {
       try {
         const audioDataUrl = await fileToDataUrl(blob);
+        // Capture timestamp once for consistency between DB and status index
+        const sentTs = new Date().toISOString();
         // Await DB write so data URL is committed before refetch
         await insertMessageToExternalDb(getStoredConnection(), {
           session_id: sessionId || '',
           sender: 'Agent',
           message_text: audioDataUrl,
-          timestamp: new Date().toISOString(),
+          timestamp: sentTs,
           recipient,
         });
         const ext = mimeType.includes('ogg') ? 'voice.ogg' : mimeType.includes('mp4') ? 'voice.mp4' : 'voice.webm';
         const uploadMime = mimeType.includes('ogg') ? 'audio/ogg' : mimeType.includes('mp4') ? 'audio/mp4' : 'audio/webm';
         const audioFile = new File([blob], ext, { type: uploadMime });
 
+        let platformMsgId: string | undefined;
         if (sessionPlatform === 'whatsapp' && waConn) {
           const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
-          await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
+          const r = await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
+          platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
           storePlatform(recipient, 'whatsapp');
         } else if (sessionPlatform === 'facebook' && fbConn) {
           const attachId = await fbUploadFile(fbConn, audioFile, 'audio');
-          await fbPost(fbConn, recipient, { attachment: { type: 'audio', payload: { attachment_id: attachId } } });
+          const r = await fbPost(fbConn, recipient, { attachment: { type: 'audio', payload: { attachment_id: attachId } } });
+          platformMsgId = r?.message_id;
           storePlatform(recipient, 'facebook');
         } else if (sessionPlatform === 'instagram' && igConn) {
           const attachId = await fbUploadFile(igConn, audioFile, 'audio');
-          await fbPost(igConn, recipient, { attachment: { type: 'audio', payload: { attachment_id: attachId } } });
+          const r = await fbPost(igConn, recipient, { attachment: { type: 'audio', payload: { attachment_id: attachId } } });
+          platformMsgId = r?.message_id;
           storePlatform(recipient, 'instagram');
         } else if (sessionPlatform === 'unknown') {
           if (waConn) {
             const mediaId = await waUploadFile(waConn, blob, ext, uploadMime);
-            await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
+            const r = await waPost(waConn, recipient, { type: 'audio', audio: { id: mediaId } });
+            platformMsgId = (r?.messages as Array<{id: string}>)?.[0]?.id;
           } else {
             const metaConn = fbConn || igConn;
             if (!metaConn) throw new Error('No messaging connection configured');
             const attachId = await fbUploadFile(metaConn, audioFile, 'audio');
-            await fbPost(metaConn, recipient, { attachment: { type: 'audio', payload: { attachment_id: attachId } } });
+            const r = await fbPost(metaConn, recipient, { attachment: { type: 'audio', payload: { attachment_id: attachId } } });
+            platformMsgId = r?.message_id;
           }
         } else {
           throw new Error('No connection available for this platform');
         }
-        markSent(id);
+        // Index audioDataUrl so the DB-fetched voice message can look up its status
+        markSent(id, platformMsgId, audioDataUrl, sentTs);
         await queryClient.invalidateQueries({ queryKey: ['chat-history', sessionId] });
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
         revertOptimistic(id);

@@ -232,6 +232,23 @@ router.get("/realtime/stream", async (req: Request, res: Response): Promise<void
 // when `raw` is provided so that n8n can forward the webhook verbatim.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/webhook/events", async (req: Request, res: Response): Promise<void> => {
+  // ── Shared-secret authentication ──────────────────────────────────────────
+  // Set WEBHOOK_SECRET env var to protect this endpoint from unauthenticated calls.
+  // Callers (e.g. n8n) must include: X-Webhook-Secret: <secret>
+  // If WEBHOOK_SECRET is not configured, the endpoint accepts all requests but
+  // logs a warning — useful during development/testing.
+  const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+  if (WEBHOOK_SECRET) {
+    const provided = req.headers['x-webhook-secret'] as string | undefined;
+    if (!provided || provided !== WEBHOOK_SECRET) {
+      logger.warn({ ip: req.ip }, "Webhook event rejected: invalid or missing X-Webhook-Secret header");
+      res.status(401).json({ error: "Unauthorized: invalid X-Webhook-Secret header" });
+      return;
+    }
+  } else {
+    logger.warn("WEBHOOK_SECRET env var not set — /webhook/events is unauthenticated. Set it in production.");
+  }
+
   // ── Resolve Supabase credentials from server-side config only (no SSRF risk) ─
   const serverCfg = getServerDbConfig();
   if (!serverCfg || serverCfg.dbType !== 'supabase' || !serverCfg.supabase_url || !serverCfg.anon_key) {
