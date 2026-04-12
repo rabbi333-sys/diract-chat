@@ -329,25 +329,42 @@ router.post("/member-auth/invites/create", async (req: Request, res: Response) =
 router.post("/member-auth/invites/update", async (req: Request, res: Response) => {
   const { creds, id, update }: { creds: DbCreds; id: string; update: Partial<InviteRecord> } = req.body;
   if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds" });
+  // Ownership: only the user who created the invite may update it.
+  // req.userId is always set because this route is protected by authMiddleware.
+  const userId = req.userId ?? "";
+  if (!userId) return void res.status(401).json({ error: "Unauthenticated" });
 
   const fields = Object.entries(update).filter(([k]) => ["status"].includes(k));
   if (fields.length === 0) return void res.status(400).json({ error: "Nothing to update" });
 
   try {
+    let affected = 0;
+
     if (creds.dbType === "postgresql") {
-      const setClauses = fields.map(([k], i) => `${k} = $${i + 2}`).join(", ");
-      await pgQuery(creds, `UPDATE team_invites SET ${setClauses} WHERE id = $1`, [id, ...fields.map(([, v]) => v)]);
+      // $1 = id, $2 = created_by (ownership), $3..N = set values
+      const setClauses = fields.map(([k], i) => `${k} = $${i + 3}`).join(", ");
+      const rows = await pgQuery<{ id: string }>(
+        creds,
+        `UPDATE team_invites SET ${setClauses} WHERE id = $1 AND created_by = $2 RETURNING id`,
+        [id, userId, ...fields.map(([, v]) => v)],
+      );
+      affected = rows.length;
     } else if (creds.dbType === "mysql") {
       const setClauses = fields.map(([k]) => `${k} = ?`).join(", ");
       const values: MySqlParam[] = fields.map(([, v]) => (v != null ? String(v) : null));
-      await mysqlQuery(creds, `UPDATE team_invites SET ${setClauses} WHERE id = ?`, [...values, id]);
+      const result = await mysqlQuery<{ affectedRows?: number }>(
+        creds,
+        `UPDATE team_invites SET ${setClauses} WHERE id = ? AND created_by = ?`,
+        [...values, id, userId],
+      );
+      // mysql2 returns result metadata as first element; use affectedRows
+      const meta = result[0] as { affectedRows?: number } | undefined;
+      affected = meta?.affectedRows ?? 0;
     } else if (creds.dbType === "mongodb") {
-      await mongoOp(creds, async (col) => {
-        // Filter by the app-level `id` UUID field (set on every insert).
-        // MongoDB's auto-generated `_id` is an ObjectId and can never equal a
-        // UUID string, so `_id` matching would always be a no-op.
-        await col.updateOne({ id }, { $set: Object.fromEntries(fields) });
+      const result = await mongoOp(creds, async (col) => {
+        return col.updateOne({ id, created_by: userId }, { $set: Object.fromEntries(fields) });
       });
+      affected = result.modifiedCount ?? 0;
     } else if (creds.dbType === "redis") {
       await redisOp(creds, async (r) => {
         const allTokens = await r.smembers(REDIS_ALL);
@@ -355,13 +372,18 @@ router.post("/member-auth/invites/update", async (req: Request, res: Response) =
           const raw = await r.get(REDIS_KEY(tok));
           if (!raw) continue;
           const doc = JSON.parse(raw) as InviteRecord;
-          if (doc.id === id) {
+          if (doc.id === id && doc.created_by === userId) {
             const updated = { ...doc, ...Object.fromEntries(fields) };
             await r.set(REDIS_KEY(tok), JSON.stringify(updated));
+            affected = 1;
             break;
           }
         }
       });
+    }
+
+    if (affected === 0) {
+      return void res.status(403).json({ error: "Forbidden: invite not found or not owned by you" });
     }
 
     res.json({ ok: true });
@@ -378,16 +400,34 @@ router.post("/member-auth/invites/update", async (req: Request, res: Response) =
 router.post("/member-auth/invites/delete", async (req: Request, res: Response) => {
   const { creds, id }: { creds: DbCreds; id: string } = req.body;
   if (!creds?.dbType) return void res.status(400).json({ error: "Missing creds" });
+  // Ownership: only the user who created the invite may delete it.
+  // req.userId is always set because this route is protected by authMiddleware.
+  const userId = req.userId ?? "";
+  if (!userId) return void res.status(401).json({ error: "Unauthenticated" });
 
   try {
+    let affected = 0;
+
     if (creds.dbType === "postgresql") {
-      await pgQuery(creds, "DELETE FROM team_invites WHERE id = $1", [id]);
+      const rows = await pgQuery<{ id: string }>(
+        creds,
+        "DELETE FROM team_invites WHERE id = $1 AND created_by = $2 RETURNING id",
+        [id, userId],
+      );
+      affected = rows.length;
     } else if (creds.dbType === "mysql") {
-      await mysqlQuery(creds, "DELETE FROM team_invites WHERE id = ?", [id]);
+      const result = await mysqlQuery<{ affectedRows?: number }>(
+        creds,
+        "DELETE FROM team_invites WHERE id = ? AND created_by = ?",
+        [id, userId],
+      );
+      const meta = result[0] as { affectedRows?: number } | undefined;
+      affected = meta?.affectedRows ?? 0;
     } else if (creds.dbType === "mongodb") {
-      await mongoOp(creds, async (col) => {
-        await col.deleteOne({ id }); // `id` is the app-level UUID field; _id is an ObjectId and never matches a UUID
+      const result = await mongoOp(creds, async (col) => {
+        return col.deleteOne({ id, created_by: userId });
       });
+      affected = result.deletedCount ?? 0;
     } else if (creds.dbType === "redis") {
       await redisOp(creds, async (r) => {
         const allTokens = await r.smembers(REDIS_ALL);
@@ -395,14 +435,19 @@ router.post("/member-auth/invites/delete", async (req: Request, res: Response) =
           const raw = await r.get(REDIS_KEY(tok));
           if (!raw) continue;
           const doc = JSON.parse(raw) as InviteRecord;
-          if (doc.id === id) {
+          if (doc.id === id && doc.created_by === userId) {
             await r.del(REDIS_KEY(tok));
             await r.srem(REDIS_IDX(doc.created_by), tok);
             await r.srem(REDIS_ALL, tok);
+            affected = 1;
             break;
           }
         }
       });
+    }
+
+    if (affected === 0) {
+      return void res.status(403).json({ error: "Forbidden: invite not found or not owned by you" });
     }
 
     res.json({ ok: true });

@@ -64,23 +64,23 @@ function verifyHS256JWT(token: string, secret: string): JwtPayload | null {
 }
 
 // ─── Auth Middleware ──────────────────────────────────────────────────────────
-// If SUPABASE_JWT_SECRET is not configured, auth is disabled (dev-mode bypass)
-// with a one-time warning. Set this env var in all production deployments.
-
-let _bypassWarningLogged = false;
+// Verifies the Supabase JWT from the Authorization header.
+// FAIL-CLOSED: if SUPABASE_JWT_SECRET is not configured the server returns 503
+// rather than bypassing authentication. This prevents accidental open access in
+// misconfigured deployments. Set SUPABASE_JWT_SECRET to the JWT Secret found in
+// your Supabase project settings → API → JWT Settings.
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   const secret = process.env.SUPABASE_JWT_SECRET;
 
   if (!secret) {
-    if (!_bypassWarningLogged) {
-      logger.warn(
-        "SUPABASE_JWT_SECRET is not configured — API authentication is DISABLED. " +
-        "Set SUPABASE_JWT_SECRET in production to enforce authentication."
-      );
-      _bypassWarningLogged = true;
-    }
-    return next();
+    logger.error(
+      "SUPABASE_JWT_SECRET is not configured. Set this env var to enable API authentication."
+    );
+    res.status(503).json({
+      error: "Server misconfiguration: SUPABASE_JWT_SECRET is not set. Contact the administrator.",
+    });
+    return;
   }
 
   const authHeader = req.headers.authorization;
