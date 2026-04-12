@@ -159,117 +159,241 @@ async function generateInvoice(order: Order) {
   try {
     const { jsPDF } = await import('jspdf');
     const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-    const W = 210; const M = 14; const CW = W - M * 2;
+
+    const W = 210;
+    const H = 297;
+    const ML = 18;   // margin left
+    const MR = 18;   // margin right
+    const CW = W - ML - MR;
 
     type RGB = [number, number, number];
     const C: Record<string, RGB> = {
-      navy:   [22, 50, 120], primary: [37, 99, 235], dark: [15, 17, 17],
-      muted:  [86, 89, 89],  border: [213, 217, 217], bg: [248, 249, 250],
-      white:  [255, 255, 255], green: [0, 118, 0], rowAlt: [248, 250, 252],
+      blue:       [66, 133, 244],    // Google blue
+      blueDark:   [25,  82, 196],
+      blueLight:  [232, 240, 254],
+      ink:        [32,  33,  36],    // Google near-black
+      muted:      [95, 99, 104],     // Google gray-600
+      border:     [218, 220, 224],   // Google gray-300
+      bg:         [248, 249, 250],   // Google gray-50
+      white:      [255, 255, 255],
+      green:      [30, 142, 62],
+      amber:      [183, 117, 0],
+      red:        [197, 34, 31],
+      greenLight: [230, 244, 234],
+      amberLight: [254, 243, 224],
+      redLight:   [252, 232, 230],
     };
-    const fill  = (c: RGB) => pdf.setFillColor(...c);
-    const stroke= (c: RGB) => pdf.setDrawColor(...c);
-    const color = (c: RGB) => pdf.setTextColor(...c);
-    const bold  = (s: number) => { pdf.setFont('helvetica', 'bold');   pdf.setFontSize(s); };
-    const norm  = (s: number) => { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(s); };
 
-    const orderId = order.merchant_order_id || order.id.slice(0, 8).toUpperCase();
+    const fill   = (c: RGB) => pdf.setFillColor(...c);
+    const stroke = (c: RGB) => pdf.setDrawColor(...c);
+    const color  = (c: RGB) => pdf.setTextColor(...c);
+    const bold   = (s: number) => { pdf.setFont('helvetica', 'bold');   pdf.setFontSize(s); };
+    const norm   = (s: number) => { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(s); };
+
+    const orderId   = order.merchant_order_id || order.id.slice(0, 8).toUpperCase();
     const invoiceNo = `INV-${orderId}`;
-    const total  = Number(order.total_price) || Number(order.amount_to_collect) || 0;
-    const qty    = Number(order.quantity) || 1;
-    const unit   = Number(order.unit_price) || total;
+    const total     = Number(order.total_price) || Number(order.amount_to_collect) || 0;
+    const qty       = Number(order.quantity) || 1;
+    const unit      = qty > 0 ? total / qty : total;
+    const hasCollect= !!(order.amount_to_collect && Number(order.amount_to_collect) !== total);
+    const toCollect = hasCollect ? Number(order.amount_to_collect) : 0;
 
-    // ── Header band ──────────────────────────────────────────
-    fill(C.navy); pdf.rect(0, 0, W, 35, 'F');
-    fill(C.primary); pdf.rect(0, 0, 5, 35, 'F');
-    fill(C.white); pdf.circle(M + 9, 17.5, 7.5, 'F');
-    color(C.primary); bold(11); pdf.text('CM', M + 9, 21, { align: 'center' });
-    color(C.white); bold(18); pdf.text('Chat Monitor', M + 22, 13);
-    norm(8.5); pdf.text('Order Invoice', M + 22, 21);
-    pdf.setTextColor(180, 200, 255); norm(7.5);
-    pdf.text(`Generated: ${format(new Date(), 'dd MMM yyyy, HH:mm')}`, M + 22, 28);
+    const statusMap: Record<string, { label: string; fg: RGB; bg: RGB }> = {
+      delivered: { label: 'PAID',      fg: C.green, bg: C.greenLight },
+      completed: { label: 'PAID',      fg: C.green, bg: C.greenLight },
+      cancelled: { label: 'CANCELLED', fg: C.red,   bg: C.redLight   },
+      pending:   { label: 'PENDING',   fg: C.amber, bg: C.amberLight },
+    };
+    const st = statusMap[order.status] ?? { label: order.status.toUpperCase(), fg: C.blue, bg: C.blueLight };
 
-    // Invoice # + status badge — top-right
-    color(C.white); bold(10); pdf.text(invoiceNo, W - M, 14, { align: 'right' });
-    const statusLabel = (order.status || 'pending').charAt(0).toUpperCase() + order.status.slice(1);
-    const statusColors: Record<string, RGB> = { delivered: C.green, cancelled: [204,12,57], pending: [180,90,0] };
-    const sColor: RGB = statusColors[order.status] ?? C.primary;
-    fill(sColor); pdf.roundedRect(W - M - 28, 18, 28, 8, 2, 2, 'F');
-    color(C.white); bold(7); pdf.text(statusLabel.toUpperCase(), W - M - 14, 23, { align: 'center' });
+    // ─────────────────────────────────────────────────────────
+    // WHITE PAGE BG
+    // ─────────────────────────────────────────────────────────
+    fill(C.white); pdf.rect(0, 0, W, H, 'F');
 
-    let y = 46;
+    // ─────────────────────────────────────────────────────────
+    // TOP ACCENT BAR (4 px, Google blue)
+    // ─────────────────────────────────────────────────────────
+    fill(C.blue); pdf.rect(0, 0, W, 4, 'F');
 
-    // ── Two-column: customer + order details ─────────────────
-    const COL1 = M; const COL2 = W / 2 + 4;
-    // Customer Info box
-    fill(C.bg); stroke(C.border); pdf.setLineWidth(0.3);
-    pdf.roundedRect(COL1, y, CW / 2 - 3, 42, 2, 2, 'FD');
-    color(C.muted); norm(7); pdf.text('BILL TO', COL1 + 4, y + 7);
-    color(C.dark); bold(10); pdf.text(order.customer_name || '—', COL1 + 4, y + 15);
-    norm(8.5);
-    if (order.customer_phone)   { color(C.muted); pdf.text('Phone:', COL1 + 4, y + 23); color(C.dark); pdf.text(order.customer_phone, COL1 + 20, y + 23); }
-    if (order.customer_address) { color(C.muted); pdf.text('Addr:',  COL1 + 4, y + 30); color(C.dark); const addr = pdf.splitTextToSize(order.customer_address, 48); pdf.text(addr[0] || '', COL1 + 18, y + 30); }
-    // Order Info box
-    fill(C.bg); stroke(C.border);
-    pdf.roundedRect(COL2, y, CW / 2 - 3, 42, 2, 2, 'FD');
-    color(C.muted); norm(7); pdf.text('ORDER INFO', COL2 + 4, y + 7);
-    const infoRows = [
-      ['Order ID', orderId], ['Date', format(parseISO(order.created_at), 'dd MMM yyyy')],
-      ['Payment', order.payment_status || 'N/A'], ['Invoice', invoiceNo],
-    ];
-    infoRows.forEach((r, i) => {
-      const iy = y + 15 + i * 7;
-      color(C.muted); norm(8); pdf.text(r[0] + ':', COL2 + 4, iy);
-      color(C.dark); bold(8); pdf.text(r[1], COL2 + 4 + 26, iy);
-    });
-    y += 50;
+    // ─────────────────────────────────────────────────────────
+    // HEADER — logo left, INVOICE label right
+    // ─────────────────────────────────────────────────────────
+    let y = 16;
 
-    // ── Line items table ──────────────────────────────────────
-    color(C.dark); bold(11); pdf.text('Items', M, y);
-    fill(C.primary); pdf.rect(M, y + 2, 16, 0.8, 'F');
-    y += 8;
-    const COLS = [90, 25, 30, 37];
-    const HEADS = ['DESCRIPTION', 'QTY', 'UNIT PRICE', 'TOTAL'];
-    fill(C.navy); pdf.rect(M, y, CW, 8, 'F');
-    color(C.white); bold(7.5); let cx = M + 3;
-    HEADS.forEach((h, i) => { pdf.text(h, cx, y + 5.5); cx += COLS[i]; });
-    y += 8;
+    // Logo pill
+    fill(C.blue);
+    pdf.roundedRect(ML, y, 12, 12, 2, 2, 'F');
+    color(C.white); bold(9);
+    pdf.text('CM', ML + 6, y + 8.5, { align: 'center' });
 
-    fill(C.rowAlt); pdf.rect(M, y, CW, 10, 'F');
-    stroke(C.border); pdf.setLineWidth(0.15); pdf.line(M, y + 10, M + CW, y + 10);
-    cx = M + 3;
-    color(C.dark); bold(9); pdf.text(order.product_name || 'Product', cx, y + 6.5); cx += COLS[0];
-    norm(9); pdf.text(qty.toString(), cx, y + 6.5); cx += COLS[1];
-    pdf.text(`Tk. ${unit.toLocaleString()}`, cx, y + 6.5); cx += COLS[2];
-    bold(9); color(C.primary); pdf.text(`Tk. ${total.toLocaleString()}`, cx, y + 6.5);
-    if (order.sku) { color(C.muted); norm(7); pdf.text(`SKU: ${order.sku}`, M + 3, y + 9); }
+    // Brand name
+    color(C.ink); bold(14);
+    pdf.text('Chat Monitor', ML + 16, y + 8);
+
+    // Right side: INVOICE heading
+    color(C.ink); bold(26);
+    pdf.text('INVOICE', W - MR, y + 9, { align: 'right' });
+
     y += 18;
 
-    // ── Totals block ──────────────────────────────────────────
-    const TX = W - M - 70;
-    fill(C.bg); stroke(C.border); pdf.roundedRect(TX, y, 70, 36, 2, 2, 'FD');
-    color(C.muted); norm(8); pdf.text('Subtotal', TX + 4, y + 9); color(C.dark); pdf.text(`Tk. ${total.toLocaleString()}`, TX + 70 - 4, y + 9, { align: 'right' });
-    stroke(C.border); pdf.line(TX + 4, y + 13, TX + 66, y + 13);
-    if (order.amount_to_collect && order.amount_to_collect !== total) {
-      color(C.muted); norm(8); pdf.text('To Collect', TX + 4, y + 19); color(C.dark); pdf.text(`Tk. ${Number(order.amount_to_collect).toLocaleString()}`, TX + 70 - 4, y + 19, { align: 'right' });
-      stroke(C.border); pdf.line(TX + 4, y + 23, TX + 66, y + 23);
-      fill(C.primary); pdf.roundedRect(TX + 2, y + 26, 66, 8, 1.5, 1.5, 'F');
-      color(C.white); bold(9); pdf.text('GRAND TOTAL', TX + 6, y + 31);
-      pdf.text(`Tk. ${total.toLocaleString()}`, TX + 68, y + 31, { align: 'right' });
-    } else {
-      fill(C.primary); pdf.roundedRect(TX + 2, y + 17, 66, 8, 1.5, 1.5, 'F');
-      color(C.white); bold(9); pdf.text('GRAND TOTAL', TX + 6, y + 22);
-      pdf.text(`Tk. ${total.toLocaleString()}`, TX + 68, y + 22, { align: 'right' });
-    }
-    y += 44;
+    // Status badge (right-aligned under INVOICE heading)
+    const statusW = 30;
+    fill(st.bg);
+    pdf.roundedRect(W - MR - statusW, y, statusW, 7, 1.5, 1.5, 'F');
+    color(st.fg); bold(6.5);
+    pdf.text(st.label, W - MR - statusW / 2, y + 4.8, { align: 'center' });
 
-    // ── Footer ─────────────────────────────────────────────────
-    const PH = 297;
-    fill(C.bg); pdf.rect(0, PH - 14, W, 14, 'F');
-    stroke(C.border); pdf.setLineWidth(0.3); pdf.line(M, PH - 14, W - M, PH - 14);
-    color(C.muted); norm(7);
-    pdf.text('Chat Monitor  ·  Invoice  ·  Thank you for your business!', M, PH - 6);
-    pdf.text(invoiceNo, W - M, PH - 6, { align: 'right' });
+    y += 14;
+
+    // Thin full-width divider
+    stroke(C.border); pdf.setLineWidth(0.4);
+    pdf.line(ML, y, W - MR, y);
+    y += 10;
+
+    // ─────────────────────────────────────────────────────────
+    // TWO-COLUMN META — Bill To (left) | Invoice Details (right)
+    // ─────────────────────────────────────────────────────────
+    const COL_R = W - MR - 72;   // right column starts here
+
+    // ── BILL TO ──
+    color(C.blue); bold(7);
+    pdf.text('BILL TO', ML, y);
+    y += 6;
+    color(C.ink); bold(11);
+    pdf.text(order.customer_name || '—', ML, y);
+
+    let leftY = y + 6;
+    norm(8.5);
+    if (order.customer_phone) {
+      color(C.muted); pdf.text('Phone', ML, leftY);
+      color(C.ink);   pdf.text(order.customer_phone, ML + 18, leftY);
+      leftY += 6;
+    }
+    if (order.customer_address) {
+      color(C.muted); pdf.text('Address', ML, leftY);
+      color(C.ink);
+      const addrLines = pdf.splitTextToSize(order.customer_address, 70);
+      pdf.text(addrLines.slice(0, 2), ML + 22, leftY);
+      leftY += 6 * Math.min(addrLines.length, 2);
+    }
+
+    // ── INVOICE DETAILS (right column) ──
+    const detailRows: [string, string][] = [
+      ['Invoice No.',  invoiceNo],
+      ['Order ID',     orderId],
+      ['Issue Date',   format(parseISO(order.created_at), 'dd MMM yyyy')],
+      ['Payment',      (order.payment_status || 'N/A').toUpperCase()],
+    ];
+
+    let rightY = y - 6;
+    detailRows.forEach(([label, val]) => {
+      color(C.muted); norm(8); pdf.text(label, COL_R, rightY);
+      color(C.ink);   bold(8); pdf.text(val, W - MR, rightY, { align: 'right' });
+      rightY += 7;
+    });
+
+    y = Math.max(leftY, rightY) + 10;
+
+    // ─────────────────────────────────────────────────────────
+    // LINE ITEMS TABLE
+    // ─────────────────────────────────────────────────────────
+    // Section label
+    color(C.ink); bold(10);
+    pdf.text('Items', ML, y);
+    // Blue underline
+    fill(C.blue); pdf.rect(ML, y + 2, 12, 0.7, 'F');
+    y += 8;
+
+    // Table header bg
+    fill(C.blueLight); stroke(C.blueLight); pdf.setLineWidth(0);
+    pdf.rect(ML, y, CW, 9, 'F');
+
+    // Header labels
+    const TCOLS = { desc: ML + 3, qty: ML + 105, unit: ML + 125, total: ML + CW };
+    color(C.blueDark); bold(7.5);
+    pdf.text('DESCRIPTION',  TCOLS.desc,  y + 6);
+    pdf.text('QTY',          TCOLS.qty,   y + 6);
+    pdf.text('UNIT PRICE',   TCOLS.unit,  y + 6);
+    pdf.text('AMOUNT',       TCOLS.total, y + 6, { align: 'right' });
+    y += 9;
+
+    // Row 1 (white bg)
+    fill(C.white); pdf.rect(ML, y, CW, 13, 'F');
+    stroke(C.border); pdf.setLineWidth(0.3);
+    pdf.line(ML, y,      W - MR, y);
+    pdf.line(ML, y + 13, W - MR, y + 13);
+
+    color(C.ink); bold(9.5);
+    pdf.text(order.product_name || 'Product', TCOLS.desc, y + 5.5);
+    if (order.sku) {
+      color(C.muted); norm(7.5);
+      pdf.text(`SKU: ${order.sku}`, TCOLS.desc, y + 10.5);
+    }
+    norm(9); color(C.ink);
+    pdf.text(qty.toString(), TCOLS.qty, y + 8);
+    pdf.text(`Tk ${unit.toLocaleString('en-US', { minimumFractionDigits: 0 })}`, TCOLS.unit, y + 8);
+    bold(9); color(C.ink);
+    pdf.text(`Tk ${total.toLocaleString('en-US', { minimumFractionDigits: 0 })}`, TCOLS.total, y + 8, { align: 'right' });
+
+    y += 20;
+
+    // ─────────────────────────────────────────────────────────
+    // TOTALS BLOCK (right-aligned, 80 mm wide)
+    // ─────────────────────────────────────────────────────────
+    const TW   = 82;
+    const TX   = W - MR - TW;
+    let   ty   = y;
+
+    const tRow = (label: string, val: string, isBold = false, hlFg?: RGB, hlBg?: RGB) => {
+      if (hlBg) {
+        fill(hlBg); pdf.rect(TX, ty - 1, TW, 9, 'F');
+      }
+      if (hlFg) color(hlFg); else color(C.muted);
+      if (isBold) bold(8.5); else norm(8.5);
+      pdf.text(label, TX + 4, ty + 5.5);
+      if (hlFg) color(hlFg); else color(C.ink);
+      if (isBold) bold(8.5); else norm(8.5);
+      pdf.text(val, TX + TW - 4, ty + 5.5, { align: 'right' });
+      stroke(C.border); pdf.setLineWidth(0.3);
+      pdf.line(TX, ty + 8, TX + TW, ty + 8);
+      ty += 9;
+    };
+
+    tRow('Subtotal', `Tk ${total.toLocaleString()}`);
+    tRow('Discount', 'Tk 0');
+    if (hasCollect) {
+      tRow('Amount to Collect', `Tk ${toCollect.toLocaleString()}`);
+    }
+    tRow('Tax / VAT', 'Included', false);
+    // Grand total — highlighted
+    fill(C.blue); pdf.rect(TX, ty, TW, 11, 'F');
+    color(C.white); bold(9.5);
+    pdf.text('TOTAL DUE', TX + 4, ty + 7.5);
+    pdf.text(`Tk ${total.toLocaleString()}`, TX + TW - 4, ty + 7.5, { align: 'right' });
+    ty += 11;
+
+    y = ty + 16;
+
+    // ─────────────────────────────────────────────────────────
+    // NOTES / THANK-YOU BLOCK
+    // ─────────────────────────────────────────────────────────
+    fill(C.bg); pdf.rect(ML, y, CW, 20, 'F');
+    color(C.blue); bold(8);
+    pdf.text('Notes', ML + 4, y + 7);
+    color(C.muted); norm(8);
+    pdf.text('Thank you for your order! If you have any questions about this invoice, please contact us.', ML + 4, y + 14, { maxWidth: CW - 8 });
+
+    // ─────────────────────────────────────────────────────────
+    // FOOTER
+    // ─────────────────────────────────────────────────────────
+    const FY = H - 14;
+    fill(C.bg); pdf.rect(0, FY, W, 14, 'F');
+    stroke(C.border); pdf.setLineWidth(0.4);
+    pdf.line(ML, FY, W - MR, FY);
+    color(C.muted); norm(7.5);
+    pdf.text('Chat Monitor  ·  Automated Order Management', ML, FY + 7);
+    pdf.text(`${invoiceNo}  ·  Generated ${format(new Date(), 'dd MMM yyyy, HH:mm')}`, W - MR, FY + 7, { align: 'right' });
 
     pdf.save(`invoice-${orderId}-${format(new Date(), 'ddMMyyyy')}.pdf`);
     toast.success('Invoice downloaded');
