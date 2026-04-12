@@ -142,7 +142,7 @@ const AudioPlayer = ({ url, isRight }: { url: string; isRight: boolean }) => {
         </div>
         <div className="flex items-center justify-between gap-1">
           <span className={cn('text-[10px] font-medium tabular-nums', timeColor)}>
-            {duration > 0 ? fmtTime(playing ? (audioRef.current?.currentTime ?? 0) : duration) : '0:00'}
+            {duration > 0 && isFinite(duration) ? fmtTime(playing ? (audioRef.current?.currentTime ?? 0) : duration) : '0:00'}
           </span>
           <button
             onClick={cycleSpeed}
