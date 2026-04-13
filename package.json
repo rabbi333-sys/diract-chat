@@ -7,7 +7,7 @@
     "build": "pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "echo 'Skipping typecheck for deployment success'",
-    "postinstall": "pnpm approve-builds"
+    "postinstall": "echo 'Build approvals managed via onlyBuiltDependencies in pnpm-workspace.yaml'"
   },
   "private": true,
   "devDependencies": {
