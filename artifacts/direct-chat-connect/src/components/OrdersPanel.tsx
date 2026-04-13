@@ -148,6 +148,17 @@ function smartDate(dateStr: string): string {
   return format(d, 'dd MMM yyyy');
 }
 
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function isWithinDateRange(date: Date, from: Date, to: Date): boolean {
+  const time = date.getTime();
+  return time >= from.getTime() && time <= to.getTime();
+}
+
 function initials(name?: string): string {
   if (!name) return '?';
   const parts = name.trim().split(/\s+/);
@@ -471,15 +482,22 @@ const OrdersPanel = () => {
 
   const dateAndSearchFiltered = useMemo(() => {
     const now = new Date();
+    const todayStart = startOfDay(now);
+    const todayEnd = endOfDay(now);
+    const yesterdayStart = startOfDay(addDays(now, -1));
+    const yesterdayEnd = endOfDay(addDays(now, -1));
+    const weekStart = startOfWeek(now, { weekStartsOn: 0 });
+    const monthStart = startOfMonth(now);
     const q = searchQuery.trim().toLowerCase();
     return orders.filter(o => {
       // Date filter
       if (dateFilter !== 'all') {
         const d = new Date(o.created_at);
-        if (dateFilter === 'today'     && !isToday(d))     return false;
-        if (dateFilter === 'yesterday' && !isYesterday(d)) return false;
-        if (dateFilter === 'week'      && !isAfter(d, startOfWeek(now, { weekStartsOn: 0 }))) return false;
-        if (dateFilter === 'month'     && !isAfter(d, startOfMonth(now))) return false;
+        if (Number.isNaN(d.getTime())) return false;
+        if (dateFilter === 'today'     && !isWithinDateRange(d, todayStart, todayEnd)) return false;
+        if (dateFilter === 'yesterday' && !isWithinDateRange(d, yesterdayStart, yesterdayEnd)) return false;
+        if (dateFilter === 'week'      && !isWithinDateRange(d, weekStart, todayEnd)) return false;
+        if (dateFilter === 'month'     && !isWithinDateRange(d, monthStart, todayEnd)) return false;
         if (dateFilter === 'custom') {
           const from = customFrom ? startOfDay(parseISO(customFrom)) : null;
           const to   = customTo   ? endOfDay(parseISO(customTo))     : null;
