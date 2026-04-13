@@ -459,7 +459,7 @@ const Index = () => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col pt-14 md:pt-0 overflow-hidden relative">
         {/* Desktop top-right toolbar: Live Sync badge + AI toggle + Theme */}
-        <div className={cn("hidden items-center gap-3 absolute top-3 right-4 z-10", activeNav !== 'Orders' && "md:flex")}>
+        <div className={cn("hidden items-center gap-3 absolute top-3 right-4 z-10", activeNav !== 'Orders' && activeNav !== 'Messages' && "md:flex")}>
           <LiveSyncBadge connected={syncConnected} mode={syncMode} paused={syncPaused} />
           <button
             onClick={toggleGlobalAi}
@@ -524,8 +524,26 @@ const Index = () => {
           <div className="flex-1 flex flex-row bg-background overflow-hidden">
             {/* Left panel: conversation list */}
             <div className={`flex flex-col border-r border-border/40 overflow-hidden transition-all duration-200 ${selectedSession ? 'hidden md:flex md:w-[340px] lg:w-[380px] flex-shrink-0' : 'flex flex-1'}`}>
-              <div className="px-3 md:px-4 pt-3 pb-2 flex-shrink-0">
-                <h2 className="text-lg md:text-xl font-bold text-foreground">{t('messagesTitle')}</h2>
+              <div className="px-3 md:px-4 pt-3 pb-2 flex-shrink-0 flex items-center gap-2">
+                <h2 className="text-lg md:text-xl font-bold text-foreground flex-1">{t('messagesTitle')}</h2>
+                <div className="hidden md:flex items-center gap-2 flex-shrink-0">
+                  <LiveSyncBadge connected={syncConnected} mode={syncMode} paused={syncPaused} />
+                  <button
+                    onClick={toggleGlobalAi}
+                    disabled={globalAiPending}
+                    data-testid="button-global-ai-toggle-messages"
+                    className={cn(
+                      'flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-bold transition-all duration-200 select-none disabled:opacity-60',
+                      globalOn
+                        ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25'
+                        : 'text-red-600 dark:text-red-400 bg-red-500/10 border border-red-400/30 hover:bg-red-500/20'
+                    )}
+                  >
+                    {globalAiPending ? <Loader2 size={12} className="animate-spin" /> : globalOn ? <Power size={12} /> : <Play size={12} />}
+                    {globalOn ? 'Shutdown' : 'Start'}
+                  </button>
+                  <ThemeToggle />
+                </div>
               </div>
               <SessionList
                 onSelect={(id, recipient) => setSelectedSession({ id, recipient })}
