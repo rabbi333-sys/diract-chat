@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import OrderDetailSheet from './OrderDetailSheet';
 
 type DateFilter = 'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom';
+type StatusFilter = 'all' | 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
 
 const DATE_FILTER_OPTIONS: { value: DateFilter; label: string }[] = [
   { value: 'all',       label: 'All' },
@@ -28,6 +29,16 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; b
   delivered:  { label: 'Delivered',  bg: 'bg-emerald-50 dark:bg-emerald-900/20',text: 'text-emerald-700 dark:text-emerald-300', border: 'border-emerald-200 dark:border-emerald-700/50',dot: '#10B981', icon: PackageCheck },
   cancelled:  { label: 'Cancelled',  bg: 'bg-red-50 dark:bg-red-900/20',        text: 'text-red-600 dark:text-red-400',         border: 'border-red-200 dark:border-red-700/50',       dot: '#EF4444', icon: XCircle },
 };
+
+const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'All Status' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'processing', label: 'Processing' },
+  { value: 'shipped', label: 'Shipped' },
+  { value: 'delivered', label: 'Delivered' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
 
 interface Order {
   id: string;
@@ -153,6 +164,13 @@ function avatarColor(id: string) {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % AVATAR_COLORS.length;
   return AVATAR_COLORS[h];
+}
+
+function normalizeOrderStatus(status?: string): StatusFilter {
+  const normalized = String(status || 'pending').toLowerCase();
+  if (normalized === 'completed') return 'delivered';
+  if (normalized in STATUS_CONFIG) return normalized as StatusFilter;
+  return 'pending';
 }
 
 async function generateInvoice(order: Order) {
@@ -403,6 +421,7 @@ const OrdersPanel = () => {
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
@@ -477,9 +496,26 @@ const OrdersPanel = () => {
         ].filter(Boolean).join(' ').toLowerCase();
         if (!haystack.includes(q)) return false;
       }
+      if (statusFilter !== 'all' && normalizeOrderStatus(o.status) !== statusFilter) return false;
       return true;
     });
-  }, [orders, dateFilter, customFrom, customTo, searchQuery]);
+  }, [orders, dateFilter, customFrom, customTo, searchQuery, statusFilter]);
+
+  const statusCounts = useMemo(() => {
+    return orders.reduce<Record<StatusFilter, number>>((acc, order) => {
+      acc.all += 1;
+      acc[normalizeOrderStatus(order.status)] += 1;
+      return acc;
+    }, {
+      all: 0,
+      pending: 0,
+      confirmed: 0,
+      processing: 0,
+      shipped: 0,
+      delivered: 0,
+      cancelled: 0,
+    });
+  }, [orders]);
 
   const newLocalCount = localOrders.length;
 
@@ -675,6 +711,40 @@ const OrdersPanel = () => {
             </button>
           </div>
         </div>
+
+        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-1">
+          {STATUS_FILTER_OPTIONS.map(opt => {
+            const active = statusFilter === opt.value;
+            const cfg = opt.value === 'all' ? null : STATUS_CONFIG[opt.value];
+            return (
+              <button
+                key={opt.value}
+                onClick={() => setStatusFilter(opt.value)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-semibold whitespace-nowrap transition-all',
+                  active
+                    ? opt.value === 'all'
+                      ? 'bg-primary border-primary text-white shadow-sm'
+                      : cn(cfg?.bg, cfg?.text, cfg?.border, 'shadow-sm ring-1 ring-black/5 dark:ring-white/10')
+                    : 'bg-white dark:bg-card border-[#D5D9D9] dark:border-border text-[#565959] dark:text-muted-foreground hover:bg-[#F7F8F8] dark:hover:bg-muted/30'
+                )}
+              >
+                {cfg && <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cfg.dot }} />}
+                <span>{opt.label}</span>
+                <span className={cn(
+                  'px-1.5 py-0.5 rounded-full text-[10px] leading-none',
+                  active
+                    ? opt.value === 'all'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-white/70 dark:bg-black/20'
+                    : 'bg-[#F3F4F5] dark:bg-muted/40 text-[#767676] dark:text-muted-foreground'
+                )}>
+                  {statusCounts[opt.value]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ── Table card ───────────────────────────────────────── */}
@@ -695,8 +765,8 @@ const OrdersPanel = () => {
               <CalendarDays size={22} className="text-[#C8CDD1] dark:text-muted-foreground/30" />
             </div>
             <div>
-              <p className="text-[13px] font-semibold text-[#0F1111] dark:text-foreground">No orders in this period</p>
-              <p className="text-[11px] text-[#565959] dark:text-muted-foreground mt-1">Try a different date filter</p>
+              <p className="text-[13px] font-semibold text-[#0F1111] dark:text-foreground">No matching orders</p>
+              <p className="text-[11px] text-[#565959] dark:text-muted-foreground mt-1">Try a different date, status, or search filter</p>
             </div>
           </div>
         ) : (
@@ -716,7 +786,8 @@ const OrdersPanel = () => {
             </thead>
             <tbody className="divide-y divide-[#EAEDED] dark:divide-border/30">
               {filtered.map((order, idx) => {
-                const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.pending;
+                const normalizedStatus = normalizeOrderStatus(order.status);
+                const cfg = STATUS_CONFIG[normalizedStatus] ?? STATUS_CONFIG.pending;
                 const total = Number(order.total_price) || Number(order.amount_to_collect) || 0;
                 const orderId = order.merchant_order_id || order.id.slice(0, 8).toUpperCase();
                 const initStr = initials(order.customer_name);
