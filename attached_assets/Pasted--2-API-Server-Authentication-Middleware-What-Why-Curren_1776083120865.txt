@@ -1,0 +1,110 @@
+
+
+
+
+#2 - API Server Authentication Middleware
+What & Why
+Currently, every single endpoint on the api-server (sessions, db-config, member-auth, ai-status, realtime) has zero server-side authentication. Anyone who knows the server URL can call any endpoint. Worse, the POST /api/member-auth/invites/list and similar endpoints accept a userId in the request body without checking whether the caller is actually that user — meaning User A can pass User B's userId and read their data.
+At 1 million users, this means any user can:
+Read another user's chat messages by guessing their DB credentials
+Call /api/db-config to read (masked) or overwrite the global server config
+Access /api/member-auth/* with another user's ID
+Done looks like
+All /api/* endpoints require a valid Supabase JWT in the Authorization: Bearer <token> header
+The middleware extracts userId from the verified JWT — endpoints no longer trust a userId from the request body
+Unauthenticated requests get 401; requests for other users' data get 403
+The existing Supabase anon/service-role key is used to verify tokens (no new auth provider needed)
+Health check (/api/healthz) and webhook endpoint remain public (they use their own secret)
+Out of scope
+Changing the frontend auth flow (users already log in via Supabase)
+Rate limiting (separate concern)
+OAuth or third-party login providers
+Tasks
+JWT verification middleware — Create artifacts/api-server/src/lib/auth-middleware.ts that reads the Authorization: Bearer header, verifies it against the Supabase JWT secret (using the SUPABASE_JWT_SECRET env var), and attaches req.userId to the request. Return 401 if missing or invalid.
+Apply middleware globally — Mount the middleware on all routes except /api/healthz and POST /api/webhook/events. The frontend already sends the Supabase session token in API calls via apiPost — update apiPost in useChatHistory.ts to include the Authorization header from supabase.auth.getSession().
+Remove userId from request bodies — Update all member-auth and db-config routes to derive userId from req.userId (set by middleware) instead of trusting the body. Add 403 checks when the derived userId doesn't match the resource being accessed.
+Relevant files
+artifacts/api-server/src/index.ts
+artifacts/api-server/src/routes/member-auth.ts
+artifacts/api-server/src/routes/db-config.ts
+artifacts/api-server/src/routes/sessions.ts:282-450
+artifacts/direct-chat-connect/src/hooks/useChatHistory.ts:316-330
+Dependencies
+Fix SQL Injection & Credential Exposure
+
+
+
+
+diract-chat
+Invite
+Publish
+Library
+File tree
+New
+Apps
+Direct Chat ConnectWebsite
+Other
+Start applicationWebsite
+Agent
+4
+#4 - Realtime Bugs, Memory Leaks & Edge Cases
+What & Why
+Four bugs cause degraded UX and gradual memory/performance degradation for long-running sessions:
+Wrong query cache invalidated on DB switch: useRealtimeUpdates.ts invalidates ['chat-history', session_id] and ['sessions'] but does NOT include dbKey in these query keys. When a user switches databases, the realtime engine invalidates the old DB's cache instead of the active one — so new messages don't appear until manual refresh.
+Duplicate messages: Conversation.tsx combines optimistic messages + React Query cache + real-time inserts. When a sent message arrives via real-time BEFORE React Query refetch completes, deduplication by message_text fails if the DB trims/encodes text, causing ghost duplicates visible until page refresh.
+Supabase channel leak on session switch: Two supabase.channel() subscriptions in Conversation.tsx are tied to sessionId. If sessionId changes quickly (user clicks rapidly through sessions), the cleanup/re-subscribe cycle overlaps, leaving stale channels open. These accumulate and can hit Supabase's channel limit.
+Memory leaks on unmount:
+handleTyping in Conversation.tsx sets a timer (typingOffTimerRef) that is never cancelled in the useEffect cleanup — fires on unmounted component.
+handleFileSelected / handleDocSelected create URL.createObjectURL(...) but only revoke it on success/error paths, not if the component unmounts mid-upload.
+ChatView.tsx: if loadMore returns exactly PAGE_SIZE messages (e.g., DB has exactly 30), hasMore stays true causing one wasted extra request before setting it to false.
+Done looks like
+Switching between two connected databases: new messages from DB B appear in real-time immediately without manual refresh
+Sending a message: it appears exactly once (no duplicate after real-time update arrives)
+Clicking between 10 sessions rapidly: no "Max channels" warning in browser console; old channels are fully cleaned up
+Navigating away while typing: no "Can't perform a state update on unmounted component" warning in console
+Uploading a file and navigating away mid-upload: no blob URL memory accumulation
+Loading a session with exactly 30 messages: "Load more" click shows spinner once, finds nothing, hides the button — no infinite retry
+Out of scope
+Redesigning the real-time architecture
+Offline/optimistic sync for non-Supabase DBs
+File upload progress tracking
+Tasks
+Fix realtime query key mismatch — In useRealtimeUpdates.ts, update all queryClient.invalidateQueries calls to include the dbKey in the query key array, matching the format used in useChatHistory.ts. Export useDbConnectionKey from useChatHistory.ts (it already exists) and import it in useRealtimeUpdates.ts.
+Fix duplicate message deduplication — In Conversation.tsx, change the dedupeLocal filter to use platform_message_id (when available) or a stable message id for deduplication, rather than message_text substring matching. Add a _localId field to optimistic messages and prefer that for matching on real-time arrival.
+Fix Supabase channel cleanup — In Conversation.tsx, use a single useRef to hold the active channel subscriptions. In the useEffect cleanup for sessionId, await removeChannel before returning (or use a cleanup flag). Add a guard to prevent re-subscribing if the same sessionId is already subscribed.
+Fix memory leaks and hasMore edge case — In Conversation.tsx useEffect, add stopTypingIndicator() to the cleanup function. Wrap URL.createObjectURL results in a cleanup useEffect that calls revokeObjectURL on unmount. In ChatView.tsx, change hasMore to use a ref-based "definitely no more" flag: only set hasMore = false when the server returns 0 messages OR the returned count is less than PAGE_SIZE.
+Relevant files
+artifacts/direct-chat-connect/src/hooks/useRealtimeUpdates.ts:100-135
+artifacts/direct-chat-connect/src/pages/Conversation.tsx:540-560,750-790,850-860,940-950,1020-1030
+artifacts/direct-chat-connect/src/components/ChatView.tsx:55-110
+artifacts/direct-chat-connect/src/hooks/useChatHistory.ts:17-27
+
+
+#3 - Race Conditions & Concurrency Fixes
+What & Why
+Three concurrency bugs will cause crashes and data corruption under load:
+Connection pool race condition: getPgPool, getMysqlPool, getRedisClient in connection-pool.ts check the Map, then asynchronously create a pool. If two requests arrive simultaneously with the same config, both see "no pool in map" and both create separate pools — the first is immediately orphaned (never closed), consuming connections forever.
+db-config concurrent write race: POST /api/db-config calls await drainAllPools() then saveServerDbConfig(). If two requests overlap, pools are drained mid-use, causing "pool has ended" errors for in-flight queries.
+Single global db-config slot: The server stores one DB config in a JSON file. In a multi-user environment, User A saving their config overwrites User B's config, so B's subsequent queries hit A's database. This is a critical multi-tenancy bug.
+Done looks like
+Under concurrent load (e.g., 50 simultaneous requests), only one pool is created per unique DB config — verified by pool count staying at 1
+Saving a new DB config while another request is using the pool does not cause "pool has ended" errors
+Each user's DB config is stored separately (keyed by userId) — one user changing their config does not affect another user's queries
+No data corruption or orphaned pools under stress
+Out of scope
+Full authentication (separate task — needed before per-user keying can work correctly)
+Pagination or query optimization
+Frontend config UI changes
+Tasks
+Fix pool singleton race condition — Add an in-flight promise map to getPgPool and getMysqlPool (similar to the existing mongoInFlight pattern already in getMongoClient). Before creating a pool, check if a creation promise is already in-flight for that key; if so, await it instead of creating a second pool. Apply the same fix to getRedisClient.
+Serialize db-config writes — Wrap the drainAllPools() + saveServerDbConfig() sequence in a per-request mutex (simple async queue using a promise chain) so concurrent config saves are processed one at a time, not in parallel.
+Per-user db-config storage — Change saveServerDbConfig / getServerDbConfig to accept a userId key. Store configs in a Map<userId, config> in memory (plus optional file persistence). Update POST /api/db-config to read userId from the auth middleware (set in the auth task) or from the request body as a fallback. Update all callers of getServerDbConfig() to pass the userId.
+Relevant files
+artifacts/api-server/src/lib/connection-pool.ts
+artifacts/api-server/src/lib/server-db-config.ts
+artifacts/api-server/src/routes/db-config.ts
+artifacts/api-server/src/routes/sessions.ts:155-170
+Dependencies
+Add API Server Authentication
+
+
