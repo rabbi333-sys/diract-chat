@@ -177,6 +177,15 @@ const Index = () => {
     }
   }, [roleLoading, isAdmin, permissions.join(',')]);
 
+  useEffect(() => {
+    const requestedNav = (location.state as { activeNav?: string } | null)?.activeNav;
+    if (!requestedNav) return;
+    if (navItems.some((item) => item.label === requestedNav)) {
+      setActiveNav(requestedNav);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [location.state, navItems.map((item) => item.label).join(',')]);
+
   const handleNavClick = (label: string, badgeKey?: 'handoff' | 'failed' | 'orders') => {
     setActiveNav(label);
     setSidebarOpen(false);

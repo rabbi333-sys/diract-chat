@@ -4,8 +4,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { useTeamRole } from '@/hooks/useTeamRole';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { cn } from '@/lib/utils';
 import {
-  ArrowLeft,
   LogOut,
   Pencil,
   Check,
@@ -20,14 +21,55 @@ import {
   Save,
   UserRound,
   BadgeCheck,
+  BarChart3,
+  MessageSquare,
+  Settings,
+  HandMetal,
+  AlertOctagon,
+  ShoppingBag,
+  Bot,
+  Users,
+  ChevronRight,
 } from 'lucide-react';
 import { clearGuestSession } from '@/lib/guestSession';
 import { signOutMember, hasMemberSetup } from '@/lib/memberAuth';
 import { clearAdminSession, getAdminEmail, updateAdminCredentials, hashPassword, verifyAdminCredentials, setAdminDisplayName, getAdminAvatarUrl, setAdminAvatarUrl } from '@/lib/adminAuth';
 
+const NAV_PERM_KEY: Record<string, string> = {
+  'Overview': 'overview',
+  'Messages': 'messages',
+  'Handoff': 'handoff',
+  'Failed': 'failed',
+  'Orders': 'orders',
+  'n8n Prompt': 'n8n_prompt',
+};
+
+const allNavItems = [
+  { icon: BarChart3, label: 'Overview' },
+  { icon: MessageSquare, label: 'Messages' },
+  { icon: HandMetal, label: 'Handoff' },
+  { icon: AlertOctagon, label: 'Failed' },
+  { icon: ShoppingBag, label: 'Orders' },
+  { icon: Bot, label: 'n8n Prompt' },
+  { icon: Users, label: 'Team Members' },
+  { icon: Settings, label: 'Settings' },
+];
+
+const NAV_LABEL_KEYS: Record<string, 'overview'|'messages'|'handoff'|'failed'|'orders'|'n8nPrompt'|'teamMembers'|'settings'> = {
+  'Overview': 'overview',
+  'Messages': 'messages',
+  'Handoff': 'handoff',
+  'Failed': 'failed',
+  'Orders': 'orders',
+  'n8n Prompt': 'n8nPrompt',
+  'Team Members': 'teamMembers',
+  'Settings': 'settings',
+};
+
 const Profile = () => {
   const navigate = useNavigate();
-  const { user, isAdmin, displayName, initials, loading: pageLoading } = useTeamRole();
+  const { t } = useLanguage();
+  const { user, isAdmin, role, permissions, displayName, initials, loading: pageLoading } = useTeamRole();
 
   const [editName, setEditName] = useState('');
   const [isEditingName, setIsEditingName] = useState(false);
@@ -158,6 +200,65 @@ const Profile = () => {
     }
   };
 
+  const navItems = (pageLoading
+    ? allNavItems
+    : allNavItems.filter((item) => {
+        if (item.label === 'Settings') return isAdmin;
+        if (isAdmin) return true;
+        const key = NAV_PERM_KEY[item.label];
+        return key ? permissions.includes(key) : false;
+      })
+  ).filter((item) => !!item.icon && !!item.label);
+
+  const openDashboardSection = (label: string) => {
+    navigate('/', { state: { activeNav: label } });
+  };
+
+  const Sidebar = () => (
+    <aside className="hidden md:flex w-[180px] border-r border-border flex-col bg-background flex-shrink-0">
+      <div className="p-5 pb-8">
+        <h1 className="text-lg font-bold text-foreground">
+          Chat <span className="text-primary">Monitor</span>
+        </h1>
+      </div>
+
+      <nav className="flex-1 px-3 space-y-1">
+        {navItems.map((item) => (
+          <button
+            key={item.label}
+            onClick={() => openDashboardSection(item.label)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <item.icon size={18} />
+            <span className="flex-1 text-left">{t(NAV_LABEL_KEYS[item.label])}</span>
+          </button>
+        ))}
+      </nav>
+
+      <div className="px-3 pb-4 border-t border-border pt-3 space-y-1">
+        <button
+          data-testid="button-profile-sidebar-active"
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all group bg-primary/10 border border-primary/20 text-foreground"
+        >
+          <div className="w-8 h-8 rounded-xl overflow-hidden bg-primary/10 flex items-center justify-center flex-shrink-0 ring-2 ring-primary/20 transition-all">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="Profile" className="w-full h-full object-cover" />
+            ) : (
+              <span className="font-bold text-primary text-[10px]">{initials}</span>
+            )}
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <p className="font-semibold text-foreground truncate leading-tight text-xs">
+              {displayName || t('profile')}
+            </p>
+            <p className="text-[10px] text-muted-foreground leading-tight">{t('accountSettings')}</p>
+          </div>
+          <ChevronRight size={13} className="text-primary flex-shrink-0" />
+        </button>
+      </div>
+    </aside>
+  );
+
   if (pageLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -167,17 +268,12 @@ const Profile = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.12),transparent_32%),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.35))]">
+    <div className="h-screen flex bg-background">
+      <Sidebar />
+      <main className="flex-1 overflow-auto bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.12),transparent_32%),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.35))]">
       <div className="sticky top-0 z-20 border-b border-border/60 bg-background/85 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
-          <button
-            onClick={() => navigate('/')}
-            className="group inline-flex items-center gap-2 rounded-full border border-border/70 bg-card/85 px-3.5 py-2 text-sm font-semibold text-muted-foreground shadow-sm transition-all hover:-translate-x-0.5 hover:border-primary/30 hover:bg-primary/5 hover:text-foreground"
-            data-testid="button-back-dashboard"
-          >
-            <ArrowLeft size={15} className="transition-transform group-hover:-translate-x-0.5" />
-            Dashboard
-          </button>
+          <div className="w-[94px]" />
           <div className="text-center">
             <p className="text-[10px] font-black uppercase tracking-[0.32em] text-primary/80">Account</p>
             <p className="hidden text-xs font-medium text-muted-foreground sm:block">Profile, access and login security</p>
@@ -408,6 +504,7 @@ const Profile = () => {
           </div>
         )}
       </div>
+      </main>
     </div>
   );
 };
