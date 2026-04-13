@@ -6,7 +6,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { cn } from '@/lib/utils';
-import { format, subDays, startOfWeek, startOfMonth, isWithinInterval, parseISO } from 'date-fns';
+import { format, subDays, startOfWeek, startOfMonth, startOfDay, endOfDay, isWithinInterval, parseISO } from 'date-fns';
 import {
   TrendingUp, Package, Truck, XCircle, CheckCircle,
   ArrowUpRight, ArrowDownRight, Clock, PackageCheck, Loader2,
@@ -47,6 +47,16 @@ const STATUS_CHART: Record<StatusKey, { label: string; color: string; gradId: st
   delivered:  { label: 'Delivered',  color: '#10b981', gradId: 'ocDelivFill' },
   cancelled:  { label: 'Cancelled',  color: '#ef4444', gradId: 'ocCancFill' },
 };
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function inclusiveDays(start: Date, end: Date): number {
+  return Math.max(1, Math.ceil((startOfDay(end).getTime() - startOfDay(start).getTime()) / 86400000) + 1);
+}
 
 async function generateAnalyticsPDF(
   viewMode: ViewMode,
@@ -360,7 +370,6 @@ async function generateAnalyticsPDF(
 
 const OrderAnalytics = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('daily');
-  const [days] = useState(90);
   const [isDownloading, setIsDownloading] = useState(false);
   const [orderChartType, setOrderChartType] = useState<'area' | 'bar'>('area');
   const [visibleStatuses, setVisibleStatuses] = useState<Set<StatusKey>>(new Set(ALL_STATUSES));
@@ -400,27 +409,31 @@ const OrderAnalytics = () => {
   });
 
   const dateRange = useMemo(() => {
+    const now = new Date();
+    const todayEnd = endOfDay(now);
     if (viewMode === 'custom' && customApplied && customFrom && customTo) {
-      const start = new Date(customFrom + 'T00:00:00');
-      const end = new Date(customTo + 'T23:59:59');
+      const start = startOfDay(new Date(customFrom + 'T00:00:00'));
+      const end = endOfDay(new Date(customTo + 'T00:00:00'));
       return { start, end };
     }
-    return { end: new Date(), start: subDays(new Date(), days) };
-  }, [viewMode, customApplied, customFrom, customTo, days]);
+    if (viewMode === 'weekly') return { start: startOfWeek(now, { weekStartsOn: 0 }), end: todayEnd };
+    if (viewMode === 'monthly') return { start: startOfMonth(now), end: todayEnd };
+    return { start: startOfDay(now), end: todayEnd };
+  }, [viewMode, customApplied, customFrom, customTo]);
 
   const filteredOrders = useMemo(() =>
     orders.filter(o => isWithinInterval(parseISO(o.created_at), dateRange)), [orders, dateRange]);
 
   const customRangeDays = useMemo(() => {
     if (viewMode === 'custom' && customApplied && customFrom && customTo) {
-      return Math.ceil((new Date(customTo).getTime() - new Date(customFrom).getTime()) / 86400000) + 1;
+      return inclusiveDays(new Date(customFrom + 'T00:00:00'), new Date(customTo + 'T00:00:00'));
     }
-    return days;
-  }, [viewMode, customApplied, customFrom, customTo, days]);
+    return inclusiveDays(dateRange.start, dateRange.end);
+  }, [viewMode, customApplied, customFrom, customTo, dateRange]);
 
   const previousOrders = useMemo(() => {
-    const end = subDays(dateRange.start, 1);
-    const start = subDays(end, customRangeDays);
+    const end = endOfDay(subDays(dateRange.start, 1));
+    const start = startOfDay(addDays(end, -(customRangeDays - 1)));
     return orders.filter(o => isWithinInterval(parseISO(o.created_at), { start, end }));
   }, [orders, dateRange, customRangeDays]);
 
