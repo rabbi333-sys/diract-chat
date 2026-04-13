@@ -8,6 +8,7 @@ import { signOutMember, hasMemberSetup } from '@/lib/memberAuth';
 import { clearAdminSession } from '@/lib/adminAuth';
 import { toast } from 'sonner';
 import { SessionList } from '@/components/SessionList';
+import Conversation from '@/pages/Conversation';
 import { AnalyticsCard } from '@/components/AnalyticsCard';
 import { ConversationChart } from '@/components/ConversationChart';
 import { SupabaseSettings } from '@/components/SupabaseSettings';
@@ -79,6 +80,7 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<string | null>(null);
   const [ordersView, setOrdersView] = useState<'list' | 'analytics'>('list');
+  const [selectedSession, setSelectedSession] = useState<{ id: string; recipient: string } | null>(null);
   const [aiEdgeFnUrl, setAiEdgeFnUrl] = useState('');
   const { enabled: notifEnabled, soundEnabled, toggleEnabled: toggleNotif, toggleSound, counts, clearCount } = useNotifications();
   const { globalOn, toggle: toggleGlobalAi, isPending: globalAiPending } = useGlobalAiControl();
@@ -517,13 +519,39 @@ const Index = () => {
           </main>
         )}
 
-        {/* Messages Page */}
+        {/* Messages Page — inbox split-pane layout */}
         {activeNav === 'Messages' && canView('Messages') && (
-          <div className="flex-1 flex flex-col bg-background overflow-hidden">
-            <div className="p-3 md:p-4 pb-2">
-              <h2 className="text-lg md:text-xl font-bold text-foreground">{t('messagesTitle')}</h2>
+          <div className="flex-1 flex flex-row bg-background overflow-hidden">
+            {/* Left panel: conversation list */}
+            <div className={`flex flex-col border-r border-border/40 overflow-hidden transition-all duration-200 ${selectedSession ? 'hidden md:flex md:w-[340px] lg:w-[380px] flex-shrink-0' : 'flex flex-1'}`}>
+              <div className="px-3 md:px-4 pt-3 pb-2 flex-shrink-0">
+                <h2 className="text-lg md:text-xl font-bold text-foreground">{t('messagesTitle')}</h2>
+              </div>
+              <SessionList
+                onSelect={(id, recipient) => setSelectedSession({ id, recipient })}
+                selectedSessionId={selectedSession?.id}
+              />
             </div>
-            <SessionList />
+
+            {/* Right panel: inline conversation */}
+            {selectedSession ? (
+              <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+                <Conversation
+                  inline
+                  inlineSessionId={selectedSession.id}
+                  inlineRecipient={selectedSession.recipient}
+                  onBack={() => setSelectedSession(null)}
+                />
+              </div>
+            ) : (
+              <div className="hidden md:flex flex-1 flex-col items-center justify-center text-center gap-3 text-muted-foreground">
+                <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center">
+                  <span className="text-3xl">💬</span>
+                </div>
+                <p className="text-sm font-semibold">Select a conversation</p>
+                <p className="text-xs text-muted-foreground/60">Click on a chat from the list to open it here</p>
+              </div>
+            )}
           </div>
         )}
 

@@ -88,7 +88,14 @@ export const PlatformAvatar = ({
 
 // ─── SessionList ───────────────────────────────────────────────────────────────
 
-export const SessionList = () => {
+type SessionListProps = {
+  /** When provided, clicking a session calls this instead of navigating to the conversation page */
+  onSelect?: (sessionId: string, recipient: string) => void;
+  /** The currently selected session ID (highlights the active row in inbox mode) */
+  selectedSessionId?: string;
+};
+
+export const SessionList = ({ onSelect, selectedSessionId }: SessionListProps = {}) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: sessions, isLoading, refetch, isFetching } = useSessions();
@@ -390,7 +397,12 @@ export const SessionList = () => {
               session={session}
               recipientName={recipientNames?.[session.recipient]}
               platform={detectPlatform(session.recipient, platformConns, { sessionId: session.session_id, dbPlatform: session.platform })}
-              onSelect={() => navigate(`/conversation/${session.session_id}?recipient=${session.recipient}`)}
+              isSelected={selectedSessionId === session.session_id}
+              onSelect={() =>
+                onSelect
+                  ? onSelect(session.session_id, session.recipient)
+                  : navigate(`/conversation/${session.session_id}?recipient=${session.recipient}`)
+              }
               onPrefetch={() => prefetchSession(session.session_id)}
             />
           ))}
@@ -425,9 +437,10 @@ interface SessionCardProps {
   onPrefetch: () => void;
   recipientName?: string;
   platform: Platform;
+  isSelected?: boolean;
 }
 
-const SessionCard = ({ session, onSelect, onPrefetch, recipientName, platform }: SessionCardProps) => {
+const SessionCard = ({ session, onSelect, onPrefetch, recipientName, platform, isSelected }: SessionCardProps) => {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const updateName = useUpdateRecipientName();
@@ -457,7 +470,12 @@ const SessionCard = ({ session, onSelect, onPrefetch, recipientName, platform }:
       onClick={onSelect}
       onMouseEnter={onPrefetch}
       onKeyDown={e => e.key === 'Enter' && onSelect()}
-      className="w-full px-3 py-3 text-left transition-all duration-200 group flex items-center gap-3 rounded-2xl hover:bg-muted/50 active:scale-[0.99] cursor-pointer"
+      className={cn(
+        "w-full px-3 py-3 text-left transition-all duration-200 group flex items-center gap-3 rounded-2xl active:scale-[0.99] cursor-pointer",
+        isSelected
+          ? "bg-primary/10 border border-primary/20"
+          : "hover:bg-muted/50"
+      )}
     >
       {/* Avatar */}
       <div className="relative flex-shrink-0">

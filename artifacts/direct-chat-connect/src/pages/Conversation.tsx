@@ -307,8 +307,20 @@ function MediaViewer({ url, type, allImages, onClose, onNavigate }: MediaViewerP
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-const Conversation = () => {
-  const { sessionId } = useParams<{ sessionId: string }>();
+type ConversationProps = {
+  /** When used in inline/inbox mode, pass sessionId directly instead of reading from URL */
+  inlineSessionId?: string;
+  /** When used in inline/inbox mode, pass recipient directly instead of reading from URL */
+  inlineRecipient?: string;
+  /** When true, the component is embedded in the inbox split-pane */
+  inline?: boolean;
+  /** Called when the user taps the back arrow in inline mode (mobile) */
+  onBack?: () => void;
+};
+
+const Conversation = ({ inlineSessionId, inlineRecipient, inline = false, onBack }: ConversationProps = {}) => {
+  const { sessionId: paramSessionId } = useParams<{ sessionId: string }>();
+  const sessionId = inlineSessionId ?? paramSessionId;
   const navigate = useNavigate();
   const { data: messages, isLoading, error, refetch } = useChatHistory(sessionId);
   const { data: sessions } = useSessions();
@@ -426,7 +438,7 @@ const Conversation = () => {
   const [fetchingName, setFetchingName] = useState(false);
 
   const searchParams = new URLSearchParams(window.location.search);
-  const recipient = searchParams.get('recipient') || '';
+  const recipient = inlineRecipient ?? searchParams.get('recipient') ?? '';
   const displayName = recipient ? recipientNames?.[recipient] || recipient : 'Conversation';
   const nameIsId = displayName === recipient && /^\d{10,}$/.test(recipient);
   const initials = displayName.slice(0, 2).toUpperCase();
@@ -1424,9 +1436,16 @@ const Conversation = () => {
       {/* ── Header ───────────────────────────────────────────────────────────── */}
       <header className="flex-shrink-0 border-b border-border/30 bg-background/95 backdrop-blur-sm">
         <div className="h-[60px] px-2 md:px-3 flex items-center gap-2 max-w-3xl mx-auto w-full">
-          <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-muted flex-shrink-0" onClick={() => navigate('/')}>
-            <ArrowLeft size={19} />
-          </Button>
+          {/* Back button: always shown on full page; on inline/mobile shows to go back to list */}
+          {inline && onBack ? (
+            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-muted flex-shrink-0 md:hidden" onClick={onBack}>
+              <ArrowLeft size={19} />
+            </Button>
+          ) : !inline ? (
+            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-muted flex-shrink-0" onClick={() => navigate('/')}>
+              <ArrowLeft size={19} />
+            </Button>
+          ) : null}
 
           {/* Avatar */}
           <div className="relative flex-shrink-0">
