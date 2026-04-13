@@ -469,7 +469,7 @@ const OrdersPanel = () => {
     onError: () => toast.error('Failed to delete order'),
   });
 
-  const filtered = useMemo(() => {
+  const dateAndSearchFiltered = useMemo(() => {
     const now = new Date();
     const q = searchQuery.trim().toLowerCase();
     return orders.filter(o => {
@@ -496,13 +496,17 @@ const OrdersPanel = () => {
         ].filter(Boolean).join(' ').toLowerCase();
         if (!haystack.includes(q)) return false;
       }
-      if (statusFilter !== 'all' && normalizeOrderStatus(o.status) !== statusFilter) return false;
       return true;
     });
-  }, [orders, dateFilter, customFrom, customTo, searchQuery, statusFilter]);
+  }, [orders, dateFilter, customFrom, customTo, searchQuery]);
+
+  const filtered = useMemo(() => {
+    if (statusFilter === 'all') return dateAndSearchFiltered;
+    return dateAndSearchFiltered.filter(o => normalizeOrderStatus(o.status) === statusFilter);
+  }, [dateAndSearchFiltered, statusFilter]);
 
   const statusCounts = useMemo(() => {
-    return orders.reduce<Record<StatusFilter, number>>((acc, order) => {
+    return dateAndSearchFiltered.reduce<Record<StatusFilter, number>>((acc, order) => {
       acc.all += 1;
       acc[normalizeOrderStatus(order.status)] += 1;
       return acc;
@@ -515,7 +519,7 @@ const OrdersPanel = () => {
       delivered: 0,
       cancelled: 0,
     });
-  }, [orders]);
+  }, [dateAndSearchFiltered]);
 
   const newLocalCount = localOrders.length;
 
@@ -692,9 +696,9 @@ const OrdersPanel = () => {
             </div>
             {orders.length > 0 && (
               <span className="text-[12px] text-[#565959] dark:text-muted-foreground font-medium hidden sm:block">
-                {filtered.length === orders.length
-                  ? `${orders.length} orders`
-                  : `${filtered.length} / ${orders.length}`}
+                {statusFilter === 'all'
+                  ? `${dateAndSearchFiltered.length} orders`
+                  : `${filtered.length} / ${dateAndSearchFiltered.length}`}
               </span>
             )}
             <button
