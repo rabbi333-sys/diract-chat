@@ -4,7 +4,7 @@ import { MongoClient } from "mongodb";
 import Redis from "ioredis";
 import { normalizeRow } from "./sessions.js";
 import { logger } from "../lib/logger.js";
-import { getServerDbConfig } from "../lib/server-db-config.js";
+import { getServerDbConfig, getAllServerDbConfigs } from "../lib/server-db-config.js";
 
 const router = Router();
 
@@ -330,7 +330,13 @@ router.post("/webhook/events", async (req: Request, res: Response): Promise<void
   }
 
   // ── Resolve Supabase credentials from server-side config only (no SSRF risk) ─
-  const serverCfg = getServerDbConfig();
+  // Webhook callers don't carry a user JWT, so we look up the config by userId
+  // from the body first, then fall back to any stored Supabase config.
+  const webhookBody = req.body as { userId?: string } & Record<string, unknown>;
+  const rawServerCfg = webhookBody.userId
+    ? getServerDbConfig(webhookBody.userId)
+    : getAllServerDbConfigs().find(c => c.dbType === 'supabase' && c.supabase_url && c.anon_key) ?? null;
+  const serverCfg = rawServerCfg;
   if (!serverCfg || serverCfg.dbType !== 'supabase' || !serverCfg.supabase_url || !serverCfg.anon_key) {
     res.status(503).json({ error: "Supabase not configured on this server. Push DB config via POST /api/db-config first." });
     return;

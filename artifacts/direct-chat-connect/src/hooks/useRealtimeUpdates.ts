@@ -24,6 +24,7 @@ import { getStoredConnection, normalizeRow } from '@/lib/externalDb';
 import { getActiveConnection } from '@/lib/db-config';
 import { supabase } from '@/integrations/supabase/client';
 import type { ChatMessage } from '@/hooks/useChatHistory';
+import { useDbConnectionKey } from '@/hooks/useChatHistory';
 
 export type SyncMode = 'realtime' | 'polling' | 'none';
 
@@ -60,6 +61,7 @@ export function useRealtimeUpdates(
   onNewMessageOrOpts?: ((sessionId: string) => void) | GlobalSyncCallbacks,
 ): { connected: boolean; mode: SyncMode; paused: boolean } {
   const queryClient = useQueryClient();
+  const dbKey = useDbConnectionKey();
 
   // Normalise the overloaded first argument
   const opts: GlobalSyncCallbacks =
@@ -69,6 +71,11 @@ export function useRealtimeUpdates(
 
   const cbRef = useRef(opts);
   cbRef.current = opts;
+
+  // Track current dbKey in a ref so the stable handleNewRow callback always
+  // targets the active DB's query cache without needing to re-create.
+  const dbKeyRef = useRef(dbKey);
+  dbKeyRef.current = dbKey;
 
   const [connected, setConnected] = useState(false);
   const [mode, setMode]           = useState<SyncMode>('none');
@@ -83,10 +90,17 @@ export function useRealtimeUpdates(
         (rawRow._syncTable as string | undefined) ||
         'n8n_chat_histories';
 
-      // Invalidate the relevant React Query keys
+      // Invalidate only the active DB's query keys using a predicate to match
+      // keys that contain the current dbKey — avoids stale-DB cache busting.
+      const activeDbKey = dbKeyRef.current;
       const keys = TABLE_QUERY_KEYS[syncTable] ?? TABLE_QUERY_KEYS['n8n_chat_histories'];
       for (const key of keys) {
-        queryClient.invalidateQueries({ queryKey: key });
+        queryClient.invalidateQueries({
+          predicate: (query) =>
+            Array.isArray(query.queryKey) &&
+            query.queryKey[0] === key[0] &&
+            query.queryKey.includes(activeDbKey),
+        });
       }
 
       if (syncTable === 'orders') {
@@ -115,9 +129,9 @@ export function useRealtimeUpdates(
         recipient: normalized.recipient,
       };
 
-      // Append to the React Query cache — no DB round-trip
+      // Append only to the active DB's chat-history cache to avoid cross-DB contamination
       queryClient.setQueriesData<ChatMessage[]>(
-        { queryKey: ['chat-history', normalized.session_id], exact: false },
+        { queryKey: ['chat-history', normalized.session_id, activeDbKey], exact: false },
         (old) => {
           if (!Array.isArray(old)) return old;
           if (old.some((m) => String(m.id) === String(chatMsg.id))) return old;
@@ -125,10 +139,13 @@ export function useRealtimeUpdates(
         }
       );
 
-      // Analytics counters need a refresh too
-      queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      queryClient.invalidateQueries({ queryKey: ['analytics'] });
-      queryClient.invalidateQueries({ queryKey: ['chart-data'] });
+      // Analytics counters need a refresh too — scoped to active DB
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          Array.isArray(query.queryKey) &&
+          ['sessions', 'analytics', 'chart-data'].includes(query.queryKey[0] as string) &&
+          query.queryKey.includes(activeDbKey),
+      });
 
       cbRef.current.onNewMessage?.(normalized.session_id);
     },
@@ -337,9 +354,15 @@ export function useRealtimeUpdates(
 
       const poll = () => {
         if (document.hidden) return;
-        // Invalidate all module query keys on every tick
+        // Invalidate only the active DB's module query keys on each polling tick
+        const activeDbKey = dbKeyRef.current;
         for (const key of MODULE_QUERY_KEYS) {
-          queryClient.invalidateQueries({ queryKey: key });
+          queryClient.invalidateQueries({
+            predicate: (query) =>
+              Array.isArray(query.queryKey) &&
+              query.queryKey[0] === key[0] &&
+              query.queryKey.includes(activeDbKey),
+          });
         }
       };
 

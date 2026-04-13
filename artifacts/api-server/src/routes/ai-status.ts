@@ -103,7 +103,7 @@ router.post("/ai-status", async (req: Request, res: Response) => {
   let effectiveCreds = creds;
 
   if (!effectiveUrl && !effectiveCreds) {
-    const stored = getServerDbConfig();
+    const stored = getServerDbConfig(req.userId ?? "");
     if (stored) {
       if (stored.dbType === "supabase" && stored.supabase_url) {
         effectiveUrl = stored.supabase_url;

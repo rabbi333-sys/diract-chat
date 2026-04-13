@@ -747,9 +747,21 @@ const Conversation = () => {
     saveMsgIndex(sessionId, msgIndex);
   }, [msgIndex, sessionId]);
 
+  // Refs to track the active Supabase channels so rapid sessionId changes do not
+  // leave stale subscriptions open (Supabase has a per-client channel limit).
+  const typingChannelRef    = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const msgStatusChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
   // Subscribe to Supabase realtime for customer typing events
   useEffect(() => {
     if (!sessionId) return;
+
+    // Clean up any previous channel before creating a new one
+    if (typingChannelRef.current) {
+      supabase.removeChannel(typingChannelRef.current);
+      typingChannelRef.current = null;
+    }
+
     const channel = supabase
       .channel(`typing:${sessionId}`)
       .on('broadcast', { event: 'typing' }, () => {
@@ -758,7 +770,11 @@ const Conversation = () => {
         customerTypingTimerRef.current = setTimeout(() => setCustomerTyping(false), 5000);
       })
       .subscribe();
+
+    typingChannelRef.current = channel;
+
     return () => {
+      typingChannelRef.current = null;
       supabase.removeChannel(channel);
       if (customerTypingTimerRef.current) clearTimeout(customerTypingTimerRef.current);
     };
@@ -768,6 +784,13 @@ const Conversation = () => {
   // and incoming customer reactions forwarded via webhook pipeline
   useEffect(() => {
     if (!sessionId) return;
+
+    // Clean up any previous channel before creating a new one
+    if (msgStatusChannelRef.current) {
+      supabase.removeChannel(msgStatusChannelRef.current);
+      msgStatusChannelRef.current = null;
+    }
+
     const channel = supabase
       .channel(`msg_status:${sessionId}`)
       .on('broadcast', { event: 'delivered' }, (payload: { payload?: { message_id?: string; message_ids?: string[] } }) => {
@@ -829,7 +852,13 @@ const Conversation = () => {
         });
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+
+    msgStatusChannelRef.current = channel;
+
+    return () => {
+      msgStatusChannelRef.current = null;
+      supabase.removeChannel(channel);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
